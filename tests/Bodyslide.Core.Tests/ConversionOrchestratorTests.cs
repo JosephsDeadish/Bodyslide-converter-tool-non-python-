@@ -1970,10 +1970,19 @@ public sealed class ConversionOrchestratorTests
 
             var bsdFiles = Directory.GetFiles(shapeDataBase, "*.bsd", SearchOption.AllDirectories);
             Assert.NotEmpty(bsdFiles);
+            var osdFiles = Directory.GetFiles(shapeDataBase, "*.osd", SearchOption.AllDirectories);
+            Assert.NotEmpty(osdFiles);
 
             // All BSD files must be inside the ShapeData tree.
             foreach (var bsdFile in bsdFiles)
                 Assert.StartsWith(shapeDataBase, bsdFile, StringComparison.OrdinalIgnoreCase);
+            foreach (var osdFile in osdFiles)
+            {
+                Assert.StartsWith(shapeDataBase, osdFile, StringComparison.OrdinalIgnoreCase);
+                Assert.True(OsdMorphReader.TryRead(osdFile, out var payload) && payload is not null);
+                Assert.True(payload!.Morphs.Count > 0, "Expected generated OSD payload morph entries.");
+                Assert.Contains(payload.Morphs.Select(static morph => morph.Name), static name => name.EndsWith("_1", StringComparison.OrdinalIgnoreCase));
+            }
         }
         finally
         {

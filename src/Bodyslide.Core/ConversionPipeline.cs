@@ -20649,6 +20649,14 @@ internal sealed class LocalExportService(
             await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext),  cancellationToken);
             outputFiles.Add(triLowPath);
             outputFiles.Add(triHighPath);
+
+            // Write an OSD payload bundle for tooling that can consume Outfit Studio style sparse morph files.
+            var osdPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.osd");
+            await File.WriteAllBytesAsync(
+                osdPath,
+                BuildOsdBytes(bodySlideProject.Sliders, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext),
+                cancellationToken);
+            outputFiles.Add(osdPath);
         }
 
         // Write plugin patch guidance + rewrite instructions when plugins were found.
@@ -36389,6 +36397,74 @@ internal sealed class LocalExportService(
             w.Write(x);
             w.Write(y);
             w.Write(z);
+        }
+
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Builds an OSD morph payload containing both low and high-weight slider deltas.
+    /// Uses Outfit Studio header layout (OSD\0 + version + morph count) with ushort indexes for compactness.
+    /// </summary>
+    private static byte[] BuildOsdBytes(
+        IReadOnlyList<string> sliders,
+        int vertexCount,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null,
+        MorphTransferContext? morphTransferContext = null)
+    {
+        vertexCount = Math.Clamp(vertexCount, 1, 250_000);
+        var morphNames = new List<(string Name, bool IsHighWeight)>(sliders.Count * 2);
+        foreach (var slider in sliders)
+        {
+            morphNames.Add((slider, IsHighWeight: false));
+            morphNames.Add(($"{slider}_1", IsHighWeight: true));
+        }
+
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(new byte[] { 0x4f, 0x53, 0x44, 0x00 }); // OSD\0 (Outfit Studio style)
+        writer.Write(3); // payload version
+        writer.Write(morphNames.Count);
+
+        foreach (var (name, isHighWeight) in morphNames)
+        {
+            var baseSliderName = isHighWeight && name.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
+                ? name[..^2]
+                : name;
+            var deltas = ResolveMorphDeltas(
+                baseSliderName,
+                isHighWeight,
+                vertexCount,
+                regionalMorphing,
+                reusableSourceMorphPayloads,
+                morphTransferContext);
+
+            var sparseDeltas = new List<(int Index, float X, float Y, float Z)>();
+            for (var index = 0; index < deltas.Count; index++)
+            {
+                var (x, y, z) = deltas[index];
+                if (MathF.Abs(x) <= 0.0001f && MathF.Abs(y) <= 0.0001f && MathF.Abs(z) <= 0.0001f)
+                {
+                    continue;
+                }
+
+                sparseDeltas.Add((index, x, y, z));
+            }
+
+            var nameBytes = System.Text.Encoding.UTF8.GetBytes(name);
+            var clampedNameLength = Math.Min(byte.MaxValue, nameBytes.Length);
+            writer.Write((byte)clampedNameLength);
+            writer.Write(nameBytes, 0, clampedNameLength);
+            writer.Write((ushort)Math.Min(ushort.MaxValue, sparseDeltas.Count));
+            for (var sparseIndex = 0; sparseIndex < sparseDeltas.Count && sparseIndex < ushort.MaxValue; sparseIndex++)
+            {
+                var (index, x, y, z) = sparseDeltas[sparseIndex];
+                writer.Write((ushort)Math.Min(ushort.MaxValue, index));
+                writer.Write(x);
+                writer.Write(y);
+                writer.Write(z);
+            }
         }
 
         return ms.ToArray();
