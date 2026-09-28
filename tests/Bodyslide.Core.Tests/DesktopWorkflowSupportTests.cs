@@ -690,6 +690,57 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_RecognizesVortexStagingPathAliasAsStartupInputFallback()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var stagingDirectory = Path.Combine(workingDirectory, "vortex-staging");
+        Directory.CreateDirectory(stagingDirectory);
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--staging-path",
+                    stagingDirectory,
+                    "--from-vortex"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(stagingDirectory, options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_RecognizesMo2PathAliasWithInlineQuotedValue()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "mods root");
+        var modDirectory = Path.Combine(workingDirectory, "mod path");
+        Directory.CreateDirectory(modDirectory);
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    $"--mo2-path=\"{modDirectory}\"",
+                    "--from-mo2"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(modDirectory, options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(workingDirectory)!, recursive: true);
+        }
+    }
+
+    [Fact]
     public void FindCommonDirectory_DoesNotCollapseCaseDistinctDirectoriesOnCaseSensitivePlatforms()
     {
         if (OperatingSystem.IsWindows())

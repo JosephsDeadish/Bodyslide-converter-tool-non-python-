@@ -1228,13 +1228,15 @@ internal static class ConversionValidationGuidance
             "missing-bodyslide-reference-nif" =>
                 "Open CalienteTools/BodySlide/ShapeData and confirm the generated reference NIF is present and opens in Outfit Studio, then re-run before release so BodySlide users can preview the outfit correctly.",
             "missing-bodyslide-slider-payload" =>
-                "Inspect CalienteTools/BodySlide/ShapeData for the expected BSD/TRI slider payloads, then rebuild the output before release so BodySlide users do not receive a partial morph package.",
+                "Inspect CalienteTools/BodySlide/ShapeData for the expected BSD/TRI/OSD slider payloads, then rebuild the output before release so BodySlide users do not receive a partial morph package.",
             "bodyslide-semantic-mismatch" =>
-                "Open the generated BodySlide OSP and ShapeData, then verify the OSP slider list, referenced source NIFs, and BSD/TRI payload slider coverage all agree before shipping the project to BodySlide or Outfit Studio users.",
+                "Open the generated BodySlide OSP and ShapeData, then verify the OSP slider list, referenced source NIFs, and BSD/TRI/OSD payload slider coverage all agree before shipping the project to BodySlide or Outfit Studio users.",
             "missing-xedit-script" =>
                 "Re-run the conversion and confirm patch-armor.pas is packaged beside plugin-patches.json before release so manual xEdit patch follow-up remains available outside the app.",
             "missing-plugin-patch-report" =>
                 "Re-run the conversion and confirm plugin-patches.json is present before release so plugin rewrite mappings, load-order hints, and linked-family review steps ship with the output.",
+            "plugin-patch-semantic-mismatch" =>
+                "Open plugin-patches.json and conversion-quality.json, then reconcile rewrite mappings and verification blocks with staged meshes before release so plugin rewrite outputs stay internally consistent.",
             "missing-root-plugin" =>
                 "Copy the source or generated ESP/ESM/ESL into the package root before release, then verify the FOMOD/plugin install flow still enables the rewritten plugin in your mod manager.",
             "missing-fomod-info" =>
@@ -1360,7 +1362,7 @@ internal static class ConversionValidationGuidance
                 ["CalienteTools/BodySlide/SliderGroups/", "conversion-quality.json"],
             "missing-bodyslide-shape-data" or "missing-bodyslide-reference-nif" or "missing-bodyslide-slider-payload" or "bodyslide-semantic-mismatch" =>
                 ["CalienteTools/BodySlide/ShapeData/", "conversion-quality.json"],
-            "missing-xedit-script" or "missing-plugin-patch-report" =>
+            "missing-xedit-script" or "missing-plugin-patch-report" or "plugin-patch-semantic-mismatch" =>
                 ["plugin-patches.json", "conversion-quality.json"],
             "missing-root-plugin" or "missing-preview-workbench" or "missing-preview-html" or "missing-preview-svg" or
             "missing-output-zip" or "zip-missing-readme" or "zip-missing-fomod-module-config" or
@@ -25854,7 +25856,7 @@ internal sealed class LocalExportService(
             xmlContent.Contains($"{attributeName}=\"{SecurityElement.Escape(value)}\"", StringComparison.OrdinalIgnoreCase);
 
         bool HasBodySlidePayloadFiles(string directoryPath) =>
-            HasAnyFile(directoryPath, "*.bsd") || HasAnyFile(directoryPath, "*.tri");
+            HasAnyFile(directoryPath, "*.bsd") || HasAnyFile(directoryPath, "*.tri") || HasAnyFile(directoryPath, "*.osd");
 
         static string NormalizeSliderToken(string value)
         {
@@ -26152,6 +26154,7 @@ internal sealed class LocalExportService(
                 var payloadSliderTokens = new List<string>();
                 var lowWeightPayloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var highWeightPayloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var osdPayloadMorphNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var bsdPath in Directory.EnumerateFiles(shapeDataDirectory, "*.bsd"))
                 {
                     if (BsdMorphReader.TryRead(bsdPath, out var bsdPayload) && !string.IsNullOrWhiteSpace(bsdPayload?.SliderName))
@@ -26193,6 +26196,29 @@ internal sealed class LocalExportService(
                                 }
                             }
                         }
+
+                    }
+                }
+
+                foreach (var osdPath in Directory.EnumerateFiles(shapeDataDirectory, "*.osd"))
+                {
+                    if (!OsdMorphReader.TryRead(osdPath, out var osdPayload) || osdPayload is null)
+                    {
+                        problems.Add($"ShapeData OSD payload '{Path.GetFileName(osdPath)}' could not be parsed.");
+                        continue;
+                    }
+
+                    foreach (var morph in osdPayload.Morphs)
+                    {
+                        if (string.IsNullOrWhiteSpace(morph.Name))
+                        {
+                            continue;
+                        }
+
+                        payloadSliderTokens.Add(morph.Name);
+                        var normalizedSlider = NormalizeSliderToken(morph.Name);
+                        payloadSliderNames.Add(normalizedSlider);
+                        osdPayloadMorphNames.Add(normalizedSlider);
                     }
                 }
 
@@ -26235,6 +26261,18 @@ internal sealed class LocalExportService(
                     if (unexpectedPayloadCoverage.Length > 0)
                     {
                         problems.Add($"ShapeData payloads contain slider names not declared in OSP: {string.Join(", ", unexpectedPayloadCoverage)}");
+                    }
+
+                    if (osdPayloadMorphNames.Count > 0)
+                    {
+                        var missingOsdCoverage = payloadSliderNames
+                            .Where(token => !osdPayloadMorphNames.Contains(token))
+                            .Take(4)
+                            .ToArray();
+                        if (missingOsdCoverage.Length > 0)
+                        {
+                            problems.Add($"OSD payloads are missing slider coverage present in BSD/TRI payloads: {string.Join(", ", missingOsdCoverage)}");
+                        }
                     }
                 }
 
@@ -26330,6 +26368,68 @@ internal sealed class LocalExportService(
             catch (Exception ex)
             {
                 problems.Add($"OSP/ShapeData validation failed: {ex.Message}");
+            }
+
+            return problems;
+        }
+
+        IReadOnlyList<string> ValidatePluginPatchSemanticConsistency(string pluginPatchPath)
+        {
+            var problems = new List<string>();
+            if (!File.Exists(pluginPatchPath))
+            {
+                return problems;
+            }
+
+            try
+            {
+                using var patchDocument = JsonDocument.Parse(File.ReadAllText(pluginPatchPath));
+                var root = patchDocument.RootElement;
+                if (!root.TryGetProperty("RewriteMappings", out var rewriteMappings) ||
+                    rewriteMappings.ValueKind is not JsonValueKind.Array)
+                {
+                    problems.Add("plugin-patches.json is missing the RewriteMappings array.");
+                    return problems;
+                }
+
+                if ((pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0) &&
+                    rewriteMappings.GetArrayLength() == 0)
+                {
+                    problems.Add("plugin-patches.json does not contain any rewrite mappings for plugin-managed meshes.");
+                }
+
+                foreach (var mapping in rewriteMappings.EnumerateArray())
+                {
+                    if (!mapping.TryGetProperty("RewrittenMeshPath", out var rewrittenMeshPathElement) ||
+                        rewrittenMeshPathElement.ValueKind is not JsonValueKind.String)
+                    {
+                        problems.Add("plugin-patches.json contains a rewrite mapping without RewrittenMeshPath.");
+                        continue;
+                    }
+
+                    var rewrittenMeshPath = rewrittenMeshPathElement.GetString();
+                    if (string.IsNullOrWhiteSpace(rewrittenMeshPath))
+                    {
+                        problems.Add("plugin-patches.json contains an empty RewrittenMeshPath entry.");
+                        continue;
+                    }
+
+                    var stagedMeshPath = Path.Combine(outputDirectory, rewrittenMeshPath.Replace('/', Path.DirectorySeparatorChar));
+                    if (!File.Exists(stagedMeshPath))
+                    {
+                        problems.Add($"plugin-patches.json references a rewritten mesh that is not staged: {rewrittenMeshPath}");
+                    }
+                }
+
+                if (!root.TryGetProperty("RewriteVerification", out var rewriteVerification) ||
+                    rewriteVerification.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                {
+                    problems.Add("plugin-patches.json is missing the RewriteVerification block.");
+                }
+            }
+            catch (Exception ex)
+            {
+                problems.Add($"plugin-patches.json validation failed: {ex.Message}");
             }
 
             return problems;
@@ -26618,7 +26718,8 @@ internal sealed class LocalExportService(
             var hasShapeData = Directory.Exists(shapeDataDirectory)
                 && (HasAnyFile(shapeDataDirectory, "*.nif")
                     || HasAnyFile(shapeDataDirectory, "*.bsd")
-                    || HasAnyFile(shapeDataDirectory, "*.tri"));
+                    || HasAnyFile(shapeDataDirectory, "*.tri")
+                    || HasAnyFile(shapeDataDirectory, "*.osd"));
             if (!hasShapeData)
             {
                 issues.Add(new ConversionValidationIssue(
@@ -26641,7 +26742,7 @@ internal sealed class LocalExportService(
                 issues.Add(new ConversionValidationIssue(
                     "missing-bodyslide-slider-payload",
                     "medium",
-                    $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing BSD/TRI slider payload files, so the generated project cannot rebuild slider morphs correctly."));
+                    $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing BSD/TRI/OSD slider payload files, so the generated project cannot rebuild slider morphs correctly."));
             }
 
             var semanticProblems = ValidateBodySlideSemanticConsistency(ospPath, sliderGroupsPath, shapeDataDirectory);
@@ -26660,6 +26761,15 @@ internal sealed class LocalExportService(
                 "patch-armor.pas was not generated, so xEdit automation for plugin rewrites is missing.");
             AddMissingFileIssue("plugin-patches.json", "missing-plugin-patch-report", "medium",
                 "plugin-patches.json was not generated, so plugin rewrite guidance and verification output are missing.");
+
+            var pluginPatchSemanticProblems = ValidatePluginPatchSemanticConsistency(Path.Combine(outputDirectory, "plugin-patches.json"));
+            if (pluginPatchSemanticProblems.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-patch-semantic-mismatch",
+                    "medium",
+                    $"plugin-patches.json is inconsistent with staged plugin rewrite output: {string.Join(" | ", pluginPatchSemanticProblems.Take(3))}"));
+            }
         }
 
         AddMissingFileIssue("meta.ini", "missing-meta-ini", "low",
@@ -26885,12 +26995,13 @@ internal sealed class LocalExportService(
                                 !zipEntries.Any(entry =>
                                     entry.StartsWith($"{zipShapeDataPrefix}/", StringComparison.OrdinalIgnoreCase) &&
                                     (entry.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase) ||
-                                     entry.EndsWith(".tri", StringComparison.OrdinalIgnoreCase))))
+                                     entry.EndsWith(".tri", StringComparison.OrdinalIgnoreCase) ||
+                                     entry.EndsWith(".osd", StringComparison.OrdinalIgnoreCase))))
                             {
                                 issues.Add(new ConversionValidationIssue(
                                     "zip-missing-bodyslide-slider-payload",
                                     "medium",
-                                    $"The distributable ZIP is missing BSD/TRI slider payload files for '{bodySlideProject.ProjectName}'."));
+                                    $"The distributable ZIP is missing BSD/TRI/OSD slider payload files for '{bodySlideProject.ProjectName}'."));
                             }
                         }
                     }

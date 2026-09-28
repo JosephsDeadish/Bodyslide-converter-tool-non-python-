@@ -17876,6 +17876,48 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchRunner_RealisticRareDualTopologyHybridBodyModPackDirectory_ExpandsRareTopologyMatrixCoverage()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticRareDualTopologyHybridBodyModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(results.Count >= 2);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            foreach (var result in results)
+            {
+                var qualityJson = await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion-quality.json"));
+                Assert.DoesNotContain("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+            }
+
+            var packProofPath = Path.Combine(outputDirectory, "conversion-matrix-pack-proof.json");
+            Assert.True(File.Exists(packProofPath), "conversion-matrix-pack-proof.json was not written.");
+            using var packProof = JsonDocument.Parse(await File.ReadAllTextAsync(packProofPath));
+
+            var hardCaseCoverage = packProof.RootElement
+                .GetProperty("MatrixDimensionCoverage")
+                .EnumerateArray()
+                .First(summary => string.Equals(summary.GetProperty("Dimension").GetString(), "hard-case-family", StringComparison.OrdinalIgnoreCase));
+            Assert.True(hardCaseCoverage.GetProperty("DistinctValueCount").GetInt32() >= 1);
+            Assert.True(packProof.RootElement.GetProperty("UniqueMatrixCoordinateCount").GetInt32() >= 1);
+
+            var packChecklistPath = Path.Combine(outputDirectory, "remaining-gaps-pack-checklist.md");
+            Assert.True(File.Exists(packChecklistPath), "remaining-gaps-pack-checklist.md was not written.");
+            var checklist = await File.ReadAllTextAsync(packChecklistPath);
+            Assert.Contains("Missing matrix", checklist, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticFailureBsSubIndexModPackDirectory_FlagsUnsupportedFamilyInDiagnostics()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureBsSubIndexModPack");
@@ -26886,6 +26928,146 @@ public sealed class OutputCompletenessTests
             var semanticIssue = Assert.Single(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
             Assert.Contains("SetFolder", semanticIssue.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("missing ShapeData NIFs", semanticIssue.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsBodySlideSemanticMismatchWhenOsdCoverageIsPartial()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(
+                Path.Combine(sliderSetDirectory, "OsdParityProject.osp"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <SliderSetInfo version="1">
+                  <SliderSet name="OsdParityProject" baseShape="Base Shape" bsversion="20">
+                    <SetFolder>CalienteTools\BodySlide\ShapeData\OsdParityProject</SetFolder>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\OsdParityProject\armor_0.nif</SourceFile>
+                    <OutputPath>meshes\slidesmith\cbbe\</OutputPath>
+                    <OutputFile gender="f" use="true">armor_1.nif</OutputFile>
+                    <Slider name="Waist" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                    <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "OsdParityProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "armor_0.nif"), "mesh");
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Waist.bsd"), BuildBsdPayload("Waist", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Belly.bsd"), BuildBsdPayload("Belly", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Waist_1.bsd"), BuildBsdPayload("Waist", isHighWeight: true, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Belly_1.bsd"), BuildBsdPayload("Belly", isHighWeight: true, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "OsdParityProject.osd"), BuildOsdPayload(("Waist", [(0, 0.1f, 0f, 0f)])));
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"CalienteTools\" destination=\"CalienteTools\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("OsdParityProject", "CBBE", ["Waist", "Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            var semanticIssue = Assert.Single(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("OSD payloads are missing slider coverage", semanticIssue.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsPluginPatchSemanticMismatch()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "race-compatibility.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "patch-armor.pas"), "script");
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "plugin-patches.json"),
+                """
+                {
+                  "RewriteMappings": [
+                    {
+                      "SourceMeshPath": "meshes/armor/nordic/cuirass_0.nif",
+                      "RewrittenMeshPath": "meshes/slidesmith/cbbe/missing_mesh.nif"
+                    }
+                  ],
+                  "RewriteVerification": null
+                }
+                """);
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: false);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+            var pluginAnalysis = new PluginAnalysisResult(
+                [Path.Combine(outputDirectory, "Armor.esp")],
+                [new PluginArmorAddon("ARMA", ["meshes/armor/nordic/cuirass_0.nif"])],
+                "patch");
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("UnusedProject", "CBBE", ["Waist"], "<BodySlideProject/>"),
+                pluginAnalysis);
+
+            var semanticIssue = Assert.Single(issues, issue => issue.Code.Equals("plugin-patch-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("not staged", semanticIssue.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
