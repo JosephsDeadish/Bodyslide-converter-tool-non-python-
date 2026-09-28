@@ -10972,6 +10972,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 {
     private const double GenderCueMatchBoostValue = 0.06;
     private const double GenderCueMismatchPenaltyValue = 0.18;
+    private const double AliasSignalBoostValue = 0.42;
     private static readonly HashSet<string> FemaleGenderCueTokens = new(StringComparer.OrdinalIgnoreCase)
     {
         "female",
@@ -11350,6 +11351,18 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         var tuning = BodyDetectionTuningCatalog.Current;
         var evidence = new List<string>();
         var hasLinkedModStructureCue = HasLinkedModStructureCue(meshNames);
+        var aliasSignal = 0d;
+        if (BuiltInBodyMetadataCatalog.TryGet(template.Body, out var templateMetadata) &&
+            templateMetadata.Aliases.Count > 0)
+        {
+            var aliasTokens = BuildAliasDetectionTokens(templateMetadata.Aliases);
+            if (aliasTokens.Count > 0 &&
+                HasAnyTokenMatch(aliasTokens, meshNames, textureNames, physicsNames, bodyReferenceNames))
+            {
+                aliasSignal = 1d;
+                evidence.Add("alias-match");
+            }
+        }
 
         var meshHitRatio = MatchRatio(meshNames, template.MeshTokens);
         if (meshHitRatio > 0)
@@ -11458,6 +11471,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             (physicsExpectationSignal * tuning.PhysicsExpectationBoostValue) +
             (referenceBoostSignal * tuning.BodyReferenceBoostValue) +
             (linkedModReferenceBoostSignal * tuning.LinkedModStructureReferenceBoostValue) +
+            (aliasSignal * AliasSignalBoostValue) +
             (hasGenderCueMatch ? GenderCueMatchBoostValue : 0d) -
             (hasGenderCueMismatch ? GenderCueMismatchPenaltyValue : 0d),
             0,
@@ -11488,7 +11502,8 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             meshHitRatio <= 0 &&
             referenceMeshHitRatio <= 0 &&
             boneSignatureScore <= 0 &&
-            physicsHitRatio <= 0)
+            physicsHitRatio <= 0 &&
+            aliasSignal <= 0)
         {
             score = Math.Min(score, 0.24);
             evidence.Add("gated:needs-explicit-ube-token");
@@ -11653,6 +11668,52 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             if (structureTokenHits >= 2)
             {
                 return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IReadOnlyList<string> BuildAliasDetectionTokens(IReadOnlyList<string> aliases)
+    {
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var alias in aliases)
+        {
+            if (string.IsNullOrWhiteSpace(alias))
+            {
+                continue;
+            }
+
+            var trimmed = alias.Trim();
+            if (trimmed.Length < 6)
+            {
+                continue;
+            }
+
+            tokens.Add(trimmed);
+            tokens.Add(trimmed.Replace('_', ' ').Replace('-', ' '));
+        }
+
+        return tokens.ToArray();
+    }
+
+    private static bool HasAnyTokenMatch(
+        IReadOnlyList<string> tokens,
+        params IReadOnlyList<string>[] signalGroups)
+    {
+        foreach (var token in tokens)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                continue;
+            }
+
+            foreach (var group in signalGroups)
+            {
+                if (group.Any(value => TokenMatches(value, token)))
+                {
+                    return true;
+                }
             }
         }
 

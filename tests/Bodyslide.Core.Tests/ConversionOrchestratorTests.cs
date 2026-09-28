@@ -12380,6 +12380,23 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public async Task SignatureBodyDetectionService_RecognizesBuiltInAliasSignals()
+    {
+        var service = new SignatureBodyDetectionService();
+        var armor = new ImportedArmor(
+            SourcePath: "/tmp/mods/ultimate_body_enhancer_2/outfit_0.nif",
+            MeshFiles: ["/tmp/mods/ultimate_body_enhancer_2/outfit_0.nif"],
+            TextureFiles: [],
+            PhysicsFiles: [],
+            BodyReferenceFiles: ["/tmp/mods/references/ultimate_body_enhancer_2_reference.tri"]);
+
+        var result = await service.DetectAsync(armor, CancellationToken.None);
+
+        Assert.Equal("UBE", result.Body);
+        Assert.Contains(result.Evidence, evidence => evidence.Equals("alias-match", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task SignatureBodyDetectionService_DoesNotMisclassifyUunpReferenceAs3Ba()
     {
         var service = new SignatureBodyDetectionService();
