@@ -144,6 +144,7 @@ public sealed class MainForm : Form
     private bool _suppressTargetSelectionChanged;
     private bool _allowUserMainSplitOverride;
     private bool _startupResultLoadHandled;
+    private bool _cacheInspectionInitialized;
     private bool _userAdjustedMainSplit;
     private bool? _usesSingleColumnConversionLayout;
     private int? _userPreferredMainSplitDistance;
@@ -1433,6 +1434,16 @@ public sealed class MainForm : Form
         _cacheListView.Columns.Add("Regions", -2);
         _cacheTabPage.Controls.Add(_cacheListView);
         _resultsTabControl.TabPages.Add(_cacheTabPage);
+        _resultsTabControl.SelectedIndexChanged += async (_, _) =>
+        {
+            if (_resultsTabControl.SelectedTab != _cacheTabPage || _cacheInspectionInitialized)
+            {
+                return;
+            }
+
+            _cacheInspectionInitialized = true;
+            await InspectLearningCacheAsync(showDialogs: false, switchToTab: false);
+        };
         AttachCopyHotkeys(_inspectListView);
         AttachCopyHotkeys(_summaryListView);
         AttachCopyHotkeys(_pipelineListView);
@@ -1485,7 +1496,6 @@ public sealed class MainForm : Form
         {
             _allowUserMainSplitOverride = true;
             ApplyLauncherContextGuidance();
-            _ = InspectLearningCacheAsync(showDialogs: false, switchToTab: false);
             if (!_startupResultLoadHandled &&
                 !string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory))
             {

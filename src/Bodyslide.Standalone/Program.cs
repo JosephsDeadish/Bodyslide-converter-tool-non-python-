@@ -600,23 +600,14 @@ static bool IsLikelyModOrganizerLaunch(IReadOnlyList<string> args, string? execu
      PathLooksLikeModOrganizerManagedLocation(workingDirectory));
 
 static bool HasExplicitStandaloneCliSwitch(IReadOnlyList<string> args) =>
+    HasStandaloneCommandSwitch(args) || HasStandaloneConversionSwitches(args);
+
+static bool HasStandaloneCommandSwitch(IReadOnlyList<string> args) =>
     args.Any(static arg =>
     {
-        if (string.IsNullOrWhiteSpace(arg) || !arg.StartsWith("--", StringComparison.Ordinal))
+        if (!TryReadLongOptionName(arg, out var option))
         {
             return false;
-        }
-
-        var option = arg[2..].Trim();
-        if (option.Length == 0)
-        {
-            return false;
-        }
-
-        var separatorIndex = option.IndexOf('=');
-        if (separatorIndex >= 0)
-        {
-            option = option[..separatorIndex];
         }
 
         if (option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
@@ -635,23 +626,58 @@ static bool HasExplicitStandaloneCliSwitch(IReadOnlyList<string> args) =>
                option.Equals("self-check", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("conversion-guide", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("export-cache", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("target", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("targets", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("preset", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("presets", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("deformation-profile", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("source-body", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("physics", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("cache-path", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("zip", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("skeleton-nif", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("skeleton-nif-path", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("generate-bodyslide-files", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("custom-profiles", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("world-drop-mode", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("shared-plugin-output", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("body-reference", StringComparison.OrdinalIgnoreCase);
     });
+
+static bool HasStandaloneConversionSwitches(IReadOnlyList<string> args)
+{
+    var hasTarget = false;
+    var hasInput = false;
+
+    foreach (var arg in args)
+    {
+        if (!TryReadLongOptionName(arg, out var option))
+        {
+            continue;
+        }
+
+        if (option.Equals("target", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("targets", StringComparison.OrdinalIgnoreCase))
+        {
+            hasTarget = true;
+        }
+
+        if (option.Equals("input", StringComparison.OrdinalIgnoreCase))
+        {
+            hasInput = true;
+        }
+    }
+
+    return hasTarget || hasInput;
+}
+
+static bool TryReadLongOptionName(string? arg, out string option)
+{
+    option = string.Empty;
+    if (string.IsNullOrWhiteSpace(arg) || !arg.StartsWith("--", StringComparison.Ordinal))
+    {
+        return false;
+    }
+
+    option = arg[2..].Trim();
+    if (option.Length == 0)
+    {
+        return false;
+    }
+
+    var separatorIndex = option.IndexOf('=');
+    if (separatorIndex >= 0)
+    {
+        option = option[..separatorIndex];
+    }
+
+    return option.Length > 0;
+}
 
 static bool IsMo2LauncherArg(string? arg)
 {
