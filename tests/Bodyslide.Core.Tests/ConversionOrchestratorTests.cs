@@ -12367,6 +12367,23 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public async Task SignatureBodyDetectionService_DoesNotMisclassifyUunpReferenceAs3Ba()
+    {
+        var service = new SignatureBodyDetectionService();
+        var armor = new ImportedArmor(
+            SourcePath: "/tmp/mods/armor/cbbe_armor_0.nif",
+            MeshFiles: ["/tmp/mods/armor/cbbe_armor_0.nif"],
+            TextureFiles: [],
+            PhysicsFiles: [],
+            BodyReferenceFiles: ["/tmp/mods/CalienteTools/BodySlide/ShapeData/UUNP/reference/femalebody_1.tri"]);
+
+        var result = await service.DetectAsync(armor, CancellationToken.None);
+
+        Assert.NotEqual("3BA", result.Body);
+        Assert.Contains(result.Evidence, evidence => evidence.StartsWith("reference:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SignatureBodyDetectionService_DoesNotTreatSubstringAsShortTokenMatch()
     {
         var service = new SignatureBodyDetectionService();

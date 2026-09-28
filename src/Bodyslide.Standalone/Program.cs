@@ -611,6 +611,7 @@ static bool HasStandaloneCommandSwitch(IReadOnlyList<string> args) =>
         }
 
         if (option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
+            option.StartsWith("mo3-", StringComparison.OrdinalIgnoreCase) ||
             option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -659,12 +660,25 @@ static bool HasStandaloneConversionSwitches(IReadOnlyList<string> args)
 static bool TryReadLongOptionName(string? arg, out string option)
 {
     option = string.Empty;
-    if (string.IsNullOrWhiteSpace(arg) || !arg.StartsWith("--", StringComparison.Ordinal))
+    if (string.IsNullOrWhiteSpace(arg))
     {
         return false;
     }
 
-    option = arg[2..].Trim();
+    var trimmed = arg.Trim();
+    if (trimmed.StartsWith("--", StringComparison.Ordinal))
+    {
+        option = trimmed[2..].Trim();
+    }
+    else if (trimmed.StartsWith("-", StringComparison.Ordinal) || trimmed.StartsWith("/", StringComparison.Ordinal))
+    {
+        option = trimmed[1..].Trim();
+    }
+    else
+    {
+        return false;
+    }
+
     if (option.Length == 0)
     {
         return false;
@@ -674,6 +688,12 @@ static bool TryReadLongOptionName(string? arg, out string option)
     if (separatorIndex >= 0)
     {
         option = option[..separatorIndex];
+    }
+
+    if (option.Contains(Path.DirectorySeparatorChar) || option.Contains(Path.AltDirectorySeparatorChar))
+    {
+        option = string.Empty;
+        return false;
     }
 
     return option.Length > 0;
@@ -708,12 +728,14 @@ static bool IsMo2LauncherArg(string? arg)
     }
 
     return trimmed.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
+           trimmed.StartsWith("mo3-", StringComparison.OrdinalIgnoreCase) ||
            trimmed.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool IsLikelyModOrganizerEnvironment()
 {
     return HasEnvironmentVariable("MO2_INSTANCE") ||
+           HasEnvironmentVariable("MO3_INSTANCE") ||
            HasEnvironmentVariable("USVFS_PARAMETERS") ||
            HasEnvironmentVariable("USVFS_PROCESS") ||
            HasEnvironmentVariable("USVFS_PROXY") ||
@@ -735,7 +757,8 @@ static bool PathLooksLikeModOrganizerManagedLocation(string? path)
     var normalizedPath = path.Replace('\\', '/');
     return normalizedPath.Contains("mod organizer", StringComparison.OrdinalIgnoreCase) ||
            normalizedPath.Contains("modorganizer", StringComparison.OrdinalIgnoreCase) ||
-           normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase);
+           normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase) ||
+           normalizedPath.Contains("/mo3/", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool IsLikelyLauncherPathArgument(string? arg)

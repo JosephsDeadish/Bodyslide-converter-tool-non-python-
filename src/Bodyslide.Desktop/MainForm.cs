@@ -85,6 +85,7 @@ public sealed class MainForm : Form
     private readonly Label _statusLabel;
     private readonly Label _progressDetailsLabel;
     private readonly Label _modeStatusLabel;
+    private readonly Label _bodySelectionSummaryLabel;
     private readonly Label _targetSelectionLabel;
     private readonly Label _targetModeHintLabel;
     private readonly Label _targetBatchLabel;
@@ -555,6 +556,17 @@ public sealed class MainForm : Form
         };
         modeRow.Controls.Add(_modeStatusLabel, 0, 4);
         modeRow.SetColumnSpan(_modeStatusLabel, 2);
+        _bodySelectionSummaryLabel = new Label
+        {
+            AutoSize = true,
+            Margin = new Padding(0, 8, 0, 0),
+            Padding = new Padding(8, 6, 8, 6),
+            BorderStyle = BorderStyle.FixedSingle,
+            Font = new Font(Font, FontStyle.Bold),
+            Text = "FROM body: (auto)  →  TO body: (not selected)",
+        };
+        modeRow.Controls.Add(_bodySelectionSummaryLabel, 0, 5);
+        modeRow.SetColumnSpan(_bodySelectionSummaryLabel, 2);
         _topLayoutPanel.Controls.Add(modeRow, 0, 2);
 
         _conversionOptionsPanel = new TableLayoutPanel
@@ -603,6 +615,7 @@ public sealed class MainForm : Form
             UpdateTargetDetails();
             UpdatePhysicsDetails();
             UpdateOutputHint();
+            UpdateBodySelectionSummary();
         };
         leftOptions.Controls.Add(_presetComboBox, 1, 1);
         leftOptions.Controls.Add(new Label { Text = "Preset batch list (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
@@ -661,6 +674,7 @@ public sealed class MainForm : Form
             UpdateTargetDetails();
             UpdatePhysicsDetails();
             UpdateOutputHint();
+            UpdateBodySelectionSummary();
         };
         _targetComboBox.TextChanged += (_, _) =>
         {
@@ -672,6 +686,7 @@ public sealed class MainForm : Form
             UpdateTargetDetails();
             UpdatePhysicsDetails();
             UpdateOutputHint();
+            UpdateBodySelectionSummary();
         };
         targetSelectorPanel.Controls.Add(_presetTargetTextBox);
         targetSelectorPanel.Controls.Add(_targetComboBox);
@@ -815,8 +830,16 @@ public sealed class MainForm : Form
             _sourceComboBox.Items.Add(body.Name);
         }
         _sourceComboBox.SelectedIndex = 0;
-        _sourceComboBox.SelectedIndexChanged += (_, _) => UpdateSourceDetails();
-        _sourceComboBox.TextChanged += (_, _) => UpdateSourceDetails();
+        _sourceComboBox.SelectedIndexChanged += (_, _) =>
+        {
+            UpdateSourceDetails();
+            UpdateBodySelectionSummary();
+        };
+        _sourceComboBox.TextChanged += (_, _) =>
+        {
+            UpdateSourceDetails();
+            UpdateBodySelectionSummary();
+        };
         rightOptions.Controls.Add(_sourceComboBox, 1, 2);
         rightOptions.Controls.Add(new Label { Text = "Source body details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
         _sourceDetailsLabel = new Label
@@ -1465,6 +1488,7 @@ public sealed class MainForm : Form
         UpdateResponsiveLayout();
         UpdateMainSplitLayout();
         UpdateSourceDetails();
+        UpdateBodySelectionSummary();
         PopulateCatalogTab();
         PopulateReadinessTab(CreateDesktopReadinessReport());
         ResetPipelineTimeline();
@@ -2738,6 +2762,7 @@ public sealed class MainForm : Form
         UpdatePhysicsDetails();
         UpdateOutputHint();
         ApplyAdvancedOptionsVisibility();
+        UpdateBodySelectionSummary();
     }
 
     private void ApplyAdvancedOptionsVisibility()
@@ -4543,6 +4568,7 @@ public sealed class MainForm : Form
             targetBody,
             defaultText: $"This is the destination body the converted armor will be reshaped for.",
             isSourceContext: false);
+        UpdateBodySelectionSummary();
     }
 
     private void UpdateSourceDetails()
@@ -4575,6 +4601,27 @@ public sealed class MainForm : Form
         _sourceDetailsLabel.Text =
             $"Source hint only: treat the original armor as built for {resolvedSource}. This does not change the destination body or output physics. " +
             BuildBodyDetailsText(resolvedSource, defaultText: string.Empty, isSourceContext: true);
+        UpdateBodySelectionSummary();
+    }
+
+    private void UpdateBodySelectionSummary()
+    {
+        if (_bodySelectionSummaryLabel is null || _bodySelectionSummaryLabel.IsDisposed)
+        {
+            return;
+        }
+
+        var fromBody = ResolveDisplayedSourceBody();
+        var resolvedFromBody = string.IsNullOrWhiteSpace(fromBody) || string.Equals(fromBody, "(auto)", StringComparison.OrdinalIgnoreCase)
+            ? "(auto-detect)"
+            : BodyTypeCatalog.ResolveName(fromBody);
+        var resolvedToBody = BodyTypeCatalog.ResolveName(ResolveProfileTargetName());
+        if (string.IsNullOrWhiteSpace(resolvedToBody))
+        {
+            resolvedToBody = "(not selected)";
+        }
+
+        _bodySelectionSummaryLabel.Text = $"FROM body: {resolvedFromBody}  →  TO body: {resolvedToBody}";
     }
 
     private void ClearAutoDetectedSourceHint(bool refreshDetails)

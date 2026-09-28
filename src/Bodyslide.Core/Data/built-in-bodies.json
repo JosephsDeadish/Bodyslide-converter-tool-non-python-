@@ -162,8 +162,9 @@
     },
     "detectionTokens": [
       "3ba",
-      "cbbe",
-      "bodyslide"
+      "3bbb",
+      "cbbe 3ba",
+      "cbbe 3bbb"
     ],
     "textureTokens": [
       "femalebody"
@@ -243,7 +244,9 @@
     ],
     "referenceTokens": [
       "bhunp",
-      "uunp special"
+      "uunp",
+      "uunp special",
+      "unp special"
     ],
     "sliderNames": [
       "Belly",
@@ -275,7 +278,9 @@
       "calves": 1.03
     },
     "detectionTokens": [
-      "bhunp"
+      "bhunp",
+      "uunp special",
+      "unp special"
     ],
     "textureTokens": [
       "femalebody"
