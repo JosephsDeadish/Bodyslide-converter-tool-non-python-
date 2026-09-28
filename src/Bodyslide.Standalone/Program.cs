@@ -780,6 +780,11 @@ static string? ResolveStartupDiagnosticsPath(IReadOnlyList<string> args)
         }
     }
 
+    if (!IsStandaloneDiagnosticsEnabledByEnvironment())
+    {
+        return null;
+    }
+
     var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     if (!string.IsNullOrWhiteSpace(localAppData))
     {
@@ -798,6 +803,15 @@ static string? NormalizeDiagnosticsPath(string? value)
 
     var trimmed = value.Trim().Trim('"');
     return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+}
+
+static bool IsStandaloneDiagnosticsEnabledByEnvironment()
+{
+    var flag = Environment.GetEnvironmentVariable("SLIDESMITH_STARTUP_DIAGNOSTICS");
+    return string.Equals(flag, "1", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(flag, "yes", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(flag, "on", StringComparison.OrdinalIgnoreCase);
 }
 
 static void WriteStartupDiagnostics(string? diagnosticsPath, string message)
@@ -866,7 +880,10 @@ static bool IsMo2LauncherArg(string? arg)
     return trimmed.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
            trimmed.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
            trimmed.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
-           trimmed.Equals("vortex", StringComparison.OrdinalIgnoreCase);
+           trimmed.Equals("vortex", StringComparison.OrdinalIgnoreCase) ||
+           trimmed.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
+           trimmed.Equals("from-vortex", StringComparison.OrdinalIgnoreCase) ||
+           trimmed.Equals("from-mo2", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool IsLikelyModOrganizerEnvironment()
@@ -880,7 +897,9 @@ static bool IsLikelyModOrganizerEnvironment()
            HasEnvironmentVariable("MODORGANIZER_ROOT") ||
            HasEnvironmentVariable("VORTEX_USERDATA") ||
            HasEnvironmentVariable("VORTEX_PROFILE_ID") ||
-           HasEnvironmentVariable("VORTEX_STAGING_FOLDER");
+           HasEnvironmentVariable("VORTEX_STAGING_FOLDER") ||
+           HasEnvironmentVariable("VORTEX_INSTANCE_ID") ||
+           HasEnvironmentVariable("VORTEX_SESSION");
 }
 
 static bool HasEnvironmentVariable(string name) =>
@@ -897,7 +916,8 @@ static bool PathLooksLikeModOrganizerManagedLocation(string? path)
     return normalizedPath.Contains("mod organizer", StringComparison.OrdinalIgnoreCase) ||
            normalizedPath.Contains("modorganizer", StringComparison.OrdinalIgnoreCase) ||
            normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase) ||
-           normalizedPath.Contains("/vortex/", StringComparison.OrdinalIgnoreCase);
+           normalizedPath.Contains("/vortex/", StringComparison.OrdinalIgnoreCase) ||
+           normalizedPath.Contains("black tree gaming", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool IsLikelyLauncherPathArgument(string? arg)
@@ -933,16 +953,21 @@ static bool HasLauncherPathOptionArgument(IReadOnlyList<string> args)
             continue;
         }
 
-        if (!option.Equals("input", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("output", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("result", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("load-result", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("mo2-output", StringComparison.OrdinalIgnoreCase) &&
+        if (!option.Equals("mo2-output", StringComparison.OrdinalIgnoreCase) &&
             !option.Equals("mo2-result", StringComparison.OrdinalIgnoreCase) &&
             !option.Equals("mo2-mod", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("mo2-path", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("modorganizer-path", StringComparison.OrdinalIgnoreCase) &&
             !option.Equals("vortex-output", StringComparison.OrdinalIgnoreCase) &&
             !option.Equals("vortex-result", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("vortex-mod", StringComparison.OrdinalIgnoreCase))
+            !option.Equals("vortex-mod", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("vortex-path", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("vortex-stage", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("vortex-staging", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("vortex-deployment", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("mods-path", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("mod-path", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("staging-path", StringComparison.OrdinalIgnoreCase))
         {
             continue;
         }

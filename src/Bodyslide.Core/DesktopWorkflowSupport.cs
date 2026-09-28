@@ -18,9 +18,18 @@ internal static class DesktopWorkflowSupport
         "mo2-output",
         "mo2-result",
         "mo2-mod",
+        "mo2-path",
+        "modorganizer-path",
         "vortex-output",
         "vortex-result",
-        "vortex-mod"
+        "vortex-mod",
+        "vortex-path",
+        "vortex-staging",
+        "vortex-stage",
+        "vortex-deployment",
+        "mods-path",
+        "mod-path",
+        "staging-path"
     ];
 
     private static readonly string[] DesktopResultMarkerFiles =
@@ -214,7 +223,7 @@ internal static class DesktopWorkflowSupport
 
         string? candidatePath = null;
         var candidateFromResultArgument = false;
-        var fromMo2 = args.Any(static arg => IsModManagerLauncherArgument(arg));
+        var fromModManagerLauncher = args.Any(static arg => IsModManagerLauncherArgument(arg));
 
         for (var index = 0; index < args.Count; index++)
         {
@@ -245,10 +254,13 @@ internal static class DesktopWorkflowSupport
         }
 
         var startupOutputDirectory = TryResolveResultOutputDirectory(candidatePath, allowAncestorWalk: candidateFromResultArgument);
+        var startupInputPath = startupOutputDirectory is null && !candidateFromResultArgument
+            ? TryResolveExistingInputPath(candidatePath)
+            : null;
         return new DesktopLaunchOptions(
             startupOutputDirectory,
-            startupOutputDirectory is null ? TryResolveExistingInputPath(candidatePath) : null,
-            fromMo2);
+            startupInputPath,
+            fromModManagerLauncher);
     }
 
     public static string? TryResolveResultOutputDirectory(string? candidatePath, bool allowAncestorWalk = true)
@@ -401,7 +413,10 @@ internal static class DesktopWorkflowSupport
         return key.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
                key.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
                key.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("vortex", StringComparison.OrdinalIgnoreCase);
+               key.Equals("vortex", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("from-vortex", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("from-mo2", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LooksLikeRecognizedOptionToken(string arg)
@@ -413,7 +428,10 @@ internal static class DesktopWorkflowSupport
         return DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
                key.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase);
+               key.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("from-vortex", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("from-mo2", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsOptionToken(string? arg) =>
@@ -458,7 +476,10 @@ internal static class DesktopWorkflowSupport
                     DesktopResultArgumentNames.Contains(potentialKey, StringComparer.OrdinalIgnoreCase) ||
                     potentialKey.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
                     potentialKey.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
-                    potentialKey.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase);
+                    potentialKey.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase) ||
+                    potentialKey.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
+                    potentialKey.Equals("from-vortex", StringComparison.OrdinalIgnoreCase) ||
+                    potentialKey.Equals("from-mo2", StringComparison.OrdinalIgnoreCase);
                 if (recognizesColonSeparatedValue)
                 {
                     separatorIndex = colonIndex;
