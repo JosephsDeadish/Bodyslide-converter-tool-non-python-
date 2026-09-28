@@ -621,6 +621,7 @@ static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<s
 static bool IsLikelyModOrganizerLaunch(IReadOnlyList<string> args, string? executablePath, string? workingDirectory) =>
     IsLikelyModOrganizerEnvironment() ||
     args.Any(IsMo2LauncherArg) ||
+    HasLauncherPathOptionArgument(args) ||
     args.Any(IsLikelyLauncherPathArgument) ||
     (PathLooksLikeModOrganizerManagedLocation(executablePath) &&
      PathLooksLikeModOrganizerManagedLocation(workingDirectory));
@@ -660,7 +661,7 @@ static bool HasStandaloneCommandSwitch(IReadOnlyList<string> args) =>
 static bool HasStandaloneConversionSwitches(IReadOnlyList<string> args)
 {
     var hasTarget = false;
-    var hasInput = false;
+    var hasConversionModifier = false;
 
     foreach (var arg in args)
     {
@@ -673,15 +674,28 @@ static bool HasStandaloneConversionSwitches(IReadOnlyList<string> args)
             option.Equals("targets", StringComparison.OrdinalIgnoreCase))
         {
             hasTarget = true;
+            continue;
         }
 
-        if (option.Equals("input", StringComparison.OrdinalIgnoreCase))
+        if (option.Equals("preset", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("presets", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("deformation-profile", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("source-body", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("physics", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("cache-path", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("zip", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("skeleton-nif", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("skeleton-nif-path", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("generate-bodyslide-files", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("custom-profiles", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("world-drop-mode", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("shared-plugin-output", StringComparison.OrdinalIgnoreCase))
         {
-            hasInput = true;
+            hasConversionModifier = true;
         }
     }
 
-    return hasTarget || hasInput;
+    return hasTarget || hasConversionModifier;
 }
 
 static bool TryReadLongOptionName(string? arg, out string option)
@@ -899,6 +913,66 @@ static bool IsLikelyLauncherPathArgument(string? arg)
     }
 
     return PathLooksLikeModOrganizerManagedLocation(trimmed);
+}
+
+static bool HasLauncherPathOptionArgument(IReadOnlyList<string> args)
+{
+    for (var index = 0; index < args.Count; index++)
+    {
+        var arg = args[index];
+        if (!TryReadLongOptionName(arg, out var option))
+        {
+            continue;
+        }
+
+        if (!option.Equals("input", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("output", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("result", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("load-result", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("mo2-output", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("mo2-result", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("mo2-mod", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+
+        string? value = null;
+        if (arg.Contains('='))
+        {
+            var separatorIndex = arg.IndexOf('=');
+            if (separatorIndex >= 0 && separatorIndex < arg.Length - 1)
+            {
+                value = arg[(separatorIndex + 1)..];
+            }
+        }
+        else if (index + 1 < args.Count && !TryReadLongOptionName(args[index + 1], out _))
+        {
+            value = args[index + 1];
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            continue;
+        }
+
+        var normalized = value.Trim().Trim('"');
+        if (normalized.Length == 0)
+        {
+            continue;
+        }
+
+        if (File.Exists(normalized) || Directory.Exists(normalized))
+        {
+            return true;
+        }
+
+        if (normalized.Contains('\\') || normalized.Contains('/') || normalized.Contains(':'))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
