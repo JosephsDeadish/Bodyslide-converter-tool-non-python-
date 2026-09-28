@@ -130,6 +130,7 @@ public sealed class MainForm : Form
     private CancellationTokenSource? _activeConversion;
     private CancellationTokenSource? _autoInspectDebounce;
     private CancellationTokenSource? _autoCacheInspectDebounce;
+    private CancellationTokenSource? _activeCacheInspection;
     private string? _lastOutputDirectory;
     private string? _lastPreviewPath;
     private string? _lastBatchReportPath;
@@ -1484,7 +1485,7 @@ public sealed class MainForm : Form
         {
             _allowUserMainSplitOverride = true;
             ApplyLauncherContextGuidance();
-            await InspectLearningCacheAsync(showDialogs: false, switchToTab: false);
+            _ = InspectLearningCacheAsync(showDialogs: false, switchToTab: false);
             if (!_startupResultLoadHandled &&
                 !string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory))
             {
@@ -1867,6 +1868,7 @@ public sealed class MainForm : Form
 
     private void LoadUiSettings()
     {
+        var loadTimer = System.Diagnostics.Stopwatch.StartNew();
         _currentTheme = GetSystemPreferredTheme();
         _customProfilePaths.Clear();
 
@@ -1893,6 +1895,11 @@ public sealed class MainForm : Form
         catch (JsonException ex)
         {
             System.Diagnostics.Trace.TraceWarning($"Failed to parse theme preference from '{settingsPath}': {ex.Message}");
+        }
+        finally
+        {
+            loadTimer.Stop();
+            System.Diagnostics.Trace.TraceInformation($"UI settings load completed in {loadTimer.ElapsedMilliseconds} ms.");
         }
     }
 
@@ -5082,15 +5089,29 @@ public sealed class MainForm : Form
 
     private async Task InspectLearningCacheAsync(bool showDialogs, bool switchToTab)
     {
+        _activeCacheInspection?.Cancel();
+        _activeCacheInspection?.Dispose();
+        var cacheInspection = new CancellationTokenSource();
+        _activeCacheInspection = cacheInspection;
+        var inspectionToken = cacheInspection.Token;
+
+        var inspectTimer = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             var cachePathOverride = ReadOptionalPathValue(_cachePathTextBox.Text);
             ConversionLearningCache.SetGlobalCachePath(cachePathOverride);
 
-            var entries = await ConversionLearningCache.LoadMergedEntriesAsync(string.Empty, CancellationToken.None);
+            var entries = await ConversionLearningCache.LoadMergedEntriesAsync(string.Empty, inspectionToken);
+            if (inspectionToken.IsCancellationRequested)
+            {
+                return;
+            }
             if (entries.Count == 0)
             {
-                AppendLog("Learning cache is empty.");
+                if (showDialogs)
+                {
+                    AppendLog("Learning cache is empty.");
+                }
                 PopulateCacheTab([], cachePathOverride);
                 if (switchToTab)
                 {
@@ -5105,14 +5126,15 @@ public sealed class MainForm : Form
 
             AppendLog($"Learning cache: {entries.Count} entr{(entries.Count == 1 ? "y" : "ies")}.");
             var orderedEntries = entries.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase).ToList();
-            foreach (var entry in orderedEntries.Take(MaxAutoCacheLogEntries))
+            var maxLogEntries = showDialogs ? MaxAutoCacheLogEntries : Math.Min(8, MaxAutoCacheLogEntries);
+            foreach (var entry in orderedEntries.Take(maxLogEntries))
             {
                 AppendLog($"[{entry.Key}] target={entry.TargetBody}, mesh={entry.MeshType}, strategy={entry.Strategy}, cached={entry.LastSuccessfulConversion:u}");
             }
 
-            if (orderedEntries.Count > MaxAutoCacheLogEntries)
+            if (orderedEntries.Count > maxLogEntries)
             {
-                AppendLog($"Cache log output truncated to {MaxAutoCacheLogEntries} entries for responsiveness.");
+                AppendLog($"Cache log output truncated to {maxLogEntries} entries for responsiveness.");
             }
 
             PopulateCacheTab(orderedEntries, cachePathOverride);
@@ -5126,6 +5148,9 @@ public sealed class MainForm : Form
                 MessageBox.Show(this, $"Loaded {entries.Count} learning-cache entr{(entries.Count == 1 ? "y" : "ies")}. Details were added to the Cache tab and log.", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
+        catch (OperationCanceledException)
+        {
+        }
         catch (Exception ex)
         {
             if (showDialogs)
@@ -5135,6 +5160,16 @@ public sealed class MainForm : Form
             else
             {
                 AppendLog($"Automatic cache inspection failed: {ex.Message}");
+            }
+        }
+        finally
+        {
+            inspectTimer.Stop();
+            System.Diagnostics.Trace.TraceInformation($"Learning cache inspection completed in {inspectTimer.ElapsedMilliseconds} ms.");
+            if (ReferenceEquals(_activeCacheInspection, cacheInspection))
+            {
+                _activeCacheInspection.Dispose();
+                _activeCacheInspection = null;
             }
         }
     }

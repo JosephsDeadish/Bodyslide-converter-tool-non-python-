@@ -442,6 +442,14 @@ internal static class DesktopWorkflowSupport
         }
 
         var separatorIndex = trimmed.IndexOf('=');
+        if (separatorIndex < 0)
+        {
+            var colonIndex = trimmed.IndexOf(':');
+            if (colonIndex > 1)
+            {
+                separatorIndex = colonIndex;
+            }
+        }
         if (separatorIndex >= 0)
         {
             key = trimmed[..separatorIndex];
