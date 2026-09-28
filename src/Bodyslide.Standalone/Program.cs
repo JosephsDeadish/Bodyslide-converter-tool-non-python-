@@ -637,7 +637,9 @@ static bool HasStandaloneCommandSwitch(IReadOnlyList<string> args) =>
         }
 
         if (option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
-            option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase))
+            option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
+            option.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
+            option.Equals("vortex", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -729,21 +731,25 @@ static string? ResolveStartupDiagnosticsPath(IReadOnlyList<string> args)
     for (var index = 0; index < args.Count; index++)
     {
         var arg = args[index];
-        if (!TryReadLongOptionName(arg, out var option) ||
-            !option.Equals("startup-diagnostics", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(arg))
         {
             continue;
         }
 
-        var inlineSeparator = arg.IndexOf('=', StringComparison.Ordinal);
-        if (inlineSeparator < 0)
+        if (arg.StartsWith("--startup-diagnostics=", StringComparison.OrdinalIgnoreCase))
         {
-            inlineSeparator = arg.IndexOf(':', StringComparison.Ordinal);
+            return NormalizeDiagnosticsPath(arg["--startup-diagnostics=".Length..]);
         }
 
-        if (inlineSeparator >= 0 && inlineSeparator + 1 < arg.Length)
+        if (arg.StartsWith("--startup-diagnostics:", StringComparison.OrdinalIgnoreCase))
         {
-            return NormalizeDiagnosticsPath(arg[(inlineSeparator + 1)..]);
+            return NormalizeDiagnosticsPath(arg["--startup-diagnostics:".Length..]);
+        }
+
+        if (!TryReadLongOptionName(arg, out var option) ||
+            !option.Equals("startup-diagnostics", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
         }
 
         if (index + 1 < args.Count)
@@ -836,7 +842,9 @@ static bool IsMo2LauncherArg(string? arg)
     }
 
     return trimmed.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
-           trimmed.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase);
+           trimmed.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
+           trimmed.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
+           trimmed.Equals("vortex", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool IsLikelyModOrganizerEnvironment()
@@ -847,7 +855,10 @@ static bool IsLikelyModOrganizerEnvironment()
            HasEnvironmentVariable("USVFS_PROXY") ||
            HasEnvironmentVariable("MODORGANIZER_INSTANCE") ||
            HasEnvironmentVariable("MODORGANIZER_PATH") ||
-           HasEnvironmentVariable("MODORGANIZER_ROOT");
+           HasEnvironmentVariable("MODORGANIZER_ROOT") ||
+           HasEnvironmentVariable("VORTEX_USERDATA") ||
+           HasEnvironmentVariable("VORTEX_PROFILE_ID") ||
+           HasEnvironmentVariable("VORTEX_STAGING_FOLDER");
 }
 
 static bool HasEnvironmentVariable(string name) =>
@@ -863,7 +874,8 @@ static bool PathLooksLikeModOrganizerManagedLocation(string? path)
     var normalizedPath = path.Replace('\\', '/');
     return normalizedPath.Contains("mod organizer", StringComparison.OrdinalIgnoreCase) ||
            normalizedPath.Contains("modorganizer", StringComparison.OrdinalIgnoreCase) ||
-           normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase);
+           normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase) ||
+           normalizedPath.Contains("/vortex/", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool IsLikelyLauncherPathArgument(string? arg)

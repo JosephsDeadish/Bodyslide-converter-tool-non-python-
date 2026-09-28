@@ -17,7 +17,10 @@ internal static class DesktopWorkflowSupport
         "output",
         "mo2-output",
         "mo2-result",
-        "mo2-mod"
+        "mo2-mod",
+        "vortex-output",
+        "vortex-result",
+        "vortex-mod"
     ];
 
     private static readonly string[] DesktopResultMarkerFiles =
@@ -211,7 +214,7 @@ internal static class DesktopWorkflowSupport
 
         string? candidatePath = null;
         var candidateFromResultArgument = false;
-        var fromMo2 = args.Any(static arg => IsMo2LauncherArgument(arg));
+        var fromMo2 = args.Any(static arg => IsModManagerLauncherArgument(arg));
 
         for (var index = 0; index < args.Count; index++)
         {
@@ -388,7 +391,7 @@ internal static class DesktopWorkflowSupport
                DesktopResultMarkerFiles.Contains(fileName, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static bool IsMo2LauncherArgument(string? argument)
+    private static bool IsModManagerLauncherArgument(string? argument)
     {
         if (!TryExtractOptionToken(argument, out var key, out _))
         {
@@ -396,7 +399,9 @@ internal static class DesktopWorkflowSupport
         }
 
         return key.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
-               key.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase);
+               key.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
+               key.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("vortex", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LooksLikeRecognizedOptionToken(string arg)
@@ -407,7 +412,8 @@ internal static class DesktopWorkflowSupport
         }
         return DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
                key.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase);
+               key.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsOptionToken(string? arg) =>
@@ -451,7 +457,8 @@ internal static class DesktopWorkflowSupport
                 var recognizesColonSeparatedValue =
                     DesktopResultArgumentNames.Contains(potentialKey, StringComparer.OrdinalIgnoreCase) ||
                     potentialKey.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
-                    potentialKey.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase);
+                    potentialKey.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
+                    potentialKey.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase);
                 if (recognizesColonSeparatedValue)
                 {
                     separatorIndex = colonIndex;

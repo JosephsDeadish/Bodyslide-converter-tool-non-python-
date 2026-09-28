@@ -1199,8 +1199,8 @@ public sealed class MainForm : Form
         _copyMo2SetupButton = new Button
         {
             Name = "copyMo2SetupButton",
-            Text = "Copy MO2 setup",
-            Width = 130,
+            Text = "Copy Mod Manager setup",
+            Width = 200,
             Height = 34,
             Margin = new Padding(8, 0, 0, 0),
         };
@@ -1526,7 +1526,7 @@ public sealed class MainForm : Form
                 _startupResultLoadHandled = true;
                 await LoadResultDirectoryAsync(
                     _launchOptions.StartupOutputDirectory,
-                    _launchOptions.FromModOrganizerLauncher ? "MO2 launcher argument" : "launcher argument");
+                    _launchOptions.FromModOrganizerLauncher ? "mod manager launcher argument" : "launcher argument");
                 return;
             }
 
@@ -1535,10 +1535,10 @@ public sealed class MainForm : Form
             {
                 _inputTextBox.Text = _launchOptions.StartupInputPath;
                 _statusLabel.Text = _launchOptions.FromModOrganizerLauncher
-                    ? "Ready — input loaded from MO2 launcher."
+                    ? "Ready — input loaded from mod manager launcher."
                     : "Ready — input loaded from launcher.";
                 AppendLog(_launchOptions.FromModOrganizerLauncher
-                    ? $"Startup input loaded from MO2 launcher: {_launchOptions.StartupInputPath}"
+                    ? $"Startup input loaded from mod manager launcher: {_launchOptions.StartupInputPath}"
                     : $"Startup input loaded from launcher: {_launchOptions.StartupInputPath}");
                 if (ShouldAutoInspectInputPath(_launchOptions.StartupInputPath))
                 {
@@ -2296,21 +2296,21 @@ public sealed class MainForm : Form
 
     private void AppendModOrganizerHealthChecks(List<RuntimeReadinessCheck> checks)
     {
-        var mo2EnvironmentDetected = IsLikelyModOrganizerEnvironment();
+        var mo2EnvironmentDetected = IsLikelyModManagerEnvironment();
         var mo2ContextDetected = _launchOptions.FromModOrganizerLauncher || mo2EnvironmentDetected;
         if (!mo2ContextDetected)
         {
             checks.Add(new RuntimeReadinessCheck(
-                "MO2 health check",
+                "Mod manager health check",
                 "Info",
-                "MO2 context was not detected in this session. If launching from Mod Organizer, use 'Copy MO2 setup' and ensure arguments include --mo2-launcher."));
+                "Mod manager context was not detected in this session. If launching from MO2 or Vortex, use 'Copy Mod Manager setup' and include --mo2-launcher (MO2) or --vortex-launcher (Vortex)."));
             return;
         }
 
         checks.Add(new RuntimeReadinessCheck(
-            "MO2 health check",
+            "Mod manager health check",
             "OK",
-            "MO2 context detected. Verify the launcher uses the desktop executable with --mo2-launcher."));
+            "Mod manager context detected. Verify the launcher targets the desktop executable and passes a launcher flag."));
 
         var executablePath = Environment.ProcessPath ?? Application.ExecutablePath;
         var executableName = Path.GetFileName(executablePath);
@@ -2324,14 +2324,14 @@ public sealed class MainForm : Form
         {
             var suggestedDesktopPath = FindSiblingDesktopExecutable(executableDirectory) ?? "SlideSmith.exe";
             checks.Add(new RuntimeReadinessCheck(
-                "MO2 executable target",
+                "Mod manager executable target",
                 "Warning",
-                $"Current launch path looks like CLI ({executableName}). Set MO2 Binary to {suggestedDesktopPath}, Start In to {Path.GetDirectoryName(suggestedDesktopPath) ?? "desktop folder"}, and keep --mo2-launcher. Use 'Copy MO2 setup' for a ready-to-paste fix."));
+                $"Current launch path looks like CLI ({executableName}). Set launcher Binary to {suggestedDesktopPath}, Start In to {Path.GetDirectoryName(suggestedDesktopPath) ?? "desktop folder"}, and use --mo2-launcher (MO2) or --vortex-launcher (Vortex). Use 'Copy Mod Manager setup' for a ready-to-paste fix."));
         }
         else
         {
             checks.Add(new RuntimeReadinessCheck(
-                "MO2 executable target",
+                "Mod manager executable target",
                 "OK",
                 $"Desktop executable target looks valid ({executableName})."));
         }
@@ -2339,9 +2339,9 @@ public sealed class MainForm : Form
         if (!_launchOptions.FromModOrganizerLauncher && mo2EnvironmentDetected)
         {
             checks.Add(new RuntimeReadinessCheck(
-                "MO2 launcher arguments",
+                "Mod manager launcher arguments",
                 "Warning",
-                "MO2 environment variables were detected but --mo2-launcher was not present. Add --mo2-launcher in MO2 executable arguments for deterministic startup routing."));
+                "Mod manager environment variables were detected but a launcher flag was not present. Add --mo2-launcher (MO2) or --vortex-launcher (Vortex) for deterministic startup routing."));
         }
     }
 
@@ -4728,18 +4728,18 @@ public sealed class MainForm : Form
             "Copies the selected rows from the active diagnostics tab.\n" +
             "If nothing is selected, copies the full log text.");
         _optionToolTip.SetToolTip(_copyMo2SetupButton,
-            "Copies recommended Mod Organizer setup values (binary, start-in, and optional launcher argument) for this SlideSmith build.");
+            "Copies recommended MO2/Vortex setup values (binary, start-in, and launcher arguments) for this SlideSmith build.");
     }
 
     private void ApplyLauncherContextGuidance()
     {
-        if (!_launchOptions.FromModOrganizerLauncher && !IsLikelyModOrganizerEnvironment())
+        if (!_launchOptions.FromModOrganizerLauncher && !IsLikelyModManagerEnvironment())
         {
             return;
         }
 
-        _statusLabel.Text = "Ready — launched from Mod Organizer context.";
-        AppendLog("Mod Organizer context detected. Use 'Copy MO2 setup' for recommended executable/profile values.");
+        _statusLabel.Text = "Ready — launched from mod manager context.";
+        AppendLog("Mod manager context detected. Use 'Copy Mod Manager setup' for recommended executable/profile values.");
     }
 
     private void CopyMo2SetupGuidance()
@@ -4758,11 +4758,12 @@ public sealed class MainForm : Form
         var cliPath = FindSiblingCliExecutable(workingDirectory);
 
         var guidance = new StringBuilder()
-            .AppendLine("Recommended Mod Organizer setup for SlideSmith")
+            .AppendLine("Recommended mod manager setup for SlideSmith")
             .AppendLine($"Title: SlideSmith (Desktop)")
             .AppendLine($"Binary: {desktopPath}")
             .AppendLine($"Start in: {workingDirectory}")
-            .AppendLine("Arguments: --mo2-launcher")
+            .AppendLine("Arguments (MO2): --mo2-launcher")
+            .AppendLine("Arguments (Vortex): --vortex-launcher")
             .AppendLine();
         if (looksLikeCliTarget && !desktopPath.Equals(processPath, StringComparison.OrdinalIgnoreCase))
         {
@@ -4781,34 +4782,29 @@ public sealed class MainForm : Form
         try
         {
             Clipboard.SetText(guidance.ToString());
-            AppendLog("Copied recommended Mod Organizer setup to clipboard.");
-            _statusLabel.Text = "Copied Mod Organizer setup guidance to clipboard.";
+            AppendLog("Copied recommended mod manager setup to clipboard.");
+            _statusLabel.Text = "Copied mod manager setup guidance to clipboard.";
         }
         catch (Exception ex)
         {
-            AppendLog($"Could not copy Mod Organizer setup guidance: {ex.Message}");
+            AppendLog($"Could not copy mod manager setup guidance: {ex.Message}");
         }
     }
 
-    private static bool IsLikelyModOrganizerEnvironment()
-    {
-        foreach (var key in Environment.GetEnvironmentVariables().Keys)
-        {
-            if (key is not string name)
-            {
-                continue;
-            }
+    private static bool IsLikelyModManagerEnvironment() =>
+        HasEnvironmentVariable("MO2_INSTANCE") ||
+        HasEnvironmentVariable("USVFS_PARAMETERS") ||
+        HasEnvironmentVariable("USVFS_PROCESS") ||
+        HasEnvironmentVariable("USVFS_PROXY") ||
+        HasEnvironmentVariable("MODORGANIZER_INSTANCE") ||
+        HasEnvironmentVariable("MODORGANIZER_PATH") ||
+        HasEnvironmentVariable("MODORGANIZER_ROOT") ||
+        HasEnvironmentVariable("VORTEX_USERDATA") ||
+        HasEnvironmentVariable("VORTEX_PROFILE_ID") ||
+        HasEnvironmentVariable("VORTEX_STAGING_FOLDER");
 
-            if (name.Contains("USVFS", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("MODORGANIZER", StringComparison.OrdinalIgnoreCase) ||
-                name.Equals("MO2_INSTANCE", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private static bool HasEnvironmentVariable(string name) =>
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
 
     private static string? FindSiblingCliExecutable(string desktopDirectory)
     {
@@ -4846,8 +4842,10 @@ public sealed class MainForm : Form
         foreach (var candidate in new[]
                  {
                      Path.Combine(executableDirectory, "SlideSmith.exe"),
+                     Path.Combine(executableDirectory, "Bodyslide.Desktop.exe"),
                      Path.Combine(executableDirectory, "SlideSmith-Desktop.exe"),
                      Path.Combine(siblingDesktopDirectory, "SlideSmith.exe"),
+                     Path.Combine(siblingDesktopDirectory, "Bodyslide.Desktop.exe"),
                      Path.Combine(siblingDesktopDirectory, "SlideSmith-Desktop.exe")
                  })
         {
