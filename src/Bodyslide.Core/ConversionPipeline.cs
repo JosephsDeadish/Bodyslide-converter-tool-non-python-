@@ -34236,18 +34236,35 @@ internal sealed class LocalExportService(
             return "multipart-straps-windows";
         }
 
+        if (signals.Any(static value => value.Contains("non-manifold", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("nonmanifold", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("self-intersect", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("degenerate", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "non-manifold-boundary";
+        }
+
+        if (signals.Any(static value => value.Contains("ownership-layout", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("partition", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("layout-violation", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("skin-partition", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "ownership-layout-review";
+        }
+
+        if (signals.Any(static value => value.Contains("multi-island", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("topology-island", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("island-count", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "multi-island-layout";
+        }
+
         return "core-humanoid";
     }
 
     private static string BuildSourceSkeletonMatrixFamily(SkeletonMappingResult skeletonMapping, IEnumerable<string>? sourceAssetSignals = null)
     {
         var label = skeletonMapping.SourceSkeleton?.Trim();
-        if (string.IsNullOrWhiteSpace(label))
-        {
-            return "unknown";
-        }
-
-        var normalized = label.ToLowerInvariant();
         var candidateSignals = skeletonMapping.SourceSkeletonCandidates?
             .SelectMany(static candidate => new[] { candidate.Label }.Concat(candidate.Evidence))
             .Where(static value => !string.IsNullOrWhiteSpace(value))
@@ -34260,6 +34277,7 @@ internal sealed class LocalExportService(
         var classificationSignals = candidateSignals.Concat(sourceSignals).ToArray();
         static bool ContainsAnySignal(IEnumerable<string> signals, params string[] probes) =>
             signals.Any(value => probes.Any(probe => value.Contains(probe, StringComparison.OrdinalIgnoreCase)));
+        var normalized = string.IsNullOrWhiteSpace(label) ? string.Empty : label.ToLowerInvariant();
 
         if (normalized.Contains("sparse", StringComparison.Ordinal) ||
             skeletonMapping.SourceSkeletonUsedSparseInference)
@@ -34402,11 +34420,66 @@ internal sealed class LocalExportService(
             return "non-skyrim-biped";
         }
 
+        if (ContainsAnySignal(classificationSignals, "xpmsse"))
+        {
+            return "xpmsse";
+        }
+
+        if (ContainsAnySignal(classificationSignals, "sam", "sos", "tng"))
+        {
+            return "male-framework";
+        }
+
+        if (ContainsAnySignal(classificationSignals, "ube", "cbbe", "bhunp", "unp"))
+        {
+            return "female-framework";
+        }
+
+        if (ContainsAnySignal(classificationSignals, "avian"))
+        {
+            return "avian-framework";
+        }
+
+        if (ContainsAnySignal(classificationSignals, "serp"))
+        {
+            return "serpentine-framework";
+        }
+
+        if (ContainsAnySignal(classificationSignals, "equine", "hoof"))
+        {
+            return "equine-framework";
+        }
+
+        if (ContainsAnySignal(classificationSignals, "draconic", "dragon"))
+        {
+            return "draconic-framework";
+        }
+
+        if (ContainsAnySignal(classificationSignals, "feline", "canine", "digitigrade", "paw", "hock"))
+        {
+            return "digitigrade-framework";
+        }
+
+        if (ContainsAnySignal(classificationSignals, "wing", "flight", "feather"))
+        {
+            return "winged-framework";
+        }
+
+        if (ContainsAnySignal(classificationSignals, "spriggan", "vine", "branch", "briar"))
+        {
+            return "spriggan-framework";
+        }
+
         if (normalized.Contains("custom", StringComparison.Ordinal) ||
             normalized.Contains("framework", StringComparison.Ordinal) ||
             normalized.Contains("hybrid", StringComparison.Ordinal))
         {
             return "custom-framework";
+        }
+
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "unknown";
         }
 
         return normalized.Replace(' ', '-');

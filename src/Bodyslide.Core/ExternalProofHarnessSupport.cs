@@ -713,7 +713,7 @@ internal static class ExternalProofHarnessSupport
             string.Equals(result.Component, "runtime-automation", StringComparison.OrdinalIgnoreCase));
         var missingProbeIds = expectedProbeIds
             .Where(id => !probeResults.ContainsKey(id))
-            .Concat(component?.MissingItems ?? [])
+            .Concat(FilterMissingExpectedNamedItems(component?.MissingItems ?? [], expectedProbeIds))
             .Concat(FilterMissingExpectedNamedItems(bundle.MissingExpectedProbes, expectedProbeIds))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -791,7 +791,7 @@ internal static class ExternalProofHarnessSupport
             string.Equals(result.Component, "live-game-execution", StringComparison.OrdinalIgnoreCase));
         var missingScenarioNames = expectedScenarioNames
             .Where(name => !scenarioResults.ContainsKey(name))
-            .Concat(component?.MissingItems ?? [])
+            .Concat(FilterMissingExpectedNamedItems(component?.MissingItems ?? [], expectedScenarioNames))
             .Concat(FilterMissingExpectedNamedItems(bundle.MissingExpectedScenarios, expectedScenarioNames))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -877,7 +877,8 @@ internal static class ExternalProofHarnessSupport
         var executedFlows = component?.ExecutedItems ?? [];
         var missingFlows = expectedFlows
             .Where(flow => !executedFlows.Contains(flow, StringComparer.OrdinalIgnoreCase))
-            .Concat(component?.MissingItems ?? [])
+            .Concat(FilterMissingExpectedNamedItems(component?.MissingItems ?? [], expectedFlows))
+            .Concat(FilterMissingExpectedNamedItems(bundle.MissingExpectedProbes, expectedFlows))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var evidence = component?.EvidenceArtifacts?.Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
@@ -1164,17 +1165,67 @@ internal static class ExternalProofHarnessSupport
             return [];
         }
 
+        var expectedSignatures = expected
+            .Select(BuildNamedItemComparisonSignature)
+            .Where(static signature => signature.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
         return missingExpectedItems
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .Select(static value => value.Trim())
-            .Where(item =>
-                expected.Contains(item, StringComparer.OrdinalIgnoreCase) ||
-                (item.StartsWith("probe:", StringComparison.OrdinalIgnoreCase) &&
-                 expected.Contains(item["probe:".Length..], StringComparer.OrdinalIgnoreCase)) ||
-                (item.StartsWith("scenario:", StringComparison.OrdinalIgnoreCase) &&
-                 expected.Contains(item["scenario:".Length..], StringComparer.OrdinalIgnoreCase)))
+            .Where(item => MatchesExpectedNamedItem(item, expected, expectedSignatures))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static bool MatchesExpectedNamedItem(
+        string item,
+        IReadOnlyList<string> expected,
+        IReadOnlyList<string> expectedSignatures)
+    {
+        if (expected.Contains(item, StringComparer.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var trimmed = item.Trim();
+        foreach (var prefix in new[] { "probe:", "scenario:", "flow:", "item:", "name:" })
+        {
+            if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var unprefixed = trimmed[prefix.Length..].Trim();
+                if (expected.Contains(unprefixed, StringComparer.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                trimmed = unprefixed;
+                break;
+            }
+        }
+
+        var signature = BuildNamedItemComparisonSignature(trimmed);
+        return signature.Length > 0 && expectedSignatures.Contains(signature, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string BuildNamedItemComparisonSignature(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var character in value.Trim().ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(character);
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static bool ContainsEvidencePrefix(IEnumerable<string> evidenceArtifacts, string expectedPrefix)
