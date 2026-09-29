@@ -275,9 +275,9 @@ internal static class DesktopWorkflowSupport
             return DesktopLaunchOptions.Empty;
         }
 
-        string? candidatePath = null;
-        var candidateFromResultArgument = false;
-        var candidateAllowsInputFallback = false;
+        var resultCandidates = new List<(string Path, bool AllowsInputFallback)>();
+        var inputCandidates = new List<string>();
+        string? positionalCandidatePath = null;
         string? startupDiagnostics = null;
         var fromModManagerLauncher = args.Any(static arg => IsModManagerLauncherArgument(arg));
 
@@ -303,12 +303,14 @@ internal static class DesktopWorkflowSupport
             if (TryReadNamedArgumentValue(args, index, out var consumedIndex, out var value, out var fromResultArgument, out var allowsInputFallback) &&
                 !string.IsNullOrWhiteSpace(value))
             {
-                if (candidatePath is null || fromResultArgument)
+                if (fromResultArgument)
                 {
-                    candidatePath = value;
-                    candidateAllowsInputFallback = allowsInputFallback;
+                    resultCandidates.Add((value, allowsInputFallback));
                 }
-                candidateFromResultArgument |= fromResultArgument;
+                else
+                {
+                    inputCandidates.Add(value);
+                }
                 index = consumedIndex;
                 continue;
             }
@@ -318,21 +320,65 @@ internal static class DesktopWorkflowSupport
                 continue;
             }
 
-            if (candidatePath is null)
+            if (positionalCandidatePath is null)
             {
                 if (index > 0 && OptionTokenConsumesFollowingValue(args[index - 1]))
                 {
                     continue;
                 }
 
-                candidatePath = arg;
+                positionalCandidatePath = arg;
             }
         }
 
-        var startupOutputDirectory = TryResolveResultOutputDirectory(candidatePath, allowAncestorWalk: candidateFromResultArgument);
-        var startupInputPath = startupOutputDirectory is null && (!candidateFromResultArgument || candidateAllowsInputFallback)
-            ? TryResolveExistingInputPath(candidatePath)
-            : null;
+        string? startupOutputDirectory = null;
+        if (resultCandidates.Count > 0)
+        {
+            foreach (var candidate in resultCandidates.AsEnumerable().Reverse())
+            {
+                startupOutputDirectory = TryResolveResultOutputDirectory(candidate.Path, allowAncestorWalk: true);
+                if (!string.IsNullOrWhiteSpace(startupOutputDirectory))
+                {
+                    break;
+                }
+            }
+        }
+        else
+        {
+            startupOutputDirectory = TryResolveResultOutputDirectory(positionalCandidatePath, allowAncestorWalk: false);
+        }
+
+        string? startupInputPath = null;
+        if (startupOutputDirectory is null)
+        {
+            foreach (var candidate in resultCandidates.AsEnumerable().Reverse().Where(static entry => entry.AllowsInputFallback))
+            {
+                startupInputPath = TryResolveExistingInputPath(candidate.Path);
+                if (startupInputPath is not null)
+                {
+                    break;
+                }
+            }
+
+            if (startupInputPath is null)
+            {
+                foreach (var inputCandidatePath in inputCandidates.AsEnumerable().Reverse())
+                {
+                    startupInputPath = TryResolveExistingInputPath(inputCandidatePath);
+                    if (startupInputPath is not null)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (startupInputPath is null &&
+                !string.IsNullOrWhiteSpace(positionalCandidatePath))
+            {
+                startupInputPath = TryResolveExistingInputPath(positionalCandidatePath);
+            }
+        }
+
         return new DesktopLaunchOptions(
             startupOutputDirectory,
             startupInputPath,

@@ -1090,6 +1090,67 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_FallsBackToExplicitInputWhenResultArgumentPathIsMissing()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        Directory.CreateDirectory(inputDirectory);
+        var inputFile = Path.Combine(inputDirectory, "armor.nif");
+        File.WriteAllText(inputFile, "mesh");
+        var missingOutputPath = Path.Combine(workingDirectory, "missing-output");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--output",
+                    missingOutputPath,
+                    "--input",
+                    inputFile,
+                    "--mo2-launcher"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(inputFile, options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_FallsBackToPositionalPathWhenResultArgumentPathIsMissing()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        Directory.CreateDirectory(inputDirectory);
+        var inputFile = Path.Combine(inputDirectory, "armor.nif");
+        File.WriteAllText(inputFile, "mesh");
+        var missingOutputPath = Path.Combine(workingDirectory, "missing-output");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--output",
+                    missingOutputPath,
+                    inputFile,
+                    "--mo2-launcher"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(inputFile, options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void FindCommonDirectory_DoesNotCollapseCaseDistinctDirectoriesOnCaseSensitivePlatforms()
     {
         if (OperatingSystem.IsWindows())
