@@ -680,7 +680,7 @@ internal static class ExternalProofHarnessSupport
             }
 
             var hostDetails = BuildHostDetails(bundle.Host);
-            var hostLooksWindows = HostLooksWindows(bundle.Host);
+            var hostLooksWindows = TryEvaluateWindowsHost(bundle.Host);
             var runtimeProof = BuildRuntimeProofExecution(bundle, runtimePlan, hostDetails);
             var liveGameProof = BuildLiveGameProofExecution(bundle, liveGameExecution, hostDetails, hostLooksWindows);
             var desktopProof = BuildDesktopProofExecution(bundle, windowsUiAutomation, hostDetails, hostLooksWindows);
@@ -779,7 +779,7 @@ internal static class ExternalProofHarnessSupport
         ImportedProofResultBundle bundle,
         LiveGameExecutionPlan liveGameExecution,
         IReadOnlyList<string> hostDetails,
-        bool hostLooksWindows)
+        bool? hostLooksWindows)
     {
         var expectedScenarioProfiles = liveGameExecution.ScenarioProfiles
             .ToDictionary(static profile => profile.Name, StringComparer.OrdinalIgnoreCase);
@@ -830,10 +830,10 @@ internal static class ExternalProofHarnessSupport
             $"{EvidenceRootDirectory}/runtime-logs/",
             $"{EvidenceRootDirectory}/scenario-observations/",
             $"{EvidenceRootDirectory}/load-order-state/");
-        var hostRequirementItems = hostLooksWindows ? Array.Empty<string>() : ["host:windows"];
+        var hostRequirementItems = hostLooksWindows == false ? ["host:windows"] : Array.Empty<string>();
         var notes = (component?.Notes ?? [])
             .Concat(bundle.Notes)
-            .Concat(hostLooksWindows ? Array.Empty<string>() : ["Live-game proof was imported from a non-Windows host."])
+            .Concat(hostLooksWindows == false ? ["Live-game proof was imported from a non-Windows host."] : Array.Empty<string>())
             .Concat(missingEvidenceItems.Length > 0 ? [$"Live-game proof import is missing expected evidence categories: {string.Join(", ", missingEvidenceItems)}"] : Array.Empty<string>())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -870,7 +870,7 @@ internal static class ExternalProofHarnessSupport
         ImportedProofResultBundle bundle,
         WindowsUiE2EAutomationPlan windowsUiAutomation,
         IReadOnlyList<string> hostDetails,
-        bool hostLooksWindows)
+        bool? hostLooksWindows)
     {
         var expectedFlows = windowsUiAutomation.SupportedFlows;
         var component = bundle.ComponentResults.FirstOrDefault(static result =>
@@ -895,10 +895,10 @@ internal static class ExternalProofHarnessSupport
             $"{EvidenceRootDirectory}/screenshots/",
             $"{EvidenceRootDirectory}/step-traces/",
             $"{EvidenceRootDirectory}/selector-logs/");
-        var hostRequirementItems = hostLooksWindows ? Array.Empty<string>() : ["host:windows"];
+        var hostRequirementItems = hostLooksWindows == false ? ["host:windows"] : Array.Empty<string>();
         var notes = (component?.Notes ?? [])
             .Concat(bundle.Notes)
-            .Concat(hostLooksWindows ? Array.Empty<string>() : ["Desktop E2E proof was imported from a non-Windows host."])
+            .Concat(hostLooksWindows == false ? ["Desktop E2E proof was imported from a non-Windows host."] : Array.Empty<string>())
             .Concat(missingEvidenceItems.Length > 0 ? [$"Desktop proof import is missing expected evidence categories: {string.Join(", ", missingEvidenceItems)}"] : Array.Empty<string>())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -1043,6 +1043,11 @@ internal static class ExternalProofHarnessSupport
             return "executed-incomplete";
         }
 
+        if (statuses.All(static status => string.Equals(status, "executed-pass", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "executed-complete";
+        }
+
         return statuses.Any(static status => string.Equals(status, "executed-pass", StringComparison.OrdinalIgnoreCase))
             ? "executed-pass"
             : "planned-only";
@@ -1110,9 +1115,32 @@ internal static class ExternalProofHarnessSupport
         string.Equals(status, "warn", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "executed-incomplete", StringComparison.OrdinalIgnoreCase);
 
-    private static bool HostLooksWindows(ImportedProofHostDetails host) =>
-        !string.IsNullOrWhiteSpace(host.OperatingSystem) &&
-        host.OperatingSystem.Contains("windows", StringComparison.OrdinalIgnoreCase);
+    private static bool? TryEvaluateWindowsHost(ImportedProofHostDetails host)
+    {
+        if (!string.IsNullOrWhiteSpace(host.OperatingSystem))
+        {
+            return host.OperatingSystem.Contains("windows", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(host.ModManager) &&
+            host.ModManager.Contains("mo2", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(host.Launcher) &&
+            host.Launcher.Contains("skse", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (host.Capabilities.Any(static capability => capability.Contains("windows", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return null;
+    }
 
     private static string[] BuildMissingEvidenceItems(
         IEnumerable<string> evidenceArtifacts,

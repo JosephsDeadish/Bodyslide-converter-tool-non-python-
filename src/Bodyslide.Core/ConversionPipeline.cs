@@ -33508,6 +33508,7 @@ internal sealed class LocalExportService(
         {
             AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "topology-family:");
             AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "hard-case-family:");
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "hard-case-variant:");
             AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "topology-classification:");
             AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "topology-layout-family:");
         }
@@ -33516,6 +33517,7 @@ internal sealed class LocalExportService(
         {
             AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "skeleton-mode:");
             AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "source-skeleton-family:");
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "skeleton-variant:");
         }
 
         if (axes.Contains("plugin-modstack"))
@@ -33945,6 +33947,11 @@ internal sealed class LocalExportService(
             return "executed-incomplete";
         }
 
+        if (statuses.All(static status => string.Equals(status, "executed-pass", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "executed-complete";
+        }
+
         return statuses.Any(static status => string.Equals(status, "executed-pass", StringComparison.OrdinalIgnoreCase))
             ? "executed-pass"
             : "planned-only";
@@ -34128,6 +34135,16 @@ internal sealed class LocalExportService(
             return "dangling-chain-cloth";
         }
 
+        if (HasExplicitFamily(signals, "extreme-scale-asymmetry"))
+        {
+            return "extreme-scale-asymmetry";
+        }
+
+        if (HasExplicitFamily(signals, "collision-dense-overlap"))
+        {
+            return "collision-dense-overlap";
+        }
+
         if (HasExplicitFamily(signals, "rigid-segmented"))
         {
             return "rigid-segmented";
@@ -34198,6 +34215,22 @@ internal sealed class LocalExportService(
             return "dangling-chain-cloth";
         }
 
+        if (signals.Any(static value => value.Contains("asymmetry", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("scale-delta", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("extreme-scale", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("one-sided", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "extreme-scale-asymmetry";
+        }
+
+        if (signals.Any(static value => value.Contains("dense-collision", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("collision-overlap", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("penetration-cluster", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("voxel-penetration", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "collision-dense-overlap";
+        }
+
         if (signals.Any(static value => value.Contains("plate", StringComparison.OrdinalIgnoreCase) ||
                                       value.Contains("rigid", StringComparison.OrdinalIgnoreCase) ||
                                       value.Contains("mechanical", StringComparison.OrdinalIgnoreCase) ||
@@ -34261,6 +34294,30 @@ internal sealed class LocalExportService(
         return "core-humanoid";
     }
 
+    private static string BuildTopologyHardCaseVariant(IEnumerable<string> signalValues)
+    {
+        var family = BuildTopologyHardCaseFamily(signalValues);
+        var signals = signalValues
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .ToArray();
+
+        return family switch
+        {
+            "beast-custom-appendages" when signals.Any(static value => value.Contains("wing", StringComparison.OrdinalIgnoreCase)) => "beast-winged",
+            "beast-custom-appendages" when signals.Any(static value => value.Contains("equine", StringComparison.OrdinalIgnoreCase) || value.Contains("hoof", StringComparison.OrdinalIgnoreCase)) => "beast-equine",
+            "beast-custom-appendages" when signals.Any(static value => value.Contains("serp", StringComparison.OrdinalIgnoreCase)) => "beast-serpentine",
+            "beast-custom-appendages" => "beast-generic",
+            "oral-genital-subpieces" when signals.Any(static value => value.Contains("oral", StringComparison.OrdinalIgnoreCase) || value.Contains("mouth", StringComparison.OrdinalIgnoreCase)) => "oral-focused",
+            "oral-genital-subpieces" when signals.Any(static value => value.Contains("genital", StringComparison.OrdinalIgnoreCase) || value.Contains("vagina", StringComparison.OrdinalIgnoreCase) || value.Contains("shaft", StringComparison.OrdinalIgnoreCase)) => "genital-focused",
+            "dangling-chain-cloth" when signals.Any(static value => value.Contains("chain", StringComparison.OrdinalIgnoreCase) || value.Contains("tassel", StringComparison.OrdinalIgnoreCase)) => "chain-metal-dangle",
+            "dangling-chain-cloth" when signals.Any(static value => value.Contains("cape", StringComparison.OrdinalIgnoreCase) || value.Contains("cloak", StringComparison.OrdinalIgnoreCase) || value.Contains("drape", StringComparison.OrdinalIgnoreCase)) => "cloth-drape",
+            "multipart-straps-windows" when signals.Any(static value => value.Contains("strap", StringComparison.OrdinalIgnoreCase)) => "strap-heavy",
+            "multipart-straps-windows" when signals.Any(static value => value.Contains("window", StringComparison.OrdinalIgnoreCase) || value.Contains("openwork", StringComparison.OrdinalIgnoreCase)) => "windowed-openwork",
+            _ => family
+        };
+    }
+
     private static string BuildSourceSkeletonMatrixFamily(SkeletonMappingResult skeletonMapping, IEnumerable<string>? sourceAssetSignals = null)
     {
         var label = skeletonMapping.SourceSkeleton?.Trim();
@@ -34309,6 +34366,21 @@ internal sealed class LocalExportService(
             if (ContainsAnySignal(classificationSignals, "horn", "spriggan", "insectoid", "aquatic", "alien", "beast"))
             {
                 return "custom-sparse-beast";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "taur", "quadruped", "centaur"))
+            {
+                return "custom-sparse-taur";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "arachnid", "spider", "insect", "chitin"))
+            {
+                return "custom-sparse-arthropod";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "tentacle", "cephalopod", "octopus", "squid"))
+            {
+                return "custom-sparse-cephalopod";
             }
 
             if (ContainsAnySignal(classificationSignals, "follower", "companion", "humanoid"))
@@ -34410,6 +34482,21 @@ internal sealed class LocalExportService(
                 return "spriggan-framework";
             }
 
+            if (ContainsAnySignal(classificationSignals, "taur", "quadruped", "centaur"))
+            {
+                return "taur-framework";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "arachnid", "spider", "insect", "chitin"))
+            {
+                return "arthropod-framework";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "tentacle", "cephalopod", "octopus", "squid"))
+            {
+                return "cephalopod-framework";
+            }
+
             return "beast-or-exotic";
         }
 
@@ -34469,6 +34556,21 @@ internal sealed class LocalExportService(
             return "spriggan-framework";
         }
 
+        if (ContainsAnySignal(classificationSignals, "taur", "quadruped", "centaur"))
+        {
+            return "taur-framework";
+        }
+
+        if (ContainsAnySignal(classificationSignals, "arachnid", "spider", "insect", "chitin"))
+        {
+            return "arthropod-framework";
+        }
+
+        if (ContainsAnySignal(classificationSignals, "tentacle", "cephalopod", "octopus", "squid"))
+        {
+            return "cephalopod-framework";
+        }
+
         if (normalized.Contains("custom", StringComparison.Ordinal) ||
             normalized.Contains("framework", StringComparison.Ordinal) ||
             normalized.Contains("hybrid", StringComparison.Ordinal))
@@ -34504,7 +34606,13 @@ internal sealed class LocalExportService(
             .Concat(partitionSignals?.Warnings ?? [])
             .Concat(partitionSignals?.UnknownFinalPartitions ?? []);
         var hardCaseFamily = BuildTopologyHardCaseFamily(hardCaseSignals);
+        var hardCaseVariant = BuildTopologyHardCaseVariant(hardCaseSignals);
         var sourceSkeletonFamily = BuildSourceSkeletonMatrixFamily(skeletonMapping, sourceAssetSignals);
+        var skeletonVariant = skeletonMapping.SourceSkeletonUsedSparseInference
+            ? $"sparse:{sourceSkeletonFamily}"
+            : string.Equals(skeletonMapping.RemapCertainty?.Classification, "review-backed", StringComparison.OrdinalIgnoreCase)
+                ? $"review:{sourceSkeletonFamily}"
+                : $"direct:{sourceSkeletonFamily}";
         var pluginMode = modStackCrossValidation is null
             ? "plugin-free"
             : modStackCrossValidation.RequiresLoadOrderValidation
@@ -34535,9 +34643,11 @@ internal sealed class LocalExportService(
             $"topology-family:{topologyFamily}",
             $"topology-layout-family:{topologyLayoutFamily}",
             $"hard-case-family:{hardCaseFamily}",
+            $"hard-case-variant:{hardCaseVariant}",
             $"topology-classification:{topologyCorrespondence.Classification}",
             $"skeleton-mode:{skeletonMode}",
             $"source-skeleton-family:{sourceSkeletonFamily}",
+            $"skeleton-variant:{skeletonVariant}",
             $"plugin-stack:{pluginMode}",
             $"plugin-family:{pluginFamily}",
             $"master-chain:{masterChainMode}",

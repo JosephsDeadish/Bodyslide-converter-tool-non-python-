@@ -2843,6 +2843,12 @@ public sealed class ConversionOrchestratorTests
 
         var multiIslandFamily = method.Invoke(null, [new[] { "multi-island-topology", "island-count:4" }]);
         Assert.Equal("multi-island-layout", multiIslandFamily);
+
+        var asymmetryFamily = method.Invoke(null, [new[] { "extreme-scale-delta", "one-sided-region-shift" }]);
+        Assert.Equal("extreme-scale-asymmetry", asymmetryFamily);
+
+        var collisionDenseFamily = method.Invoke(null, [new[] { "dense-collision-cluster", "voxel-penetration-stack" }]);
+        Assert.Equal("collision-dense-overlap", collisionDenseFamily);
     }
 
     [Fact]
@@ -2888,6 +2894,29 @@ public sealed class ConversionOrchestratorTests
             SourceSkeletonCandidates: []);
         var digitigradeFamily = method.Invoke(null, [digitigradeCustom, new[] { "digitigrade paw framework evidence" }]);
         Assert.Equal("digitigrade-framework", digitigradeFamily);
+
+        var sparseArthropod = new SkeletonMappingResult(
+            SourceSkeleton: string.Empty,
+            TargetSkeleton: "3ba",
+            BoneMappings: [],
+            UnsupportedBones: [],
+            SourceSkeletonUsedSparseInference: true,
+            SourceSkeletonCandidates:
+            [
+                new SkeletonInferenceCandidate("custom sparse arthropod", 0.69d, ["arachnid chitin rig"], true)
+            ]);
+        var sparseArthropodFamily = method.Invoke(null, [sparseArthropod, Array.Empty<string>()]);
+        Assert.Equal("custom-sparse-arthropod", sparseArthropodFamily);
+
+        var taurFramework = new SkeletonMappingResult(
+            SourceSkeleton: "custom taur framework",
+            TargetSkeleton: "3ba",
+            BoneMappings: [],
+            UnsupportedBones: [],
+            SourceSkeletonUsedSparseInference: false,
+            SourceSkeletonCandidates: []);
+        var taurFamily = method.Invoke(null, [taurFramework, new[] { "quadruped centaur remap" }]);
+        Assert.Equal("taur-framework", taurFamily);
     }
 
     [Fact]
@@ -19572,7 +19601,13 @@ public sealed class RealisticModPackFixtureTests
                 static coordinate => coordinate is not null && coordinate.StartsWith("hard-case-family:", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
+                static coordinate => coordinate is not null && coordinate.StartsWith("hard-case-variant:", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
                 static coordinate => coordinate is not null && coordinate.StartsWith("source-skeleton-family:", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
+                static coordinate => coordinate is not null && coordinate.StartsWith("skeleton-variant:", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
                 static coordinate => coordinate is not null && coordinate.StartsWith("plugin-family:", StringComparison.OrdinalIgnoreCase));
@@ -19945,7 +19980,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Equal("externally-executed-and-imported", passingRuntimePlan.RootElement.GetProperty("ExecutionCoverage").GetString());
             Assert.Equal("executed-pass", passingLiveGamePlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
             Assert.Equal("executed-pass", passingWindowsUiPlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
-            Assert.Equal("executed-pass", passingMatrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
+            Assert.Equal("executed-complete", passingMatrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
             Assert.Empty(passingMatrixProof.RootElement.GetProperty("PlannedOnlyProofAxes").EnumerateArray());
             Assert.Contains(
                 passingMatrixProof.RootElement.GetProperty("ExecutedImportedProofAxes").EnumerateArray().Select(static axis => axis.GetString()),
@@ -19958,11 +19993,11 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 passingSnapshot.ReportMetrics,
                 metric => string.Equals(metric.Property, "Proof execution status", StringComparison.OrdinalIgnoreCase) &&
-                          string.Equals(metric.Value, "executed-pass", StringComparison.OrdinalIgnoreCase));
+                          string.Equals(metric.Value, "executed-complete", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 passingSnapshot.SummaryRows,
                 row => string.Equals(row.Property, "Proof execution status", StringComparison.OrdinalIgnoreCase) &&
-                       string.Equals(row.Value, "executed-pass", StringComparison.OrdinalIgnoreCase));
+                       string.Equals(row.Value, "executed-complete", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 passingSnapshot.Artifacts,
                 artifact => string.Equals(artifact.DisplayPath, "proof-harness-bundle.json", StringComparison.OrdinalIgnoreCase));
@@ -20113,7 +20148,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Equal("executed-pass", runtimePlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
             Assert.Equal("executed-pass", liveGamePlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
             Assert.Equal("executed-pass", desktopPlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
-            Assert.Equal("executed-pass", matrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
+            Assert.Equal("executed-complete", matrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
         }
         finally
         {
@@ -20936,7 +20971,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Equal("executed-pass", runtimePlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
             Assert.Equal("executed-pass", refreshedLiveGame.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
             Assert.Equal("executed-pass", refreshedWindowsUi.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
-            Assert.Equal("executed-pass", matrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
+            Assert.Equal("executed-complete", matrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
         }
         finally
         {
@@ -21147,7 +21182,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Equal("executed-pass", runtimePlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
             Assert.Equal("executed-pass", refreshedLiveGame.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
             Assert.Equal("executed-pass", refreshedWindowsUi.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
-            Assert.Equal("executed-pass", matrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
+            Assert.Equal("executed-complete", matrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
         }
         finally
         {
