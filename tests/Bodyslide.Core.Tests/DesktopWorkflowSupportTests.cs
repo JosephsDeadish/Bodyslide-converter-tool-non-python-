@@ -335,6 +335,57 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_RecognizesModOrganizerOutputAlias()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "mods root");
+        var outputDirectory = Path.Combine(workingDirectory, "output with spaces");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    $"--modorganizer-output=\"{outputDirectory}\"",
+                    "--modorganizer-launcher"
+                ]);
+
+            Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(workingDirectory)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_UsesModOrganizerResultAliasAsStartupInputWhenNoResultMarkersExist()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "mods root");
+        var inputDirectory = Path.Combine(workingDirectory, "input fallback");
+        Directory.CreateDirectory(inputDirectory);
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    $"--modorganizer-result=\"{inputDirectory}\"",
+                    "--mo2-launcher"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(inputDirectory, options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(workingDirectory)!, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParseLaunchOptions_RecognizesMixedQuotedInlineAndColonModManagerPayloads()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "mods root");

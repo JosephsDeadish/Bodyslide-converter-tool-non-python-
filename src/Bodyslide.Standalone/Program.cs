@@ -387,7 +387,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
         WriteStartupDiagnostics(
             startupDiagnosticsPath,
             $"desktop-launch: mo2={launchedFromModOrganizer}, cli={explicitCliLaunch}, exe={currentExeFullPath}");
-        if (args.Length != 0 && (explicitCliLaunch || !launchedFromModOrganizer))
+        if (args.Length != 0 && explicitCliLaunch)
         {
             WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: skipped (non-launcher invocation)");
             return false;
