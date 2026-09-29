@@ -17984,6 +17984,49 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchRunner_RealisticRareFrameworkFusionHybridModPackDirectory_ExpandsRareTopologyAndRigCoverage()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticRareFrameworkFusionHybridModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(results.Count >= 2);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            foreach (var result in results)
+            {
+                var qualityJson = await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion-quality.json"));
+                Assert.DoesNotContain("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+            }
+
+            var packProofPath = Path.Combine(outputDirectory, "conversion-matrix-pack-proof.json");
+            Assert.True(File.Exists(packProofPath), "conversion-matrix-pack-proof.json was not written.");
+            using var packProof = JsonDocument.Parse(await File.ReadAllTextAsync(packProofPath));
+
+            var hardCaseCoverage = packProof.RootElement
+                .GetProperty("MatrixDimensionCoverage")
+                .EnumerateArray()
+                .First(summary => string.Equals(summary.GetProperty("Dimension").GetString(), "hard-case-family", StringComparison.OrdinalIgnoreCase));
+            Assert.True(hardCaseCoverage.GetProperty("DistinctValueCount").GetInt32() >= 1);
+
+            var skeletonCoverage = packProof.RootElement
+                .GetProperty("MatrixDimensionCoverage")
+                .EnumerateArray()
+                .First(summary => string.Equals(summary.GetProperty("Dimension").GetString(), "source-skeleton-family", StringComparison.OrdinalIgnoreCase));
+            Assert.True(skeletonCoverage.GetProperty("DistinctValueCount").GetInt32() >= 1);
+            Assert.True(packProof.RootElement.GetProperty("UniqueMatrixCoordinateCount").GetInt32() >= 1);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticFailureBsSubIndexModPackDirectory_FlagsUnsupportedFamilyInDiagnostics()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureBsSubIndexModPack");

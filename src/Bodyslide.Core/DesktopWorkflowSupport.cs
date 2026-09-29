@@ -1,8 +1,12 @@
 namespace Bodyslide.Core;
 
-internal sealed record DesktopLaunchOptions(string? StartupOutputDirectory, string? StartupInputPath, bool FromModOrganizerLauncher)
+internal sealed record DesktopLaunchOptions(
+    string? StartupOutputDirectory,
+    string? StartupInputPath,
+    bool FromModOrganizerLauncher,
+    string? StartupDiagnostics = null)
 {
-    internal static DesktopLaunchOptions Empty { get; } = new(null, null, false);
+    internal static DesktopLaunchOptions Empty { get; } = new(null, null, false, null);
 }
 
 internal static class DesktopWorkflowSupport
@@ -57,6 +61,11 @@ internal static class DesktopWorkflowSupport
         "source",
         "file",
         "folder"
+    ];
+    private static readonly string[] StartupDiagnosticsArgumentNames =
+    [
+        "startup-diagnostics",
+        "launcher-handoff-diagnostics"
     ];
 
     private static readonly string[] DesktopResultMarkerFiles =
@@ -251,6 +260,7 @@ internal static class DesktopWorkflowSupport
         string? candidatePath = null;
         var candidateFromResultArgument = false;
         var candidateAllowsInputFallback = false;
+        string? startupDiagnostics = null;
         var fromModManagerLauncher = args.Any(static arg => IsModManagerLauncherArgument(arg));
 
         for (var index = 0; index < args.Count; index++)
@@ -258,6 +268,17 @@ internal static class DesktopWorkflowSupport
             var arg = args[index];
             if (string.IsNullOrWhiteSpace(arg))
             {
+                continue;
+            }
+
+            if (TryReadStartupDiagnosticsArgument(args, index, out var diagnosticsConsumedIndex, out var diagnosticsValue))
+            {
+                if (!string.IsNullOrWhiteSpace(diagnosticsValue))
+                {
+                    startupDiagnostics = diagnosticsValue;
+                }
+
+                index = diagnosticsConsumedIndex;
                 continue;
             }
 
@@ -281,6 +302,11 @@ internal static class DesktopWorkflowSupport
 
             if (candidatePath is null)
             {
+                if (index > 0 && OptionTokenConsumesFollowingValue(args[index - 1]))
+                {
+                    continue;
+                }
+
                 candidatePath = arg;
             }
         }
@@ -292,7 +318,8 @@ internal static class DesktopWorkflowSupport
         return new DesktopLaunchOptions(
             startupOutputDirectory,
             startupInputPath,
-            fromModManagerLauncher);
+            fromModManagerLauncher,
+            startupDiagnostics);
     }
 
     public static string? TryResolveResultOutputDirectory(string? candidatePath, bool allowAncestorWalk = true)
@@ -419,6 +446,41 @@ internal static class DesktopWorkflowSupport
         return true;
     }
 
+    private static bool TryReadStartupDiagnosticsArgument(
+        IReadOnlyList<string> args,
+        int index,
+        out int consumedIndex,
+        out string? diagnostics)
+    {
+        consumedIndex = index;
+        diagnostics = null;
+
+        var arg = args[index];
+        if (!TryExtractOptionToken(arg, out var key, out var inlineValue) ||
+            !StartupDiagnosticsArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(inlineValue))
+        {
+            diagnostics = DecodeStartupDiagnostics(inlineValue);
+            return true;
+        }
+
+        if (index + 1 < args.Count)
+        {
+            var next = args[index + 1];
+            if (!string.IsNullOrWhiteSpace(next) && !LooksLikeRecognizedOptionToken(next))
+            {
+                diagnostics = DecodeStartupDiagnostics(next);
+                consumedIndex = index + 1;
+            }
+        }
+
+        return true;
+    }
+
     private static string? TryWalkAncestorResultDirectory(string? currentDirectory)
     {
         while (!string.IsNullOrWhiteSpace(currentDirectory))
@@ -465,6 +527,7 @@ internal static class DesktopWorkflowSupport
         }
         return DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
                DesktopInputArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
+               StartupDiagnosticsArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
                key.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase) ||
@@ -475,6 +538,24 @@ internal static class DesktopWorkflowSupport
 
     private static bool IsOptionToken(string? arg) =>
         TryExtractOptionToken(arg, out _, out _);
+
+    private static bool OptionTokenConsumesFollowingValue(string? arg)
+    {
+        if (!TryExtractOptionToken(arg, out var key, out var inlineValue))
+        {
+            return false;
+        }
+
+        if (inlineValue is not null)
+        {
+            return false;
+        }
+
+        return DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
+               DesktopInputArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
+               StartupDiagnosticsArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
+               key.Equals("profile", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool TryExtractOptionToken(string? arg, out string key, out string? inlineValue)
     {
@@ -514,6 +595,7 @@ internal static class DesktopWorkflowSupport
                 var recognizesColonSeparatedValue =
                     DesktopResultArgumentNames.Contains(potentialKey, StringComparer.OrdinalIgnoreCase) ||
                     DesktopInputArgumentNames.Contains(potentialKey, StringComparer.OrdinalIgnoreCase) ||
+                    StartupDiagnosticsArgumentNames.Contains(potentialKey, StringComparer.OrdinalIgnoreCase) ||
                     potentialKey.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
                     potentialKey.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
                     potentialKey.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase) ||
@@ -554,5 +636,50 @@ internal static class DesktopWorkflowSupport
 
         var trimmed = path.Trim().Trim('"');
         return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+    }
+
+    private static string DecodeStartupDiagnostics(string rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = rawValue.Trim().Trim('"');
+        var decoded = trimmed;
+        try
+        {
+            decoded = Uri.UnescapeDataString(trimmed);
+        }
+        catch
+        {
+            decoded = trimmed;
+        }
+
+        if (File.Exists(decoded))
+        {
+            try
+            {
+                var lines = File.ReadAllLines(decoded);
+                if (lines.Length == 0)
+                {
+                    return $"startup diagnostics file was empty: {decoded}";
+                }
+
+                var tail = lines
+                    .Where(static line => !string.IsNullOrWhiteSpace(line))
+                    .TakeLast(6)
+                    .ToArray();
+                return tail.Length == 0
+                    ? $"startup diagnostics file was empty: {decoded}"
+                    : string.Join(" | ", tail);
+            }
+            catch
+            {
+                return $"startup diagnostics file could not be read: {decoded}";
+            }
+        }
+
+        return decoded;
     }
 }

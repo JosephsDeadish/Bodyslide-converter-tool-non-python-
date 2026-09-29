@@ -204,8 +204,8 @@ public sealed class MainForm : Form
     private static readonly TimeSpan AutoInspectTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan PreviewLoadTimeout = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan StartupOperationTimeout = TimeSpan.FromSeconds(20);
-    private static readonly TimeSpan ArchiveProgressUiRefreshInterval = TimeSpan.FromMilliseconds(700);
-    private static readonly TimeSpan ArchiveProgressLogInterval = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan ArchiveProgressUiRefreshInterval = TimeSpan.FromMilliseconds(1200);
+    private static readonly TimeSpan ArchiveProgressLogInterval = TimeSpan.FromSeconds(20);
 
     private enum UiTheme
     {
@@ -1554,6 +1554,16 @@ public sealed class MainForm : Form
         {
             _allowUserMainSplitOverride = true;
             ApplyLauncherContextGuidance();
+            if (!string.IsNullOrWhiteSpace(_launchOptions.StartupDiagnostics))
+            {
+                AppendLog($"Launcher handoff diagnostics: {_launchOptions.StartupDiagnostics}");
+                if (string.IsNullOrWhiteSpace(_statusLabel.Text) ||
+                    _statusLabel.Text.StartsWith("Ready", StringComparison.OrdinalIgnoreCase))
+                {
+                    _statusLabel.Text = "Ready — launcher handoff diagnostics recorded in log.";
+                }
+            }
+
             if (!_startupResultLoadHandled &&
                 !string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory))
             {
@@ -3031,7 +3041,10 @@ public sealed class MainForm : Form
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
                 var stageDisplay = BuildProgressStageDisplay(update);
-                var stageKey = $"{activeItem}|{update.CurrentFile}|{update.Stage}";
+                var normalizedStageForTracking = isArchiveExtractionStage
+                    ? "Extracting archive"
+                    : update.Stage;
+                var stageKey = $"{activeItem}|{update.CurrentFile}|{normalizedStageForTracking}";
                 if (!string.Equals(stageKey, activeStageKey, StringComparison.Ordinal))
                 {
                     if (activeStageStartedUtc is { } previousStageStartedUtc &&

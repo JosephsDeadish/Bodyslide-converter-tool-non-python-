@@ -36105,6 +36105,22 @@ internal sealed class LocalExportService(
         if (!string.Equals(physics.Profile, "none", StringComparison.OrdinalIgnoreCase) ||
            worldPhysics.RuntimePhysicsProfileGenerated)
         {
+            if (skeletonMapping.UnsupportedBones.Count > 0 ||
+               skeletonMapping.SourceSkeletonUsedSparseInference ||
+               !skeletonMapping.AutomaticRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase))
+            {
+               var skeletonPhysicsRegions = sensitiveRegions.Count > 0
+                   ? sensitiveRegions
+                   : (hotspotRegions.Count > 0 ? hotspotRegions : coreRegions);
+               scenarios.Add(new InGameValidationScenario(
+                   "Skeleton + physics chain compatibility sweep",
+                   skeletonMapping.AutomaticRemapSafety.Equals("unsafe", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
+                   $"Physics profile '{physics.Profile}' is active while skeleton remap uncertainty remains (unsupported bones={skeletonMapping.UnsupportedBones.Count}, sparseInference={skeletonMapping.SourceSkeletonUsedSparseInference}). Validate live chain routing and collision ownership under stress poses.",
+                   ["idle", "walk", "sprint", "jump / landing", "ragdoll / hit react"],
+                   skeletonPhysicsRegions,
+                   ["skeleton-compatibility.json", "world-physics.json", "pose-simulation-report.json", "runtime-validation-plan.json"]));
+            }
+
            scenarios.Add(new InGameValidationScenario(
                "Physics collision sweep",
                "Action",

@@ -335,13 +335,20 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
-    public void ParseLaunchOptions_IgnoresStartupDiagnosticsArgumentAndPrefersMo2ResultPath()
+    public void ParseLaunchOptions_ReadsStartupDiagnosticsArgumentAndPrefersMo2ResultPath()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
         var diagnosticsPath = Path.Combine(workingDirectory, "startup.log");
         Directory.CreateDirectory(outputDirectory);
         File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+        File.WriteAllLines(diagnosticsPath,
+        [
+            "startup: begin",
+            "desktop-launch: shell start failed for candidate-a",
+            "desktop-launch: started fallback candidate-b",
+            "desktop-launch: handoff complete"
+        ]);
 
         try
         {
@@ -357,11 +364,28 @@ public sealed class DesktopWorkflowSupportTests
             Assert.Equal(outputDirectory, options.StartupOutputDirectory);
             Assert.Null(options.StartupInputPath);
             Assert.True(options.FromModOrganizerLauncher);
+            Assert.Contains("handoff complete", options.StartupDiagnostics, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("candidate-b", options.StartupDiagnostics, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_ReadsInlineLauncherHandoffDiagnosticsPayload()
+    {
+        var diagnostics = "desktop-launch: shell failed | desktop-launch: fallback started";
+        var encodedDiagnostics = Uri.EscapeDataString(diagnostics);
+        var options = DesktopWorkflowSupport.ParseLaunchOptions(
+        [
+            $"--launcher-handoff-diagnostics={encodedDiagnostics}"
+        ]);
+
+        Assert.Null(options.StartupOutputDirectory);
+        Assert.Null(options.StartupInputPath);
+        Assert.Equal(diagnostics, options.StartupDiagnostics);
     }
 
     [Fact]
@@ -437,6 +461,62 @@ public sealed class DesktopWorkflowSupportTests
 
             Assert.Equal(outputDirectory, options.StartupOutputDirectory);
             Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_RecognizesRealWorldVortexStagingPathAndOutputPair()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "Vortex Mods");
+        var outputDirectory = Path.Combine(workingDirectory, "SlideSmith Output");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "/vortex-staging",
+                    workingDirectory,
+                    "--output",
+                    outputDirectory,
+                    "--vortex-launcher"
+                ]);
+
+            Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(workingDirectory)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_HandlesLauncherProfileValueBeforePositionalInputPath()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "mods", "armor-pack");
+        Directory.CreateDirectory(inputDirectory);
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                    [
+                        "--profile",
+                        "Default",
+                        inputDirectory,
+                        "--from-mo2"
+                    ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(inputDirectory, options.StartupInputPath);
             Assert.True(options.FromModOrganizerLauncher);
         }
         finally
