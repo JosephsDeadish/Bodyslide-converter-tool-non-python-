@@ -8136,6 +8136,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         if (ArchiveExtractionHelper.IsSupportedArchive(request.InputPath))
         {
             var archiveLabel = Path.GetFileName(request.InputPath);
+            var lastArchiveProgressReportUtc = DateTime.MinValue;
             progress?.Report(new BatchProgressUpdate(
                 Completed: 0,
                 Total: 1,
@@ -8151,11 +8152,19 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 cancellationToken,
                 extractionProgress =>
                 {
+                    var nowUtc = DateTime.UtcNow;
+                    var isCopyingUpdate = extractionProgress.CurrentEntry.Contains("copying", StringComparison.OrdinalIgnoreCase);
+                    if (isCopyingUpdate &&
+                        nowUtc - lastArchiveProgressReportUtc < TimeSpan.FromMilliseconds(250))
+                    {
+                        return;
+                    }
+
                     if (extractionProgress.TotalEntries is int totalEntries &&
                         extractionProgress.ProcessedEntries > 0 &&
                         extractionProgress.ProcessedEntries != totalEntries &&
                         extractionProgress.ProcessedEntries % 5 != 0 &&
-                        !extractionProgress.CurrentEntry.Contains("copying", StringComparison.OrdinalIgnoreCase))
+                        !isCopyingUpdate)
                     {
                         return;
                     }
@@ -8181,6 +8190,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                         StageIndex: 1,
                         StageCount: 3,
                         IsItemCompleted: false));
+                    lastArchiveProgressReportUtc = nowUtc;
                 });
             progress?.Report(new BatchProgressUpdate(
                 Completed: 0,
