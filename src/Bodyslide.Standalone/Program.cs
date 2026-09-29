@@ -383,11 +383,12 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
         var currentExeFullPath = Path.GetFullPath(currentExePath);
         var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
+        var launcherSignal = IsExplicitLauncherSignal(args);
         var launchedFromModOrganizer = IsLikelyModOrganizerLaunch(args, currentExeFullPath, Environment.CurrentDirectory);
         WriteStartupDiagnostics(
             startupDiagnosticsPath,
-            $"desktop-launch: mo2={launchedFromModOrganizer}, cli={explicitCliLaunch}, exe={currentExeFullPath}");
-        if (args.Length != 0 && explicitCliLaunch)
+            $"desktop-launch: launcherSignal={launcherSignal}, mo2={launchedFromModOrganizer}, cli={explicitCliLaunch}, exe={currentExeFullPath}");
+        if (args.Length != 0 && explicitCliLaunch && !launcherSignal)
         {
             WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: skipped (non-launcher invocation)");
             return false;
@@ -793,6 +794,11 @@ static bool HasStandaloneConversionSwitches(IReadOnlyList<string> args)
     return hasTarget || hasConversionModifier;
 }
 
+static bool IsExplicitLauncherSignal(IReadOnlyList<string> args) =>
+    IsLikelyModOrganizerEnvironment() ||
+    args.Any(IsMo2LauncherArg) ||
+    HasLauncherPathOptionArgument(args);
+
 static bool TryReadLongOptionName(string? arg, out string option)
 {
     option = string.Empty;
@@ -1057,6 +1063,10 @@ static bool HasLauncherPathOptionArgument(IReadOnlyList<string> args)
             !option.Equals("mo2-mod", StringComparison.OrdinalIgnoreCase) &&
             !option.Equals("mo2-path", StringComparison.OrdinalIgnoreCase) &&
             !option.Equals("modorganizer-path", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("load-result", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("result", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("output", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("input", StringComparison.OrdinalIgnoreCase) &&
             !option.Equals("vortex-output", StringComparison.OrdinalIgnoreCase) &&
             !option.Equals("vortex-result", StringComparison.OrdinalIgnoreCase) &&
             !option.Equals("vortex-mod", StringComparison.OrdinalIgnoreCase) &&
