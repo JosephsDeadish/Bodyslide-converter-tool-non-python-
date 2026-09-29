@@ -20429,9 +20429,15 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "body-hardcase-runtime", StringComparison.OrdinalIgnoreCase));
-            Assert.DoesNotContain(
+            Assert.Contains(
                 packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
+                summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase) &&
+                           !summary.GetProperty("MeetsMinimumCoverage").GetBoolean() &&
+                           summary.GetProperty("DistinctCombinationCount").GetInt32() >= 1 &&
+                           summary.GetProperty("DistinctCombinationCount").GetInt32() < 3);
             Assert.Contains(
                 packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
                 static gap => gap is not null && gap.Contains("broader body coverage", StringComparison.OrdinalIgnoreCase));
@@ -20488,7 +20494,7 @@ public sealed class RealisticModPackFixtureTests
                 packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
                 summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase) &&
                            summary.GetProperty("DistinctCombinationCount").GetInt32() >= 1 &&
-                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
+                           !summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
             Assert.Contains(
                 packProof.RootElement.GetProperty("Items").EnumerateArray().Select(static item => item.GetProperty("MatrixCoordinateKey").GetString()),
                 static key => !string.IsNullOrWhiteSpace(key));
