@@ -322,7 +322,9 @@ internal static class DesktopWorkflowSupport
 
             if (positionalCandidatePath is null)
             {
-                if (index > 0 && OptionTokenConsumesFollowingValue(args[index - 1]))
+                if (index > 0 &&
+                    (OptionTokenConsumesFollowingValue(args[index - 1]) ||
+                     IsLikelyUnrecognizedOptionValue(args[index - 1], arg)))
                 {
                     continue;
                 }
@@ -619,6 +621,45 @@ internal static class DesktopWorkflowSupport
                DesktopInputArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
                StartupDiagnosticsArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
                key.Equals("profile", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsLikelyUnrecognizedOptionValue(string? previousArg, string currentArg)
+    {
+        if (!TryExtractOptionToken(previousArg, out _, out var inlineValue) || inlineValue is not null)
+        {
+            return false;
+        }
+
+        if (LooksLikeRecognizedOptionToken(previousArg!))
+        {
+            return false;
+        }
+
+        return LooksLikePathToken(currentArg);
+    }
+
+    private static bool LooksLikePathToken(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var trimmed = value.Trim().Trim('"');
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        if (trimmed.StartsWith("-", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return trimmed.Contains('\\') ||
+               trimmed.Contains('/') ||
+               trimmed.Contains(':') ||
+               Path.HasExtension(trimmed);
     }
 
     private static bool TryExtractOptionToken(string? arg, out string key, out string? inlineValue)

@@ -1203,6 +1203,60 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_DoesNotTreatUnknownPathOptionValueAsPositionalInput()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var cacheFilePath = Path.Combine(workingDirectory, "cache.json");
+        Directory.CreateDirectory(workingDirectory);
+        File.WriteAllText(cacheFilePath, "{}");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--cache-path",
+                    cacheFilePath,
+                    "--mo2-launcher"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_KeepsPositionalInputAfterLauncherFlag()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        Directory.CreateDirectory(inputDirectory);
+        var inputFile = Path.Combine(inputDirectory, "armor.nif");
+        File.WriteAllText(inputFile, "mesh");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--mo2-launcher",
+                    inputFile
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(inputFile, options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void FindCommonDirectory_DoesNotCollapseCaseDistinctDirectoriesOnCaseSensitivePlatforms()
     {
         if (OperatingSystem.IsWindows())
