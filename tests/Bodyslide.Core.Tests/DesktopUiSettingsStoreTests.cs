@@ -178,4 +178,39 @@ public sealed class DesktopUiSettingsStoreTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+
+    [Fact]
+    public void Save_RecoversFromRecentOrphanedLockFile()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+
+        try
+        {
+            var settingsPath = Path.Combine(workingDirectory, "ui-settings.json");
+            var existingProfile = Path.Combine(workingDirectory, "custom-profile.json");
+            File.WriteAllText(existingProfile, "{ }");
+
+            var lockPath = $"{settingsPath}.lock";
+            var orphanedMetadata = """
+                                   {
+                                     "processId": 2147483647,
+                                     "processStartTimeUtcTicks": 1,
+                                     "machineName": "localhost",
+                                     "createdUtcTicks": 1
+                                   }
+                                   """;
+            File.WriteAllText(lockPath, orphanedMetadata);
+            File.SetLastWriteTimeUtc(lockPath, DateTime.UtcNow);
+
+            DesktopUiSettingsStore.Save(settingsPath, new DesktopUiSettings("Dark", [existingProfile]));
+
+            Assert.True(File.Exists(settingsPath));
+            Assert.False(File.Exists(lockPath));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 }

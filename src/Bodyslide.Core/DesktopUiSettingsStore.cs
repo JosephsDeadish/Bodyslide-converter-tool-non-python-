@@ -140,7 +140,6 @@ public static class DesktopUiSettingsStore
         var lockPath = $"{settingsPath}.lock";
         const int maxAttempts = 200;
         const int retryDelayMilliseconds = 50;
-        var staleCutoffUtc = DateTime.UtcNow.AddMinutes(-2);
 
         for (var attempt = 0; ; attempt++)
         {
@@ -158,7 +157,7 @@ public static class DesktopUiSettingsStore
             }
             catch (IOException) when (attempt < maxAttempts)
             {
-                if (TryDeleteStaleLockFile(lockPath, staleCutoffUtc))
+                if (TryDeleteStaleLockFile(lockPath))
                 {
                     continue;
                 }
@@ -172,7 +171,7 @@ public static class DesktopUiSettingsStore
         }
     }
 
-    private static bool TryDeleteStaleLockFile(string lockPath, DateTime staleCutoffUtc)
+    private static bool TryDeleteStaleLockFile(string lockPath)
     {
         try
         {
@@ -183,7 +182,7 @@ public static class DesktopUiSettingsStore
 
             using (var lockProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
-                if (!IsLockFileStale(lockProbe, staleCutoffUtc))
+                if (!IsLockFileStale(lockProbe))
                 {
                     return false;
                 }
@@ -217,14 +216,8 @@ public static class DesktopUiSettingsStore
         }
     }
 
-    private static bool IsLockFileStale(FileStream lockStream, DateTime staleCutoffUtc)
+    private static bool IsLockFileStale(FileStream lockStream)
     {
-        var fileInfo = new FileInfo(lockStream.Name);
-        if (fileInfo.LastWriteTimeUtc > staleCutoffUtc)
-        {
-            return false;
-        }
-
         try
         {
             lockStream.Position = 0;
