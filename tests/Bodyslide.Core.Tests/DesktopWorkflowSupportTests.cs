@@ -846,7 +846,10 @@ public sealed class DesktopWorkflowSupportTests
     [InlineData("--mo2-output")]
     [InlineData("--modorganizer-path")]
     [InlineData("--vortex-output")]
+    [InlineData("--vortex-deploy-path")]
     [InlineData("--mods-path")]
+    [InlineData("--output-dir")]
+    [InlineData("--output-path")]
     public void ParseLaunchOptions_ResolvesCommonModManagerResultArgumentAliases(string resultArgumentName)
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

@@ -31,8 +31,11 @@ internal static class DesktopWorkflowSupport
         "vortex-staging",
         "vortex-stage",
         "vortex-deployment",
+        "vortex-deploy-path",
         "mods-path",
         "mod-path",
+        "output-dir",
+        "output-path",
         "staging-path"
     ];
     private static readonly string[] DesktopInputFallbackArgumentNames =
@@ -50,8 +53,11 @@ internal static class DesktopWorkflowSupport
         "vortex-staging",
         "vortex-stage",
         "vortex-deployment",
+        "vortex-deploy-path",
         "mods-path",
         "mod-path",
+        "output-dir",
+        "output-path",
         "staging-path"
     ];
     private static readonly string[] DesktopInputArgumentNames =

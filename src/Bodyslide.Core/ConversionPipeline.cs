@@ -36121,6 +36121,25 @@ internal sealed class LocalExportService(
                    ["skeleton-compatibility.json", "world-physics.json", "pose-simulation-report.json", "runtime-validation-plan.json"]));
             }
 
+            if (skeletonMapping.UnsupportedBones.Count > 0 ||
+               skeletonMapping.SourceSkeletonUsedSparseInference ||
+               !skeletonMapping.AutomaticRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase))
+            {
+               var skeletonCandidateSummary = skeletonMapping.SourceSkeletonCandidates is { Count: > 0 } sourceSkeletonCandidates
+                   ? string.Join(", ", sourceSkeletonCandidates.Take(3).Select(candidate => candidate.Label))
+                   : skeletonMapping.SourceSkeleton;
+               var skeletonPhysicsRegions = sensitiveRegions.Count > 0
+                   ? sensitiveRegions
+                   : (hotspotRegions.Count > 0 ? hotspotRegions : coreRegions);
+               scenarios.Add(new InGameValidationScenario(
+                   "Cross-framework skeleton + physics sweep",
+                   skeletonMapping.AutomaticRemapSafety.Equals("unsafe", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
+                   $"Skeleton-family crossover signals ({skeletonCandidateSummary}) were detected while physics profile '{physics.Profile}' is active. Validate chain ownership, collision routing, and save/reload stability across framework crossover states.",
+                   ["full load-order launch", "equip", "sprint", "jump / landing", "ragdoll / hit react", "save / reload"],
+                   skeletonPhysicsRegions,
+                   ["skeleton-compatibility.json", "world-physics.json", "runtime-validation-plan.json", "live-game-execution.json", "mod-stack-cross-validation.json"]));
+            }
+
            scenarios.Add(new InGameValidationScenario(
                "Physics collision sweep",
                "Action",
