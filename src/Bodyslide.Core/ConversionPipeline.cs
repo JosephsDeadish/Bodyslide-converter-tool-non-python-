@@ -762,6 +762,7 @@ public sealed record ConversionReadinessAssessment(
     string RecommendedReleaseGate);
 public sealed record MatrixProofContext(
     string TargetBody,
+    string SourceAssetPath,
     ConversionReadinessAssessment ConversionReadiness,
     TopologyCorrespondenceReport TopologyCorrespondence,
     SkeletonMappingResult SkeletonMapping,
@@ -21643,6 +21644,7 @@ internal sealed class LocalExportService(
 
         var matrixProofContext = new MatrixProofContext(
             request.TargetBody,
+            request.InputPath,
             conversionReadiness,
             topologyCorrespondence,
             skeletonMapping,
@@ -33984,7 +33986,8 @@ internal sealed class LocalExportService(
 
     private static string BuildTopologyMatrixFamily(TopologyCorrespondenceReport topologyCorrespondence, string targetBody)
     {
-        var signals = BuildTopologyClassificationSignals(topologyCorrespondence, targetBody);
+        var signals = BuildTopologyClassificationSignals(topologyCorrespondence)
+            .Append(targetBody);
 
         if (signals.Any(static value => value.Contains("oral", StringComparison.OrdinalIgnoreCase) ||
                                       value.Contains("mouth", StringComparison.OrdinalIgnoreCase) ||
@@ -34080,13 +34083,12 @@ internal sealed class LocalExportService(
         topologyCorrespondence.HardCaseFamily.Equals("multipart-straps-windows", StringComparison.OrdinalIgnoreCase);
 
     private static string BuildTopologyHardCaseFamily(TopologyCorrespondenceReport topologyCorrespondence, string targetBody) =>
-        BuildTopologyHardCaseFamily(BuildTopologyClassificationSignals(topologyCorrespondence, targetBody));
+        BuildTopologyHardCaseFamily(BuildTopologyClassificationSignals(topologyCorrespondence));
 
-    private static IReadOnlyList<string> BuildTopologyClassificationSignals(TopologyCorrespondenceReport topologyCorrespondence, string targetBody) =>
+    private static IReadOnlyList<string> BuildTopologyClassificationSignals(TopologyCorrespondenceReport topologyCorrespondence) =>
         topologyCorrespondence.FocusRegions
             .Concat(topologyCorrespondence.UnmatchedFocusRegions)
             .Concat(topologyCorrespondence.Signals)
-            .Append(targetBody)
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .Select(static value => value.Trim())
             .ToArray();
@@ -34189,7 +34191,7 @@ internal sealed class LocalExportService(
         return "core-humanoid";
     }
 
-    private static string BuildSourceSkeletonMatrixFamily(SkeletonMappingResult skeletonMapping)
+    private static string BuildSourceSkeletonMatrixFamily(SkeletonMappingResult skeletonMapping, IEnumerable<string>? sourceAssetSignals = null)
     {
         var label = skeletonMapping.SourceSkeleton?.Trim();
         if (string.IsNullOrWhiteSpace(label))
@@ -34203,13 +34205,43 @@ internal sealed class LocalExportService(
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .Select(static value => value.Trim())
             .ToArray() ?? [];
+        var sourceSignals = sourceAssetSignals?
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .ToArray() ?? [];
+        var classificationSignals = candidateSignals.Concat(sourceSignals).ToArray();
         static bool ContainsAnySignal(IEnumerable<string> signals, params string[] probes) =>
             signals.Any(value => probes.Any(probe => value.Contains(probe, StringComparison.OrdinalIgnoreCase)));
 
         if (normalized.Contains("sparse", StringComparison.Ordinal) ||
             skeletonMapping.SourceSkeletonUsedSparseInference)
         {
-            if (ContainsAnySignal(candidateSignals, "beast", "digitigrade", "equine", "avian", "serp", "draconic", "insectoid", "aquatic", "spriggan", "alien"))
+            if (ContainsAnySignal(classificationSignals, "avian"))
+            {
+                return "custom-sparse-avian";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "serp"))
+            {
+                return "custom-sparse-serpentine";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "equine", "hoof"))
+            {
+                return "custom-sparse-equine";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "draconic", "dragon"))
+            {
+                return "custom-sparse-draconic";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "feline", "canine", "digitigrade", "paw", "hock"))
+            {
+                return "custom-sparse-digitigrade";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "horn", "spriggan", "insectoid", "aquatic", "alien", "beast"))
             {
                 return "custom-sparse-beast";
             }
@@ -34263,6 +34295,31 @@ internal sealed class LocalExportService(
             normalized.Contains("spriggan", StringComparison.Ordinal) ||
             normalized.Contains("alien", StringComparison.Ordinal))
         {
+            if (ContainsAnySignal(classificationSignals, "avian"))
+            {
+                return "avian-framework";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "serp"))
+            {
+                return "serpentine-framework";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "equine", "hoof"))
+            {
+                return "equine-framework";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "draconic", "dragon"))
+            {
+                return "draconic-framework";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "feline", "canine", "digitigrade", "paw", "hock"))
+            {
+                return "digitigrade-framework";
+            }
+
             return "beast-or-exotic";
         }
 
@@ -34285,6 +34342,7 @@ internal sealed class LocalExportService(
     private static IReadOnlyList<string> BuildBaseMatrixCoordinates(MatrixProofContext matrixProofContext)
     {
         var targetBody = matrixProofContext.TargetBody;
+        var sourceAssetSignals = BuildSourceAssetMatrixSignals(matrixProofContext.SourceAssetPath);
         var conversionReadiness = matrixProofContext.ConversionReadiness;
         var topologyCorrespondence = matrixProofContext.TopologyCorrespondence;
         var skeletonMapping = matrixProofContext.SkeletonMapping;
@@ -34292,8 +34350,16 @@ internal sealed class LocalExportService(
         var physicsCompatibility = matrixProofContext.PhysicsCompatibility;
         var topologyFamily = BuildTopologyMatrixFamily(topologyCorrespondence, targetBody);
         var topologyLayoutFamily = BuildTopologyLayoutMatrixFamily(topologyCorrespondence, matrixProofContext.PartitionSignals);
-        var hardCaseFamily = BuildTopologyHardCaseFamily(topologyCorrespondence, targetBody);
-        var sourceSkeletonFamily = BuildSourceSkeletonMatrixFamily(skeletonMapping);
+        var partitionSignals = matrixProofContext.PartitionSignals;
+        var hardCaseSignals = BuildTopologyClassificationSignals(topologyCorrespondence)
+            .Concat(sourceAssetSignals)
+            .Concat(partitionSignals?.Regions ?? [])
+            .Concat(partitionSignals?.TopologyLabels ?? [])
+            .Concat(partitionSignals?.TopologyWarnings ?? [])
+            .Concat(partitionSignals?.Warnings ?? [])
+            .Concat(partitionSignals?.UnknownFinalPartitions ?? []);
+        var hardCaseFamily = BuildTopologyHardCaseFamily(hardCaseSignals);
+        var sourceSkeletonFamily = BuildSourceSkeletonMatrixFamily(skeletonMapping, sourceAssetSignals);
         var pluginMode = modStackCrossValidation is null
             ? "plugin-free"
             : modStackCrossValidation.RequiresLoadOrderValidation
@@ -34332,6 +34398,32 @@ internal sealed class LocalExportService(
             $"master-chain:{masterChainMode}",
             $"runtime-physics:{runtimePhysicsMode}"
         ];
+    }
+
+    private static IReadOnlyList<string> BuildSourceAssetMatrixSignals(string? sourceAssetPath)
+    {
+        if (string.IsNullOrWhiteSpace(sourceAssetPath))
+        {
+            return [];
+        }
+
+        var values = new List<string>();
+        var normalized = sourceAssetPath.Replace('\\', '/');
+        values.Add(normalized);
+        values.Add(Path.GetFileNameWithoutExtension(normalized));
+
+        var parentDirectory = Path.GetDirectoryName(normalized);
+        if (!string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            values.Add(parentDirectory);
+            values.Add(Path.GetFileName(parentDirectory));
+        }
+
+        return values
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string BuildPluginFamilyMatrixMode(ModStackCrossValidationReport? modStackCrossValidation)

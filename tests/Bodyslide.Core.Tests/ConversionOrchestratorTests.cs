@@ -20131,10 +20131,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
+            Assert.DoesNotContain(
                 packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "body-hardcase-runtime", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
+            Assert.DoesNotContain(
                 packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
@@ -20193,7 +20193,7 @@ public sealed class RealisticModPackFixtureTests
                 packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
                 summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase) &&
                            summary.GetProperty("DistinctCombinationCount").GetInt32() >= 1 &&
-                           !summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
+                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
             Assert.Contains(
                 packProof.RootElement.GetProperty("Items").EnumerateArray().Select(static item => item.GetProperty("MatrixCoordinateKey").GetString()),
                 static key => !string.IsNullOrWhiteSpace(key));
@@ -20283,6 +20283,205 @@ public sealed class RealisticModPackFixtureTests
                 desktopSnapshot.SummaryRows,
                 row => string.Equals(row.Property, "Blocking proof gaps", StringComparison.OrdinalIgnoreCase) &&
                        row.Value.Contains("body × skeleton × plugin × runtime physics", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DesktopWorkflowAutomation_BuildFromOutputDirectory_TreatsDotPrefixedEvidencePathsAsCompletedProof()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticAlienSparseCustomPluginModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        static string BuildScenarioEvidenceKey(string scenario)
+        {
+            var builder = new StringBuilder();
+            foreach (var character in scenario.Trim().ToLowerInvariant())
+            {
+                if (char.IsLetterOrDigit(character))
+                {
+                    builder.Append(character);
+                }
+                else if (builder.Length == 0 || builder[^1] != '-')
+                {
+                    builder.Append('-');
+                }
+            }
+
+            return builder.ToString().Trim('-');
+        }
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "Alien Hybrid", outputDirectory));
+            Assert.True(result.Success);
+
+            using var runtimeHarness = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-harness.json")));
+            using var liveGameExecution = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "live-game-execution.json")));
+            using var windowsUiAutomation = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "windows-ui-e2e-automation.json")));
+
+            var probeIds = runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray()
+                .Select(static probe => probe.GetProperty("ProbeId").GetString())
+                .Where(static probeId => !string.IsNullOrWhiteSpace(probeId))
+                .Cast<string>()
+                .ToArray();
+            var scenarios = liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray()
+                .ToDictionary(
+                    static scenario => scenario.GetProperty("Name").GetString()!,
+                    static scenario => scenario.GetProperty("ValidationSaveProfile").GetString()!,
+                    StringComparer.OrdinalIgnoreCase);
+            var flows = windowsUiAutomation.RootElement.GetProperty("SupportedFlows").EnumerateArray()
+                .Select(static flow => flow.GetString())
+                .Where(static flow => !string.IsNullOrWhiteSpace(flow))
+                .Cast<string>()
+                .ToArray();
+
+            var payload = new
+            {
+                ContractVersion = "1.0",
+                HarnessKind = "external-proof-dot-prefix-coverage",
+                OverallStatus = "pass",
+                Host = new
+                {
+                    OperatingSystem = "Windows 11",
+                    HarnessRunner = "WinAppDriver + Skyrim harness",
+                    Launcher = "SKSE",
+                    ModManager = "MO2",
+                    SaveProfile = "full-load-order-integration-save",
+                    ObservationMode = "screenshots-and-traces",
+                    Capabilities = new[] { "windows-host-control", "validation-save-selection", "ui-screenshot-capture" }
+                },
+                ComponentResults = new object[]
+                {
+                    new
+                    {
+                        Component = "runtime-automation",
+                        Status = "pass",
+                        ExecutedItems = probeIds,
+                        MissingItems = Array.Empty<string>(),
+                        EvidenceArtifacts = new[] { ".\\proof-evidence\\runtime-logs\\runtime.log", "./proof-evidence/step-traces/runtime.json" },
+                        Notes = Array.Empty<string>()
+                    },
+                    new
+                    {
+                        Component = "live-game-execution",
+                        Status = "pass",
+                        ExecutedItems = scenarios.Keys.ToArray(),
+                        MissingItems = Array.Empty<string>(),
+                        EvidenceArtifacts = new[] { "./proof-evidence/scenario-observations/", ".\\proof-evidence\\screenshots\\live-game.png", "./proof-evidence/runtime-logs/live-game.log", ".\\proof-evidence\\load-order-state\\loadorder.txt" },
+                        Notes = Array.Empty<string>()
+                    },
+                    new
+                    {
+                        Component = "desktop-e2e",
+                        Status = "pass",
+                        ExecutedItems = flows,
+                        MissingItems = Array.Empty<string>(),
+                        EvidenceArtifacts = new[] { ".\\proof-evidence\\screenshots\\desktop.png", "./proof-evidence/selector-logs/selectors.json", ".\\proof-evidence\\step-traces\\desktop.json" },
+                        Notes = Array.Empty<string>()
+                    }
+                },
+                ScenarioResults = scenarios.Select(entry => new
+                {
+                    Scenario = entry.Key,
+                    Status = "pass",
+                    ValidationSaveProfile = entry.Value,
+                    ObservedSignals = new[] { "runtime-scenarios-dispatched", "host-observations-captured" },
+                    MissingSignals = Array.Empty<string>(),
+                    EvidenceArtifacts = new[] { $".\\proof-evidence\\scenario-observations\\{BuildScenarioEvidenceKey(entry.Key)}\\notes.txt" },
+                    Notes = Array.Empty<string>()
+                }).ToArray(),
+                ProbeResults = probeIds.Select(id => new
+                {
+                    ProbeId = id,
+                    Status = "pass",
+                    ObservedSignals = new[] { "assertion-passed", "artifact-captured" },
+                    MissingSignals = Array.Empty<string>(),
+                    EvidenceArtifacts = new[] { $"./proof-evidence/probe-observations/{id}.json" },
+                    Notes = Array.Empty<string>()
+                }).ToArray(),
+                MissingExpectedArtifacts = Array.Empty<string>(),
+                MissingExpectedScenarios = Array.Empty<string>(),
+                MissingExpectedProbes = Array.Empty<string>(),
+                Notes = new[] { "All proof evidence paths are valid but intentionally dot-prefixed to mirror real-world bundle variants." }
+            };
+
+            await File.WriteAllTextAsync(
+                Path.Combine(outputDirectory, "proof-result-bundle.json"),
+                JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+
+            DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath: null);
+
+            using var runtimePlan = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-plan.json")));
+            using var refreshedLiveGame = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "live-game-execution.json")));
+            using var refreshedWindowsUi = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "windows-ui-e2e-automation.json")));
+            using var matrixProof = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-matrix-proof.json")));
+
+            Assert.Equal("executed-pass", runtimePlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
+            Assert.Equal("executed-pass", refreshedLiveGame.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
+            Assert.Equal("executed-pass", refreshedWindowsUi.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
+            Assert.Equal("executed-pass", matrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchRunner_RealisticSparseTopologyMatrixClosureModPackDirectory_ClosesTargetMatrixCombinations()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticSparseTopologyMatrixClosureModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "Alien Hybrid", outputDirectory));
+
+            Assert.True(results.Count >= 5);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var packProofPath = Path.Combine(outputDirectory, "conversion-matrix-pack-proof.json");
+            Assert.True(File.Exists(packProofPath), "conversion-matrix-pack-proof.json was not written.");
+            using var packProof = JsonDocument.Parse(await File.ReadAllTextAsync(packProofPath));
+
+            Assert.DoesNotContain(
+                packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
+                static combination => string.Equals(combination, "body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(
+                packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
+                static combination => string.Equals(combination, "body-hardcase-runtime", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(
+                packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
+                static combination => string.Equals(combination, "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase));
+
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
+                summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase) &&
+                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
+                summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "body-hardcase-runtime", StringComparison.OrdinalIgnoreCase) &&
+                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
+                summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase) &&
+                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
+
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MatrixDimensionCoverage").EnumerateArray(),
+                summary => string.Equals(summary.GetProperty("Dimension").GetString(), "hard-case-family", StringComparison.OrdinalIgnoreCase) &&
+                           summary.GetProperty("DistinctValueCount").GetInt32() >= 2);
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MatrixDimensionCoverage").EnumerateArray(),
+                summary => string.Equals(summary.GetProperty("Dimension").GetString(), "source-skeleton-family", StringComparison.OrdinalIgnoreCase) &&
+                           summary.GetProperty("DistinctValueCount").GetInt32() >= 2);
         }
         finally
         {

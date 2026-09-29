@@ -1223,8 +1223,17 @@ internal static class ExternalProofHarnessSupport
         return builder.ToString();
     }
 
-    private static string NormalizeEvidencePath(string? path) =>
-        (path ?? string.Empty).Replace('\\', '/').Trim();
+    private static string NormalizeEvidencePath(string? path)
+    {
+        var normalized = (path ?? string.Empty).Replace('\\', '/').Trim();
+        while (normalized.StartsWith("./", StringComparison.Ordinal) ||
+               normalized.StartsWith(".\\", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
+        }
+
+        return normalized.TrimStart('/');
+    }
 
     private static string BuildScenarioEvidenceKey(string scenarioName)
     {
