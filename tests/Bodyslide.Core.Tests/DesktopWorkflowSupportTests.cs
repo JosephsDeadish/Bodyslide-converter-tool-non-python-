@@ -204,6 +204,32 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_RecognizesSlashColonMo2OutputArguments()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    $"/mo2-output:{outputDirectory}",
+                    "/mo2-launcher"
+                ]);
+
+            Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParseLaunchOptions_RecognizesVortexArgumentsAndResultPath()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -708,6 +734,32 @@ public sealed class DesktopWorkflowSupportTests
             Assert.Null(options.StartupOutputDirectory);
             Assert.Equal(inputFile, options.StartupInputPath);
             Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_UsesResultFallbackArgumentAsInputWhenPathIsNotResultOutput()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var modDirectory = Path.Combine(workingDirectory, "deployed-mod");
+        Directory.CreateDirectory(modDirectory);
+        var inputFile = Path.Combine(modDirectory, "armor.nif");
+        File.WriteAllText(inputFile, "mesh");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--vortex-staging",
+                    modDirectory
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(modDirectory, options.StartupInputPath);
         }
         finally
         {
