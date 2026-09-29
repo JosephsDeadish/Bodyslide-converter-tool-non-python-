@@ -5053,10 +5053,17 @@ public sealed class MainForm : Form
     }
 
     private string? ResolveDisplayedSourceBody()
-        => DesktopWorkflowSupport.ResolveDisplayedSourceBody(
+    {
+        if (_sourceComboBox is null || _sourceComboBox.IsDisposed)
+        {
+            return _autoDetectedSourceBody;
+        }
+
+        return DesktopWorkflowSupport.ResolveDisplayedSourceBody(
             _sourceComboBox.Text,
             _sourceComboBox.SelectedItem?.ToString(),
             _autoDetectedSourceBody);
+    }
 
     private bool TryGetAutoDetectedSourceConfidence(string rawSource, string resolvedSource, out double confidence)
     {
