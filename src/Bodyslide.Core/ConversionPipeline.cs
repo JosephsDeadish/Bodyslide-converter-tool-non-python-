@@ -8875,7 +8875,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         ("target-body", 2),
         ("target-body-family", 2),
         ("topology-family", 2),
-        ("hard-case-family", 3),
+        ("hard-case-family", 4),
         ("skeleton-mode", 2),
         ("source-skeleton-family", 2),
         ("plugin-stack", 2),
@@ -8890,7 +8890,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
     private static readonly (string CoverageKey, string[] Dimensions, int MinimumDistinctCombinationCount)[] RequiredMatrixPackCombinations =
     [
         ("body-skeleton-plugin-runtime", ["target-body-family", "source-skeleton-family", "plugin-family", "runtime-physics"], 2),
-        ("body-hardcase-runtime", ["target-body-family", "hard-case-family", "runtime-physics"], 2),
+        ("body-hardcase-runtime", ["target-body-family", "hard-case-family", "runtime-physics"], 3),
         ("hardcase-skeleton-master", ["hard-case-family", "source-skeleton-family", "master-chain"], 2)
     ];
 

@@ -177,6 +177,12 @@ internal static class ExternalProofHarnessSupport
     {
         WriteIndented = true
     };
+    private static readonly JsonSerializerOptions ReadJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
+    };
 
     private sealed record WriteLockMetadata(
         int ProcessId,
@@ -662,7 +668,7 @@ internal static class ExternalProofHarnessSupport
 
         try
         {
-            var bundle = ReadJson<ImportedProofResultBundle>(resultBundlePath);
+            var bundle = ReadImportedProofResultBundle(resultBundlePath);
             if (bundle is null)
             {
                 return new ImportedProofBundleSummary(
@@ -1247,11 +1253,27 @@ internal static class ExternalProofHarnessSupport
 
     private static string NormalizeEvidencePath(string? path)
     {
-        var normalized = (path ?? string.Empty).Replace('\\', '/').Trim();
+        var normalized = (path ?? string.Empty).Trim().Trim('"').Replace('\\', '/');
+        if (normalized.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized["file://".Length..];
+        }
+
         while (normalized.StartsWith("./", StringComparison.Ordinal) ||
                normalized.StartsWith(".\\", StringComparison.Ordinal))
         {
             normalized = normalized[2..];
+        }
+
+        while (normalized.Contains("//", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("//", "/", StringComparison.Ordinal);
+        }
+
+        var evidenceRootIndex = normalized.IndexOf($"{EvidenceRootDirectory}/", StringComparison.OrdinalIgnoreCase);
+        if (evidenceRootIndex >= 0)
+        {
+            normalized = normalized[evidenceRootIndex..];
         }
 
         return normalized.TrimStart('/');
@@ -1288,7 +1310,200 @@ internal static class ExternalProofHarnessSupport
         }
 
         using var stream = File.OpenRead(path);
-        return JsonSerializer.Deserialize<T>(stream);
+        return JsonSerializer.Deserialize<T>(stream, ReadJsonOptions);
+    }
+
+    private static ImportedProofResultBundle? ReadImportedProofResultBundle(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        using var stream = File.OpenRead(path);
+        using var document = JsonDocument.Parse(stream);
+        if (document.RootElement.ValueKind is not JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var root = document.RootElement;
+        var host = TryGetObjectProperty(root, "Host", "host", "HostDetails", "hostDetails");
+        var componentResults = ReadComponentResults(root);
+        var scenarioResults = ReadScenarioResults(root);
+        var probeResults = ReadProbeResults(root);
+
+        return new ImportedProofResultBundle(
+            ReadStringProperty(root, "ContractVersion", "contractVersion", "Version", "version") ?? ContractVersion,
+            ReadStringProperty(root, "HarnessKind", "harnessKind", "RunnerKind", "runnerKind") ?? "external-proof-runner",
+            ReadStringProperty(root, "OverallStatus", "overallStatus", "Status", "status") ?? "unknown",
+            ReadHostDetails(host),
+            componentResults,
+            scenarioResults,
+            probeResults,
+            ReadStringArrayProperty(root, "MissingExpectedArtifacts", "missingExpectedArtifacts", "MissingArtifacts", "missingArtifacts"),
+            ReadStringArrayProperty(root, "MissingExpectedScenarios", "missingExpectedScenarios", "MissingScenarios", "missingScenarios"),
+            ReadStringArrayProperty(root, "MissingExpectedProbes", "missingExpectedProbes", "MissingProbes", "missingProbes"),
+            ReadStringArrayProperty(root, "Notes", "notes"));
+    }
+
+    private static ImportedProofHostDetails ReadHostDetails(JsonElement? host)
+    {
+        if (host is not JsonElement element || element.ValueKind is not JsonValueKind.Object)
+        {
+            return new ImportedProofHostDetails(string.Empty, string.Empty, null, null, null, null, []);
+        }
+
+        return new ImportedProofHostDetails(
+            ReadStringProperty(element, "OperatingSystem", "operatingSystem", "Platform", "platform", "Os", "os") ?? string.Empty,
+            ReadStringProperty(element, "HarnessRunner", "harnessRunner", "Runner", "runner") ?? string.Empty,
+            ReadStringProperty(element, "Launcher", "launcher"),
+            ReadStringProperty(element, "ModManager", "modManager", "ModOrganizer", "modOrganizer"),
+            ReadStringProperty(element, "SaveProfile", "saveProfile", "Profile", "profile"),
+            ReadStringProperty(element, "ObservationMode", "observationMode"),
+            ReadStringArrayProperty(element, "Capabilities", "capabilities", "HostCapabilities", "hostCapabilities"));
+    }
+
+    private static IReadOnlyList<ImportedProofComponentResult> ReadComponentResults(JsonElement root)
+    {
+        var result = new List<ImportedProofComponentResult>();
+        foreach (var item in ReadObjectArrayProperty(root, "ComponentResults", "componentResults", "Components", "components"))
+        {
+            result.Add(new ImportedProofComponentResult(
+                ReadStringProperty(item, "Component", "component", "Name", "name") ?? "unknown-component",
+                ReadStringProperty(item, "Status", "status", "Result", "result") ?? "unknown",
+                ReadStringArrayProperty(item, "ExecutedItems", "executedItems", "Items", "items"),
+                ReadStringArrayProperty(item, "MissingItems", "missingItems"),
+                ReadStringArrayProperty(item, "EvidenceArtifacts", "evidenceArtifacts", "EvidencePaths", "evidencePaths", "Artifacts", "artifacts"),
+                ReadStringArrayProperty(item, "Notes", "notes")));
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<ImportedProofScenarioResult> ReadScenarioResults(JsonElement root)
+    {
+        var result = new List<ImportedProofScenarioResult>();
+        foreach (var item in ReadObjectArrayProperty(root, "ScenarioResults", "scenarioResults", "Scenarios", "scenarios"))
+        {
+            result.Add(new ImportedProofScenarioResult(
+                ReadStringProperty(item, "Scenario", "scenario", "Name", "name") ?? "scenario",
+                ReadStringProperty(item, "Status", "status", "Result", "result") ?? "unknown",
+                ReadStringProperty(item, "ValidationSaveProfile", "validationSaveProfile", "SaveProfile", "saveProfile", "Profile", "profile") ?? string.Empty,
+                ReadStringArrayProperty(item, "ObservedSignals", "observedSignals"),
+                ReadStringArrayProperty(item, "MissingSignals", "missingSignals"),
+                ReadStringArrayProperty(item, "EvidenceArtifacts", "evidenceArtifacts", "EvidencePaths", "evidencePaths", "Artifacts", "artifacts"),
+                ReadStringArrayProperty(item, "Notes", "notes")));
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<ImportedProofProbeResult> ReadProbeResults(JsonElement root)
+    {
+        var result = new List<ImportedProofProbeResult>();
+        foreach (var item in ReadObjectArrayProperty(root, "ProbeResults", "probeResults", "Probes", "probes"))
+        {
+            result.Add(new ImportedProofProbeResult(
+                ReadStringProperty(item, "ProbeId", "probeId", "Id", "id", "Name", "name") ?? "probe",
+                ReadStringProperty(item, "Status", "status", "Result", "result") ?? "unknown",
+                ReadStringArrayProperty(item, "ObservedSignals", "observedSignals"),
+                ReadStringArrayProperty(item, "MissingSignals", "missingSignals"),
+                ReadStringArrayProperty(item, "EvidenceArtifacts", "evidenceArtifacts", "EvidencePaths", "evidencePaths", "Artifacts", "artifacts"),
+                ReadStringArrayProperty(item, "Notes", "notes")));
+        }
+
+        return result;
+    }
+
+    private static string? ReadStringProperty(JsonElement element, params string[] names)
+    {
+        var value = TryGetProperty(element, names);
+        if (value is null)
+        {
+            return null;
+        }
+
+        return value.Value.ValueKind switch
+        {
+            JsonValueKind.String => value.Value.GetString(),
+            JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.Value.ToString(),
+            _ => null
+        };
+    }
+
+    private static IReadOnlyList<string> ReadStringArrayProperty(JsonElement element, params string[] names)
+    {
+        var property = TryGetProperty(element, names);
+        if (property is null || property.Value.ValueKind is not JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var values = new List<string>();
+        foreach (var item in property.Value.EnumerateArray())
+        {
+            var text = item.ValueKind switch
+            {
+                JsonValueKind.String => item.GetString(),
+                JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => item.ToString(),
+                JsonValueKind.Object => ReadStringProperty(item, "Path", "path", "Value", "value", "Artifact", "artifact", "File", "file"),
+                _ => null
+            };
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                values.Add(text);
+            }
+        }
+
+        return values
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<JsonElement> ReadObjectArrayProperty(JsonElement element, params string[] names)
+    {
+        var property = TryGetProperty(element, names);
+        if (property is null || property.Value.ValueKind is not JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var values = new List<JsonElement>();
+        foreach (var item in property.Value.EnumerateArray())
+        {
+            if (item.ValueKind is JsonValueKind.Object)
+            {
+                values.Add(item);
+            }
+        }
+
+        return values;
+    }
+
+    private static JsonElement? TryGetProperty(JsonElement element, params string[] names)
+    {
+        if (element.ValueKind is not JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var candidate in element.EnumerateObject())
+        {
+            if (names.Any(name => string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                return candidate.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static JsonElement? TryGetObjectProperty(JsonElement element, params string[] names)
+    {
+        var value = TryGetProperty(element, names);
+        return value is { ValueKind: JsonValueKind.Object } ? value : null;
     }
 
     private static void WriteJsonIfChanged<T>(string path, T value)
