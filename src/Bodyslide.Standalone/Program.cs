@@ -489,6 +489,8 @@ static IReadOnlyList<string> EnumerateDesktopExeCandidates(string executableDire
 
     var discovered = EnumerateDirectoryCandidates(executableDirectory, "*.exe")
         .Concat(EnumerateDirectoryCandidates(siblingDesktopDirectory, "*.exe"))
+        .Concat(EnumerateDirectoryCandidatesRecursive(executableDirectory, "*.exe"))
+        .Concat(EnumerateDirectoryCandidatesRecursive(siblingDesktopDirectory, "*.exe"))
         .Where(static path => Path.GetFileName(path).Contains("desktop", StringComparison.OrdinalIgnoreCase));
 
     return preferred
@@ -509,6 +511,8 @@ static IReadOnlyList<string> EnumerateDesktopDllCandidates(string executableDire
     };
 
     var discovered = EnumerateDirectoryCandidates(siblingDesktopDirectory, "*.dll")
+        .Concat(EnumerateDirectoryCandidatesRecursive(executableDirectory, "*.dll"))
+        .Concat(EnumerateDirectoryCandidatesRecursive(siblingDesktopDirectory, "*.dll"))
         .Where(static path => Path.GetFileName(path).Contains("desktop", StringComparison.OrdinalIgnoreCase) ||
                               Path.GetFileName(path).Equals("SlideSmith.dll", StringComparison.OrdinalIgnoreCase));
 
@@ -523,6 +527,25 @@ static IReadOnlyList<string> EnumerateDirectoryCandidates(string directory, stri
     if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
     {
         return [];
+    }
+
+    static IReadOnlyList<string> EnumerateDirectoryCandidatesRecursive(string directory, string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return [];
+        }
+
+        try
+        {
+            return Directory
+                .EnumerateFiles(directory, pattern, SearchOption.AllDirectories)
+                .ToArray();
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     try
