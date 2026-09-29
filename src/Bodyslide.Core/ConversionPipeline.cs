@@ -34227,15 +34227,6 @@ internal sealed class LocalExportService(
             return "layered-openwork";
         }
 
-        if (signals.Any(static value => value.Contains("strap", StringComparison.OrdinalIgnoreCase) ||
-                                      value.Contains("multipart", StringComparison.OrdinalIgnoreCase) ||
-                                      value.Contains("split", StringComparison.OrdinalIgnoreCase) ||
-                                      value.Contains("island", StringComparison.OrdinalIgnoreCase) ||
-                                      value.Contains("layered", StringComparison.OrdinalIgnoreCase)))
-        {
-            return "multipart-straps-windows";
-        }
-
         if (signals.Any(static value => value.Contains("non-manifold", StringComparison.OrdinalIgnoreCase) ||
                                       value.Contains("nonmanifold", StringComparison.OrdinalIgnoreCase) ||
                                       value.Contains("self-intersect", StringComparison.OrdinalIgnoreCase) ||
@@ -34253,10 +34244,18 @@ internal sealed class LocalExportService(
         }
 
         if (signals.Any(static value => value.Contains("multi-island", StringComparison.OrdinalIgnoreCase) ||
-                                      value.Contains("topology-island", StringComparison.OrdinalIgnoreCase) ||
                                       value.Contains("island-count", StringComparison.OrdinalIgnoreCase)))
         {
             return "multi-island-layout";
+        }
+
+        if (signals.Any(static value => value.Contains("strap", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("multipart", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("split", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("island", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("layered", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "multipart-straps-windows";
         }
 
         return "core-humanoid";

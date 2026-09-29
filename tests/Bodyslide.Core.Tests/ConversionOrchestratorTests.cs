@@ -2825,6 +2825,72 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void LocalExportService_BuildTopologyHardCaseFamily_ClassifiesAdvancedSignalFamilies()
+    {
+        var method = typeof(LocalExportService).GetMethod(
+            "BuildTopologyHardCaseFamily",
+            BindingFlags.NonPublic | BindingFlags.Static,
+            binder: null,
+            [typeof(IEnumerable<string>)],
+            modifiers: null);
+        Assert.NotNull(method);
+
+        var nonManifoldFamily = method!.Invoke(null, [new[] { "nonmanifold-edge-network", "self-intersect-warning" }]);
+        Assert.Equal("non-manifold-boundary", nonManifoldFamily);
+
+        var ownershipFamily = method.Invoke(null, [new[] { "skin-partition-layout-violation", "ownership-layout-signal" }]);
+        Assert.Equal("ownership-layout-review", ownershipFamily);
+
+        var multiIslandFamily = method.Invoke(null, [new[] { "multi-island-topology", "island-count:4" }]);
+        Assert.Equal("multi-island-layout", multiIslandFamily);
+    }
+
+    [Fact]
+    public void LocalExportService_BuildSourceSkeletonMatrixFamily_ClassifiesSparseAndCustomFrameworkSignals()
+    {
+        var method = typeof(LocalExportService).GetMethod(
+            "BuildSourceSkeletonMatrixFamily",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var sparseAvian = new SkeletonMappingResult(
+            SourceSkeleton: string.Empty,
+            TargetSkeleton: "3ba",
+            BoneMappings: [],
+            UnsupportedBones: [],
+            SourceSkeletonUsedSparseInference: true,
+            SourceSkeletonCandidates:
+            [
+                new SkeletonInferenceCandidate("custom sparse avian", 0.82d, ["avian wing-bone map"], true)
+            ]);
+        var sparseAvianFamily = method!.Invoke(null, [sparseAvian, Array.Empty<string>()]);
+        Assert.Equal("custom-sparse-avian", sparseAvianFamily);
+
+        var draconicCustom = new SkeletonMappingResult(
+            SourceSkeleton: string.Empty,
+            TargetSkeleton: "3ba",
+            BoneMappings: [],
+            UnsupportedBones: [],
+            SourceSkeletonUsedSparseInference: false,
+            SourceSkeletonCandidates:
+            [
+                new SkeletonInferenceCandidate("custom draconic profile", 0.74d, ["dragon tail rig"], false)
+            ]);
+        var draconicFamily = method.Invoke(null, [draconicCustom, Array.Empty<string>()]);
+        Assert.Equal("draconic-framework", draconicFamily);
+
+        var digitigradeCustom = new SkeletonMappingResult(
+            SourceSkeleton: string.Empty,
+            TargetSkeleton: "3ba",
+            BoneMappings: [],
+            UnsupportedBones: [],
+            SourceSkeletonUsedSparseInference: false,
+            SourceSkeletonCandidates: []);
+        var digitigradeFamily = method.Invoke(null, [digitigradeCustom, new[] { "digitigrade paw framework evidence" }]);
+        Assert.Equal("digitigrade-framework", digitigradeFamily);
+    }
+
+    [Fact]
     public async Task LocalExportService_SynthesizesTopologySummaryForHeuristicSnapshots()
     {
         var method = typeof(LocalExportService).GetMethod("GetMeshTransferTopologySnapshot", BindingFlags.NonPublic | BindingFlags.Static);
@@ -20029,6 +20095,7 @@ public sealed class RealisticModPackFixtureTests
                 MissingExpectedArtifacts = Array.Empty<string>(),
                 MissingExpectedScenarios = Array.Empty<string>(),
                 MissingExpectedProbes = Array.Empty<string>(),
+                MissingExpectedFlows = new[] { "flow:nonexistent-proof-flow" },
                 Notes = new[] { "Non-expected missingItems entries should not block proof execution status." }
             };
 

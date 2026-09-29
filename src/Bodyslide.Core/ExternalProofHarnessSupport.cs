@@ -158,6 +158,7 @@ public sealed record ImportedProofResultBundle(
     IReadOnlyList<string> MissingExpectedArtifacts,
     IReadOnlyList<string> MissingExpectedScenarios,
     IReadOnlyList<string> MissingExpectedProbes,
+    IReadOnlyList<string> MissingExpectedFlows,
     IReadOnlyList<string> Notes);
 
 internal sealed record ImportedProofBundleSummary(
@@ -878,6 +879,7 @@ internal static class ExternalProofHarnessSupport
         var missingFlows = expectedFlows
             .Where(flow => !executedFlows.Contains(flow, StringComparer.OrdinalIgnoreCase))
             .Concat(FilterMissingExpectedNamedItems(component?.MissingItems ?? [], expectedFlows))
+            .Concat(FilterMissingExpectedNamedItems(bundle.MissingExpectedFlows, expectedFlows))
             .Concat(FilterMissingExpectedNamedItems(bundle.MissingExpectedProbes, expectedFlows))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -1421,6 +1423,7 @@ internal static class ExternalProofHarnessSupport
             ReadStringArrayProperty(root, "MissingExpectedArtifacts", "missingExpectedArtifacts", "MissingArtifacts", "missingArtifacts"),
             ReadStringArrayProperty(root, "MissingExpectedScenarios", "missingExpectedScenarios", "MissingScenarios", "missingScenarios"),
             ReadStringArrayProperty(root, "MissingExpectedProbes", "missingExpectedProbes", "MissingProbes", "missingProbes"),
+            ReadStringArrayProperty(root, "MissingExpectedFlows", "missingExpectedFlows", "MissingFlows", "missingFlows", "MissingExpectedDesktopFlows", "missingExpectedDesktopFlows"),
             ReadStringArrayProperty(root, "Notes", "notes"));
     }
 
