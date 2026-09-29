@@ -9047,6 +9047,14 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         foreach (var (meshFile, result) in resultsWithPaths)
         {
             var qualityReport = TryReadConversionQualityReport(result);
+            try
+            {
+                ExternalProofHarnessSupport.RefreshImportedProofState(result.OutputDirectory);
+            }
+            catch
+            {
+            }
+
             var proofReport = TryReadConversionMatrixProofReport(result.OutputDirectory);
             if (proofReport is not null)
             {
@@ -34100,6 +34108,46 @@ internal sealed class LocalExportService(
             .Select(static value => value.Trim())
             .ToArray();
 
+        static bool HasExplicitFamily(IReadOnlyList<string> values, string family) =>
+            values.Any(value =>
+                value.Equals(family, StringComparison.OrdinalIgnoreCase) ||
+                value.Contains($"hard-case-family:{family}", StringComparison.OrdinalIgnoreCase));
+
+        if (HasExplicitFamily(signals, "oral-genital-subpieces"))
+        {
+            return "oral-genital-subpieces";
+        }
+
+        if (HasExplicitFamily(signals, "beast-custom-appendages"))
+        {
+            return "beast-custom-appendages";
+        }
+
+        if (HasExplicitFamily(signals, "dangling-chain-cloth"))
+        {
+            return "dangling-chain-cloth";
+        }
+
+        if (HasExplicitFamily(signals, "rigid-segmented"))
+        {
+            return "rigid-segmented";
+        }
+
+        if (HasExplicitFamily(signals, "footwear-world-mesh"))
+        {
+            return "footwear-world-mesh";
+        }
+
+        if (HasExplicitFamily(signals, "layered-openwork"))
+        {
+            return "layered-openwork";
+        }
+
+        if (HasExplicitFamily(signals, "multipart-straps-windows"))
+        {
+            return "multipart-straps-windows";
+        }
+
         if (signals.Any(static value => value.Contains("oral", StringComparison.OrdinalIgnoreCase) ||
                                       value.Contains("mouth", StringComparison.OrdinalIgnoreCase) ||
                                       value.Contains("tongue", StringComparison.OrdinalIgnoreCase) ||
@@ -34246,6 +34294,21 @@ internal sealed class LocalExportService(
                 return "custom-sparse-beast";
             }
 
+            if (ContainsAnySignal(classificationSignals, "follower", "companion", "humanoid"))
+            {
+                return "custom-sparse-follower";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "wing", "flight", "feather"))
+            {
+                return "custom-sparse-winged";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "spriggan", "vine", "branch", "briar"))
+            {
+                return "custom-sparse-spriggan";
+            }
+
             if (ContainsAnySignal(candidateSignals, "sam", "sos", "tng"))
             {
                 return "custom-sparse-male";
@@ -34318,6 +34381,16 @@ internal sealed class LocalExportService(
             if (ContainsAnySignal(classificationSignals, "feline", "canine", "digitigrade", "paw", "hock"))
             {
                 return "digitigrade-framework";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "wing", "flight", "feather"))
+            {
+                return "winged-framework";
+            }
+
+            if (ContainsAnySignal(classificationSignals, "spriggan", "vine", "branch", "briar"))
+            {
+                return "spriggan-framework";
             }
 
             return "beast-or-exotic";

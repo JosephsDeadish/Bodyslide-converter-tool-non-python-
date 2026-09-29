@@ -714,7 +714,7 @@ internal static class ExternalProofHarnessSupport
         var missingProbeIds = expectedProbeIds
             .Where(id => !probeResults.ContainsKey(id))
             .Concat(component?.MissingItems ?? [])
-            .Concat(bundle.MissingExpectedProbes)
+            .Concat(FilterMissingExpectedNamedItems(bundle.MissingExpectedProbes, expectedProbeIds))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var failedProbeIds = probeResults.Values
@@ -792,7 +792,7 @@ internal static class ExternalProofHarnessSupport
         var missingScenarioNames = expectedScenarioNames
             .Where(name => !scenarioResults.ContainsKey(name))
             .Concat(component?.MissingItems ?? [])
-            .Concat(bundle.MissingExpectedScenarios)
+            .Concat(FilterMissingExpectedNamedItems(bundle.MissingExpectedScenarios, expectedScenarioNames))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var failedScenarioNames = scenarioResults.Values
@@ -1147,6 +1147,32 @@ internal static class ExternalProofHarnessSupport
                 return matchedPrefixes.Any(prefix =>
                     !normalizedEvidence.Any(evidence => evidence.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)));
             })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string[] FilterMissingExpectedNamedItems(
+        IEnumerable<string> missingExpectedItems,
+        IEnumerable<string> expectedNames)
+    {
+        var expected = expectedNames
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (expected.Length == 0)
+        {
+            return [];
+        }
+
+        return missingExpectedItems
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .Where(item =>
+                expected.Contains(item, StringComparer.OrdinalIgnoreCase) ||
+                (item.StartsWith("probe:", StringComparison.OrdinalIgnoreCase) &&
+                 expected.Contains(item["probe:".Length..], StringComparer.OrdinalIgnoreCase)) ||
+                (item.StartsWith("scenario:", StringComparison.OrdinalIgnoreCase) &&
+                 expected.Contains(item["scenario:".Length..], StringComparer.OrdinalIgnoreCase)))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
