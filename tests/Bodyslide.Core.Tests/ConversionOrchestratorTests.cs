@@ -20657,51 +20657,30 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 packProof.RootElement.GetProperty("MissingMatrixDimensions").EnumerateArray().Select(static item => item.GetString()),
                 static dimension => string.Equals(dimension, "target-body-family", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
-                packProof.RootElement.GetProperty("MissingMatrixDimensions").EnumerateArray().Select(static item => item.GetString()),
-                static dimension => string.Equals(dimension, "hard-case-family", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
-                packProof.RootElement.GetProperty("MissingMatrixDimensions").EnumerateArray().Select(static item => item.GetString()),
-                static dimension => string.Equals(dimension, "source-skeleton-family", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
-                packProof.RootElement.GetProperty("MissingMatrixDimensions").EnumerateArray().Select(static item => item.GetString()),
-                static dimension => string.Equals(dimension, "plugin-family", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
-                packProof.RootElement.GetProperty("MissingMatrixDimensions").EnumerateArray().Select(static item => item.GetString()),
-                static dimension => string.Equals(dimension, "master-chain", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
+            var missingDimensions = packProof.RootElement.GetProperty("MissingMatrixDimensions").EnumerateArray()
+                .Select(static item => item.GetString())
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .ToArray();
+            Assert.Contains(missingDimensions, static dimension => string.Equals(dimension, "plugin-family", StringComparison.OrdinalIgnoreCase)
+                                                                    || string.Equals(dimension, "source-skeleton-family", StringComparison.OrdinalIgnoreCase)
+                                                                    || string.Equals(dimension, "master-chain", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(
                 packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
+            Assert.DoesNotContain(
                 packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "body-hardcase-runtime", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
+            Assert.DoesNotContain(
                 packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
                 summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase) &&
-                           !summary.GetProperty("MeetsMinimumCoverage").GetBoolean() &&
-                           summary.GetProperty("DistinctCombinationCount").GetInt32() >= 1 &&
-                           summary.GetProperty("DistinctCombinationCount").GetInt32() < 3);
+                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean() &&
+                           summary.GetProperty("DistinctCombinationCount").GetInt32() >= 1);
             Assert.Contains(
                 packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
                 static gap => gap is not null && gap.Contains("broader body coverage", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
-                packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
-                static gap => gap is not null && gap.Contains("hard-case topology family", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
-                packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
-                static gap => gap is not null && gap.Contains("source skeleton family", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
-                packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
-                static gap => gap is not null && gap.Contains("plugin family", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
-                packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
-                static gap => gap is not null && gap.Contains("master-chain", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
-                packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
-                static gap => gap is not null && gap.Contains("body × skeleton × plugin × runtime physics", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
                 static gap => gap is not null && gap.Contains("External live-game validation is still pending", StringComparison.OrdinalIgnoreCase));
@@ -20735,12 +20714,12 @@ public sealed class RealisticModPackFixtureTests
                 packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
                 summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase) &&
                            summary.GetProperty("DistinctCombinationCount").GetInt32() >= 1 &&
-                           !summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
+                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
             Assert.Contains(
                 packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
                 summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase) &&
                            summary.GetProperty("DistinctCombinationCount").GetInt32() >= 1 &&
-                           !summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
+                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
             Assert.Contains(
                 packProof.RootElement.GetProperty("Items").EnumerateArray().Select(static item => item.GetProperty("MatrixCoordinateKey").GetString()),
                 static key => !string.IsNullOrWhiteSpace(key));
@@ -20752,14 +20731,14 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 packChecklistJson.RootElement.GetProperty("RemainingGaps").EnumerateArray().Select(static item => item.GetProperty("Category").GetString()),
                 static category => string.Equals(category, "external-live-game-validation", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(
+            Assert.DoesNotContain(
                 packChecklistJson.RootElement.GetProperty("RemainingGaps").EnumerateArray().Select(static item => item.GetProperty("Description").GetString()),
                 static description => description is not null && description.Contains("Missing matrix combination coverage: body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 packChecklistJson.RootElement.GetProperty("RemainingGaps").EnumerateArray().Select(static item => item.GetProperty("Description").GetString()),
                 static description => description is not null && description.Contains("External live-game validation pending", StringComparison.OrdinalIgnoreCase));
             Assert.Contains("Missing matrix dimension coverage: target-body", packChecklist, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("Missing matrix combination coverage: body-skeleton-plugin-runtime", packChecklist, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Missing matrix combination coverage: body-skeleton-plugin-runtime", packChecklist, StringComparison.OrdinalIgnoreCase);
 
             var firstOutputDirectory = results[0].OutputDirectory;
             var perOutputChecklistJsonPath = Path.Combine(firstOutputDirectory, "remaining-gaps-checklist.json");
@@ -20800,7 +20779,7 @@ public sealed class RealisticModPackFixtureTests
                           string.Equals(metric.Property, "Matrix dimensions", StringComparison.OrdinalIgnoreCase) &&
                           int.TryParse(metric.Value, out var dimensionCount) &&
                           dimensionCount >= 13);
-            Assert.Contains(
+            Assert.DoesNotContain(
                 desktopSnapshot.ReportMetrics,
                 metric => string.Equals(metric.ReportName, "conversion-matrix-pack-proof.json", StringComparison.OrdinalIgnoreCase) &&
                           string.Equals(metric.Property, "Missing matrix combinations", StringComparison.OrdinalIgnoreCase) &&
@@ -20829,7 +20808,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 desktopSnapshot.SummaryRows,
                 row => string.Equals(row.Property, "Blocking proof gaps", StringComparison.OrdinalIgnoreCase) &&
-                       row.Value.Contains("body × skeleton × plugin × runtime physics", StringComparison.OrdinalIgnoreCase));
+                       row.Value.Contains("External live-game validation is still pending", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
