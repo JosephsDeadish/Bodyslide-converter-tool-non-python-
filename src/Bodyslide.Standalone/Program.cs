@@ -392,6 +392,9 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
         WriteStartupDiagnostics(
             startupDiagnosticsPath,
             $"desktop-launch: launcherSignal={launcherSignal}, mo2={launchedFromModOrganizer}, cli={explicitCliLaunch}, exe={currentExeFullPath}");
+        WriteStartupDiagnostics(
+            startupDiagnosticsPath,
+            $"desktop-launch: parsed-args {SummarizeLaunchArguments(args)}");
         if (!launchDecision.ShouldAttemptDesktopHandoff)
         {
             WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: skipped (non-launcher invocation)");
@@ -661,6 +664,9 @@ static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<s
 
     if (!launchedFromModOrganizer)
     {
+        WriteStartupDiagnostics(
+            startupDiagnosticsPath,
+            $"desktop-launch: handoff-args[{startInfo.ArgumentList.Count}]={FormatArgumentList(startInfo.ArgumentList)}");
         return;
     }
 
@@ -669,6 +675,10 @@ static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<s
     {
         startInfo.ArgumentList.Add("--mo2-launcher");
     }
+
+    WriteStartupDiagnostics(
+        startupDiagnosticsPath,
+        $"desktop-launch: handoff-args[{startInfo.ArgumentList.Count}]={FormatArgumentList(startInfo.ArgumentList)}");
 }
 
 static bool HasStartupDiagnosticsArgumentWithValue(IReadOnlyList<string> args)
@@ -871,6 +881,30 @@ static bool IsStandaloneOptionMatch(string? arg, string optionName)
     }
 
     return option.Equals(optionName, StringComparison.OrdinalIgnoreCase);
+}
+
+static string SummarizeLaunchArguments(IReadOnlyList<string> args)
+{
+    if (args.Count == 0)
+    {
+        return "none";
+    }
+
+    var modManagerSwitches = args.Count(StandaloneStartupRouting.IsModManagerLauncherArgument);
+    var launcherPathTokens = args.Count(StandaloneStartupRouting.IsLikelyLauncherPathArgument);
+    var startupDiagnosticsSwitches = args.Count(static arg => IsStandaloneOptionMatch(arg, "startup-diagnostics"));
+    var quotedTokens = args.Count(static arg => !string.IsNullOrWhiteSpace(arg) && arg.Contains('"'));
+    return $"count={args.Count}, mod-manager-switches={modManagerSwitches}, launcher-path-tokens={launcherPathTokens}, startup-diagnostics-switches={startupDiagnosticsSwitches}, quoted={quotedTokens}";
+}
+
+static string FormatArgumentList(System.Collections.Generic.IReadOnlyList<string> args)
+{
+    if (args.Count == 0)
+    {
+        return "(none)";
+    }
+
+    return string.Join(", ", args.Select(static value => $"\"{value}\""));
 }
 
 static IReadOnlyList<string> ParseDelimitedValues(string? value) =>

@@ -9,6 +9,12 @@ internal sealed record DesktopLaunchOptions(
     internal static DesktopLaunchOptions Empty { get; } = new(null, null, false, null);
 }
 
+internal sealed record DesktopStartupHandoffPlan(
+    bool ShouldLoadStartupResult,
+    bool ShouldApplyStartupInput,
+    bool ShouldQueueStartupAutoInspect,
+    string? StartupInputPath);
+
 internal static class DesktopWorkflowSupport
 {
     private static readonly StringComparison FileSystemPathComparison =
@@ -386,6 +392,46 @@ internal static class DesktopWorkflowSupport
             startupInputPath,
             fromModManagerLauncher,
             startupDiagnostics);
+    }
+
+    public static DesktopStartupHandoffPlan BuildStartupHandoffPlan(
+        DesktopLaunchOptions launchOptions,
+        Func<string, bool> shouldAutoInspectInputPath,
+        Func<string, bool>? fileExists = null,
+        Func<string, bool>? directoryExists = null)
+    {
+        ArgumentNullException.ThrowIfNull(launchOptions);
+        ArgumentNullException.ThrowIfNull(shouldAutoInspectInputPath);
+        fileExists ??= File.Exists;
+        directoryExists ??= Directory.Exists;
+
+        if (!string.IsNullOrWhiteSpace(launchOptions.StartupOutputDirectory))
+        {
+            return new DesktopStartupHandoffPlan(
+                ShouldLoadStartupResult: true,
+                ShouldApplyStartupInput: false,
+                ShouldQueueStartupAutoInspect: false,
+                StartupInputPath: null);
+        }
+
+        var inputPath = launchOptions.StartupInputPath;
+        var hasUsableInputPath =
+            !string.IsNullOrWhiteSpace(inputPath) &&
+            (fileExists(inputPath) || directoryExists(inputPath));
+        if (!hasUsableInputPath)
+        {
+            return new DesktopStartupHandoffPlan(
+                ShouldLoadStartupResult: false,
+                ShouldApplyStartupInput: false,
+                ShouldQueueStartupAutoInspect: false,
+                StartupInputPath: null);
+        }
+
+        return new DesktopStartupHandoffPlan(
+            ShouldLoadStartupResult: false,
+            ShouldApplyStartupInput: true,
+            ShouldQueueStartupAutoInspect: shouldAutoInspectInputPath(inputPath!),
+            StartupInputPath: inputPath);
     }
 
     public static string? TryResolveResultOutputDirectory(string? candidatePath, bool allowAncestorWalk = true)

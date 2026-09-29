@@ -1630,8 +1630,11 @@ public sealed class MainForm : Form
                 }
             }
 
-            if (!_startupResultLoadHandled &&
-                !string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory))
+            var startupPlan = DesktopWorkflowSupport.BuildStartupHandoffPlan(
+                _launchOptions,
+                ShouldAutoInspectInputPath);
+
+            if (!_startupResultLoadHandled && startupPlan.ShouldLoadStartupResult)
             {
                 _startupResultLoadHandled = true;
                 UpdateStartupHandoffTelemetry(
@@ -1646,20 +1649,20 @@ public sealed class MainForm : Form
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(_launchOptions.StartupInputPath) &&
-                (File.Exists(_launchOptions.StartupInputPath) || Directory.Exists(_launchOptions.StartupInputPath)))
+            if (startupPlan.ShouldApplyStartupInput &&
+                !string.IsNullOrWhiteSpace(startupPlan.StartupInputPath))
             {
-                _inputTextBox.Text = _launchOptions.StartupInputPath;
+                _inputTextBox.Text = startupPlan.StartupInputPath;
                 UpdateStartupHandoffTelemetry(
                     _launchOptions.FromModOrganizerLauncher ? "Mod manager handoff" : "Launcher handoff",
-                    $"Startup input path: {_launchOptions.StartupInputPath}");
+                    $"Startup input path: {startupPlan.StartupInputPath}");
                 _statusLabel.Text = _launchOptions.FromModOrganizerLauncher
                     ? "Ready — input loaded from mod manager launcher."
                     : "Ready — input loaded from launcher.";
                 AppendLog(_launchOptions.FromModOrganizerLauncher
-                    ? $"Startup input loaded from mod manager launcher: {_launchOptions.StartupInputPath}"
-                    : $"Startup input loaded from launcher: {_launchOptions.StartupInputPath}");
-                if (ShouldAutoInspectInputPath(_launchOptions.StartupInputPath))
+                    ? $"Startup input loaded from mod manager launcher: {startupPlan.StartupInputPath}"
+                    : $"Startup input loaded from launcher: {startupPlan.StartupInputPath}");
+                if (startupPlan.ShouldQueueStartupAutoInspect)
                 {
                     ScheduleAutoInspectInput();
                     _statusLabel.Text = "Ready — startup input loaded. Auto-inspection queued.";

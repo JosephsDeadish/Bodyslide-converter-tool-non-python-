@@ -1257,6 +1257,88 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void BuildStartupHandoffPlan_PrioritizesStartupResultOverInputToKeepStartupOrderSafe()
+    {
+        var options = new DesktopLaunchOptions(
+            StartupOutputDirectory: @"C:\out",
+            StartupInputPath: @"C:\input\armor.nif",
+            FromModOrganizerLauncher: true);
+
+        var plan = DesktopWorkflowSupport.BuildStartupHandoffPlan(
+            options,
+            shouldAutoInspectInputPath: static _ => true,
+            fileExists: static _ => true,
+            directoryExists: static _ => true);
+
+        Assert.True(plan.ShouldLoadStartupResult);
+        Assert.False(plan.ShouldApplyStartupInput);
+        Assert.False(plan.ShouldQueueStartupAutoInspect);
+        Assert.Null(plan.StartupInputPath);
+    }
+
+    [Fact]
+    public void BuildStartupHandoffPlan_QueuesAutoInspectWhenStartupInputExistsAndIsInspectable()
+    {
+        var inputPath = @"C:\input\armor.nif";
+        var options = new DesktopLaunchOptions(
+            StartupOutputDirectory: null,
+            StartupInputPath: inputPath,
+            FromModOrganizerLauncher: true);
+
+        var plan = DesktopWorkflowSupport.BuildStartupHandoffPlan(
+            options,
+            shouldAutoInspectInputPath: static path => path.EndsWith(".nif", StringComparison.OrdinalIgnoreCase),
+            fileExists: static _ => true,
+            directoryExists: static _ => false);
+
+        Assert.False(plan.ShouldLoadStartupResult);
+        Assert.True(plan.ShouldApplyStartupInput);
+        Assert.True(plan.ShouldQueueStartupAutoInspect);
+        Assert.Equal(inputPath, plan.StartupInputPath);
+    }
+
+    [Fact]
+    public void BuildStartupHandoffPlan_SkipsAutoInspectForNonInspectableStartupInput()
+    {
+        var inputPath = @"C:\mods\pack.zip";
+        var options = new DesktopLaunchOptions(
+            StartupOutputDirectory: null,
+            StartupInputPath: inputPath,
+            FromModOrganizerLauncher: true);
+
+        var plan = DesktopWorkflowSupport.BuildStartupHandoffPlan(
+            options,
+            shouldAutoInspectInputPath: static _ => false,
+            fileExists: static _ => true,
+            directoryExists: static _ => false);
+
+        Assert.False(plan.ShouldLoadStartupResult);
+        Assert.True(plan.ShouldApplyStartupInput);
+        Assert.False(plan.ShouldQueueStartupAutoInspect);
+        Assert.Equal(inputPath, plan.StartupInputPath);
+    }
+
+    [Fact]
+    public void BuildStartupHandoffPlan_IgnoresMissingStartupInputPath()
+    {
+        var options = new DesktopLaunchOptions(
+            StartupOutputDirectory: null,
+            StartupInputPath: @"C:\missing\armor.nif",
+            FromModOrganizerLauncher: true);
+
+        var plan = DesktopWorkflowSupport.BuildStartupHandoffPlan(
+            options,
+            shouldAutoInspectInputPath: static _ => true,
+            fileExists: static _ => false,
+            directoryExists: static _ => false);
+
+        Assert.False(plan.ShouldLoadStartupResult);
+        Assert.False(plan.ShouldApplyStartupInput);
+        Assert.False(plan.ShouldQueueStartupAutoInspect);
+        Assert.Null(plan.StartupInputPath);
+    }
+
+    [Fact]
     public void FindCommonDirectory_DoesNotCollapseCaseDistinctDirectoriesOnCaseSensitivePlatforms()
     {
         if (OperatingSystem.IsWindows())

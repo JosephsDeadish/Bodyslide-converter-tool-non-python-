@@ -85,4 +85,48 @@ public sealed class StandaloneStartupRoutingTests
         Assert.True(decision.ModManagerLaunchDetected);
         Assert.True(decision.ExplicitCliLaunchDetected);
     }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_Mo2InputPathOnly_TreatedAsLauncherSignal()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--input", @"D:\Mod Organizer 2\mods\My Armor\meshes\armor_1.nif"],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+        Assert.False(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_Mo2PathInlineQuotedWithCliFlag_StillPrefersDesktopHandoff()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--self-check", "--mo2-path:\"D:\\Mod Organizer 2\\mods\\Pack With Spaces\""],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+        Assert.True(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_SlashPrefixedMo2ColonArgument_IsDetected()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["/modorganizer-path:D:\\MO2\\mods\\SomePack"],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+    }
 }
