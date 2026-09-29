@@ -904,6 +904,9 @@ public sealed class DesktopWorkflowSupportTests
     [InlineData("--modorganizer-path")]
     [InlineData("--vortex-output")]
     [InlineData("--vortex-deploy-path")]
+    [InlineData("--vortex-deployment-path")]
+    [InlineData("--vortex-staging-path")]
+    [InlineData("--vortex-mod-path")]
     [InlineData("--mods-path")]
     [InlineData("--output-dir")]
     [InlineData("--output-path")]
@@ -925,6 +928,31 @@ public sealed class DesktopWorkflowSupportTests
 
             Assert.Equal(outputDirectory, options.StartupOutputDirectory);
             Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_RecognizesVortexDeploymentPathAliasWithColonSeparatedQuotedValue()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "vortex stage root");
+        var stagingDirectory = Path.Combine(workingDirectory, "staging path");
+        Directory.CreateDirectory(stagingDirectory);
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    $"/vortex-deployment-path:\"{stagingDirectory}\"",
+                    "--from-vortex"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(stagingDirectory, options.StartupInputPath);
             Assert.True(options.FromModOrganizerLauncher);
         }
         finally

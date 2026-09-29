@@ -1,0 +1,9 @@
+<smp>
+  <bone name="Tail1" />
+  <bone name="Tail2" />
+  <bone name="TailTip" />
+  <bone name="WingMid.L" />
+  <bone name="WingMid.R" />
+  <bone name="HDT JawLower" />
+  <bone name="HDT Tongue" />
+</smp>

@@ -12551,6 +12551,47 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public async Task SignatureBodyDetectionService_UsesReferenceBoneSemanticsWithoutXmlSignals()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "outfit_0.nif");
+        var referencePath = Path.Combine(workingDirectory, "cbbe_3ba_reference_0.nif");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(
+                referencePath,
+                """
+                NPC Root [Root]
+                NPC L Breast01
+                NPC R Breast01
+                NPC L Breast02
+                NPC R Breast02
+                NPC Belly
+                NPC Belly01
+                NPC L Butt
+                NPC R Butt
+                NPC L Thigh
+                NPC R Thigh
+                """);
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [referencePath], []);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("3BA", result.Body);
+            Assert.True(result.Confidence > 0.0);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SignatureBodyDetectionService_DoesNotMisclassifyUunpReferenceAs3Ba()
     {
         var service = new SignatureBodyDetectionService();
@@ -18144,6 +18185,49 @@ public sealed class RealisticModPackFixtureTests
                     .ToArray();
                 Assert.Contains(scenarioNames, static name => string.Equals(name, "Follower/beast/custom-rig physics variance sweep", StringComparison.Ordinal));
             }
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchRunner_RealisticRareWingedDigitigradePhysicsVarianceModPackDirectory_ExpandsDifficultRigRuntimeCoverage()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticRareWingedDigitigradePhysicsVarianceModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(results.Count >= 2);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            foreach (var result in results)
+            {
+                var inGameJsonPath = Path.Combine(result.OutputDirectory, "in-game-validation.json");
+                Assert.True(File.Exists(inGameJsonPath));
+                using var inGameReport = JsonDocument.Parse(await File.ReadAllTextAsync(inGameJsonPath));
+                var scenarioNames = inGameReport.RootElement
+                    .GetProperty("ScenarioMatrix")
+                    .EnumerateArray()
+                    .Select(static entry => entry.GetProperty("Name").GetString())
+                    .Where(static name => !string.IsNullOrWhiteSpace(name))
+                    .ToArray();
+                Assert.Contains(scenarioNames, static name => string.Equals(name, "Difficult skeleton+physics chain stress sweep", StringComparison.Ordinal));
+            }
+
+            var packProofPath = Path.Combine(outputDirectory, "conversion-matrix-pack-proof.json");
+            Assert.True(File.Exists(packProofPath), "conversion-matrix-pack-proof.json was not written.");
+            using var packProof = JsonDocument.Parse(await File.ReadAllTextAsync(packProofPath));
+            var hardCaseCoverage = packProof.RootElement
+                .GetProperty("MatrixDimensionCoverage")
+                .EnumerateArray()
+                .First(summary => string.Equals(summary.GetProperty("Dimension").GetString(), "hard-case-family", StringComparison.OrdinalIgnoreCase));
+            Assert.True(hardCaseCoverage.GetProperty("DistinctValueCount").GetInt32() >= 1);
         }
         finally
         {

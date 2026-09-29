@@ -5195,6 +5195,21 @@ public sealed class MainForm : Form
         return !string.IsNullOrWhiteSpace(selectedPreset) && PresetCatalog.TryGet(selectedPreset, out preset);
     }
 
+    private bool CanStartConversion()
+    {
+        if (!InputPathExists())
+        {
+            return false;
+        }
+
+        if (_usePresetRadio.Checked)
+        {
+            return TryGetSelectedPreset(out _);
+        }
+
+        return _targetComboBox.SelectedItem is not null || _targetComboBox.Items.Count > 0;
+    }
+
     private bool InputPathExists()
     {
         var inputPath = _inputTextBox.Text.Trim();

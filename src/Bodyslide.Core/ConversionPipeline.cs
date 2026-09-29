@@ -11024,10 +11024,11 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         // Read physics file contents once for bone signature matching.
         var physicsContents = await ReadPhysicsContentsAsync(armor.PhysicsFiles, cancellationToken);
         var physicsBoneNames = ExtractPhysicsBoneNames(physicsContents);
+        var referenceBoneNames = ExtractReferenceBoneNames(armor.BodyReferenceFiles);
 
         var scoredCandidates = VanillaBodySignatureDatabase.Templates
             .Concat(CustomBodyProfileSupport.GetSignatureTemplates(armor))
-            .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, sourceContextNames, sourceGenderCue, physicsContents, physicsBoneNames, geometrySignature))
+            .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, sourceContextNames, sourceGenderCue, physicsContents, physicsBoneNames, referenceBoneNames, geometrySignature))
             .OrderByDescending(result => result.Score)
             .ThenByDescending(result => result.ReferenceHitRatio)
             .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
@@ -11327,6 +11328,66 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         return bones;
     }
 
+    private static IReadOnlySet<string> ExtractReferenceBoneNames(IReadOnlyList<string> bodyReferenceFiles)
+    {
+        var bones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (bodyReferenceFiles.Count == 0)
+        {
+            return bones;
+        }
+
+        foreach (var bodyReferenceFile in bodyReferenceFiles
+                     .Where(static file => !string.IsNullOrWhiteSpace(file) &&
+                                           file.EndsWith(".nif", StringComparison.OrdinalIgnoreCase))
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .Take(12))
+        {
+            if (!File.Exists(bodyReferenceFile))
+            {
+                continue;
+            }
+
+            try
+            {
+                var nifBytes = File.ReadAllBytes(bodyReferenceFile);
+                var parsedBones = SkeletonNifBoneParser.ExtractBoneNames(nifBytes).ToArray();
+                if (parsedBones.Length == 0)
+                {
+                    var rawText = Encoding.ASCII.GetString(nifBytes);
+                    foreach (var signature in BuiltInBodyMetadataCatalog.All
+                                 .SelectMany(static metadata => metadata.PhysicsBoneSignatures)
+                                 .Where(static signature => !string.IsNullOrWhiteSpace(signature))
+                                 .Distinct(StringComparer.OrdinalIgnoreCase))
+                    {
+                        if (rawText.Contains(signature, StringComparison.OrdinalIgnoreCase))
+                        {
+                            bones.Add(signature.Trim());
+                        }
+                    }
+                }
+
+                foreach (var bone in parsedBones)
+                {
+                    if (!string.IsNullOrWhiteSpace(bone))
+                    {
+                        bones.Add(bone.Trim());
+                    }
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (InvalidDataException)
+            {
+            }
+        }
+
+        return bones;
+    }
+
     private static int CountBoneSignatureMatches(
         IReadOnlySet<string> sourceBones,
         IReadOnlyList<string> expectedBones)
@@ -11550,6 +11611,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         string? sourceGenderCue,
         string physicsContents,
         IReadOnlySet<string> physicsBoneNames,
+        IReadOnlySet<string> referenceBoneNames,
         MeshGeometrySignature? geometrySignature)
     {
         var tuning = BodyDetectionTuningCatalog.Current;
@@ -11619,6 +11681,18 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             if (boneSignatureScore > 0)
             {
                 evidence.Add($"bone-sig:{boneSignatureScore:P0}");
+            }
+        }
+        if (BuiltInBodyMetadataCatalog.TryGet(template.Body, out var referenceBoneMetadata) &&
+            referenceBoneMetadata.PhysicsBoneSignatures.Count > 0 &&
+            referenceBoneNames.Count > 0)
+        {
+            var referenceHits = CountBoneSignatureMatches(referenceBoneNames, referenceBoneMetadata.PhysicsBoneSignatures);
+            var referenceBoneSignatureScore = (double)referenceHits / referenceBoneMetadata.PhysicsBoneSignatures.Count;
+            if (referenceBoneSignatureScore > 0)
+            {
+                boneSignatureScore = Math.Max(boneSignatureScore, referenceBoneSignatureScore);
+                evidence.Add($"bone-sig-reference:{referenceBoneSignatureScore:P0}");
             }
         }
 
@@ -36224,6 +36298,24 @@ internal sealed class LocalExportService(
                    ["full load-order launch", "equip", "sprint", "jump / landing", "ragdoll / hit react", "save / reload"],
                    skeletonPhysicsRegions,
                    ["skeleton-compatibility.json", "world-physics.json", "runtime-validation-plan.json", "live-game-execution.json", "mod-stack-cross-validation.json"]));
+            }
+
+            if (wingRegions.Count > 0 ||
+                beastRegions.Count > 0 ||
+                skeletonMapping.UnsupportedBones.Count > 0)
+            {
+                var difficultRigRegions = wingRegions.Count > 0
+                   ? wingRegions
+                   : beastRegions.Count > 0
+                       ? beastRegions
+                       : (sensitiveRegions.Count > 0 ? sensitiveRegions : (hotspotRegions.Count > 0 ? hotspotRegions : coreRegions));
+                scenarios.Add(new InGameValidationScenario(
+                   "Difficult skeleton+physics chain stress sweep",
+                   skeletonMapping.AutomaticRemapSafety.Equals("unsafe", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
+                   $"Difficult rig-family signals and active physics profile '{physics.Profile}' require stress verification of chain ownership, damping stability, and collision routing under dense animation changes.",
+                   ["equip", "sprint", "jump / landing", "ragdoll / hit react", "save / reload"],
+                   difficultRigRegions,
+                   ["skeleton-compatibility.json", "world-physics.json", "pose-simulation-report.json", "runtime-validation-plan.json", "live-game-execution.json"]));
             }
 
            scenarios.Add(new InGameValidationScenario(
