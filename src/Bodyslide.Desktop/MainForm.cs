@@ -336,7 +336,8 @@ public sealed class MainForm : Form
             .GetExecutingAssembly()
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion ?? "1.0";
-        Text = $"SlideSmith v{appVersion}";
+        var stableVersion = appVersion.Split('+', 2)[0];
+        Text = $"SlideSmith v{stableVersion}";
         Name = "mainForm";
         AutoScaleMode = AutoScaleMode.Dpi;
         Width = 1240;
@@ -510,7 +511,6 @@ public sealed class MainForm : Form
         inputActions.Controls.Add(_inspectInputButton);
         inputActions.Controls.Add(_openInputButton);
         inputRow.Controls.Add(inputActions, 2, 0);
-        _topLayoutPanel.Controls.Add(inputRow, 0, 1);
 
         var modeRow = new TableLayoutPanel
         {
@@ -1059,7 +1059,19 @@ public sealed class MainForm : Form
             MaximumSize = new Size(920, 0),
         };
         outputSection.Controls.Add(_outputHintLabel, 0, 1);
-        _topLayoutPanel.Controls.Add(outputSection, 0, 4);
+        var pathSelectionPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 2,
+            AutoSize = true,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        pathSelectionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+        pathSelectionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+        pathSelectionPanel.Controls.Add(inputRow, 0, 0);
+        pathSelectionPanel.Controls.Add(outputSection, 1, 0);
+        _topLayoutPanel.Controls.Add(pathSelectionPanel, 0, 1);
 
         var cacheRow = CreateThreeColumnRow("Learning cache (optional)", out _cachePathTextBox);
         _cachePathTextBox.PlaceholderText = "Custom path for .conversion-learning-cache.json";
@@ -1391,7 +1403,7 @@ public sealed class MainForm : Form
         {
             Name = "resultsTabControl",
             Dock = DockStyle.Fill,
-            Multiline = true,
+            Multiline = false,
         };
         var logTabPage = new TabPage(DesktopSmokeTestContract.LogTabTitle) { Name = "logTabPage" };
         logTabPage.Controls.Add(_logTextBox);
@@ -1471,7 +1483,6 @@ public sealed class MainForm : Form
         _guidanceListView.SelectedIndexChanged += (_, _) => UpdatePathActionStates();
         _guidanceListView.DoubleClick += async (_, _) => await OpenSelectedGuidanceTargetAsync();
         _guidanceTabPage.Controls.Add(_guidanceListView);
-        _resultsTabControl.TabPages.Add(_guidanceTabPage);
         _reportsTabPage = new TabPage(DesktopSmokeTestContract.ReportsTabTitle) { Name = "reportsTabPage" };
         _reportsListView = new ListView
         {
@@ -2405,7 +2416,7 @@ public sealed class MainForm : Form
                 strictProofReady || remainingGapCount == 0 ? "OK" : "Warning",
                 strictProofReady || remainingGapCount == 0
                     ? $"Strict/universal blocker checklist is clear for the loaded output ({sourceReport}; coverage={proofCoverage})."
-                    : $"Loaded output still has {remainingGapCount} strict/universal blocker(s) ({sourceReport}; coverage={proofCoverage}). Use Next actions and the checklist report to close them."));
+                    : $"Loaded output still has {remainingGapCount} strict/universal blocker(s) ({sourceReport}; coverage={proofCoverage}). Use Summary recommendations and the checklist report to close them."));
         }
         catch (Exception ex)
         {
@@ -3225,7 +3236,7 @@ public sealed class MainForm : Form
                 : "Conversion complete. Preview and reports are ready.");
 
             _resultsTabControl.SelectedTab = guidanceNeedsReview
-                ? _guidanceTabPage
+                ? _summaryTabPage
                 : !string.IsNullOrWhiteSpace(_lastPreviewPath)
                     ? _previewTabPage
                     : _summaryTabPage;
@@ -4101,14 +4112,14 @@ public sealed class MainForm : Form
             cancellationToken.ThrowIfCancellationRequested();
             ApplyValidationGatePresentation(snapshot.ValidationState, guidanceNeedsReview);
             _resultsTabControl.SelectedTab = guidanceNeedsReview
-                ? _guidanceTabPage
+                ? _summaryTabPage
                 : previewPath is not null
                     ? _previewTabPage
                     : _summaryTabPage;
             AppendLog($"Loaded previous result from {sourceLabel}: {selectedFolder}");
             if (previewPath is null)
             {
-                AppendLog("Loaded reports/artifacts without an embedded preview; review Summary, Reports, Files, and Next actions for packaging/runtime details.");
+                AppendLog("Loaded reports/artifacts without an embedded preview; review Summary recommendations, Reports, and Files for packaging/runtime details.");
             }
 
             AppendLog(BuildValidationOutcomeLogMessage([selectedFolder], previewPath, guidanceNeedsReview));
@@ -4247,6 +4258,33 @@ public sealed class MainForm : Form
         AutoSizeListViewColumns(_summaryListView, 220, 420);
     }
 
+    private void MergeGuidanceIntoSummary(IReadOnlyList<GuidanceEntry> entries)
+    {
+        for (var index = _summaryListView.Items.Count - 1; index >= 0; index--)
+        {
+            if (_summaryListView.Items[index].Text.StartsWith("Recommended action", StringComparison.OrdinalIgnoreCase))
+            {
+                _summaryListView.Items.RemoveAt(index);
+            }
+        }
+
+        var topActions = entries
+            .OrderByDescending(entry => GetGuidancePriorityRank(entry.Priority))
+            .ThenBy(entry => entry.Area, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(entry => entry.Guidance, StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToList();
+        for (var index = 0; index < topActions.Count; index++)
+        {
+            var action = topActions[index];
+            var label = $"Recommended action {index + 1}";
+            var value = $"{action.Area} — {action.Guidance}";
+            _summaryListView.Items.Add(new ListViewItem([label, value]));
+        }
+
+        AutoSizeListViewColumns(_summaryListView, 220, 420);
+    }
+
     private void ApplyGuidanceItemStyles(UiThemePalette palette)
     {
         foreach (ListViewItem item in _guidanceListView.Items)
@@ -4356,6 +4394,7 @@ public sealed class MainForm : Form
         }
 
         AutoSizeListViewColumns(_guidanceListView, 180, 100, 460);
+        MergeGuidanceIntoSummary(buildResult.Entries);
         UpdateGuidanceActionButtonState();
 
         return buildResult.RequiresReview ||
@@ -4633,15 +4672,20 @@ public sealed class MainForm : Form
 
     private async Task OpenSelectedGuidanceTargetAsync()
     {
-        if (_guidanceListView.SelectedItems.Count == 0)
+        var selectedGuidanceItem = _guidanceListView.SelectedItems.Count > 0
+            ? _guidanceListView.SelectedItems[0]
+            : _guidanceListView.Items
+                .Cast<ListViewItem>()
+                .FirstOrDefault(item => item.Tag is string candidate && !string.IsNullOrWhiteSpace(candidate));
+        if (selectedGuidanceItem is null)
         {
             return;
         }
 
-        if (_guidanceListView.SelectedItems[0].Tag is not string targetPath ||
+        if (selectedGuidanceItem.Tag is not string targetPath ||
             string.IsNullOrWhiteSpace(targetPath))
         {
-            MessageBox.Show(this, "This next-action item does not have a direct file or folder to open.", "Open next action", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "This recommendation does not have a direct file or folder to open.", "Open recommended action", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
@@ -4657,7 +4701,7 @@ public sealed class MainForm : Form
 
         if (!File.Exists(targetPath))
         {
-            MessageBox.Show(this, "The file for this next-action item was not found.", "Open next action", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "The file for this recommendation was not found.", "Open recommended action", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             PopulateGuidanceTab(GetPreferredOutputDirectoryForOpen(), _lastPreviewPath);
             return;
         }
@@ -4872,7 +4916,6 @@ public sealed class MainForm : Form
             ? "needs-review"
             : state.EffectiveStatus;
         _previewTabPage.Text = ConversionValidationPresentation.BuildDesktopResultTabTitle("Preview", effectiveStatus);
-        _guidanceTabPage.Text = ConversionValidationPresentation.BuildDesktopResultTabTitle("Next actions", effectiveStatus);
         _statusLabel.Text = ConversionValidationPresentation.BuildDesktopStatusLabel(effectiveStatus, state.PreviewAvailable);
     }
 
@@ -5490,11 +5533,20 @@ public sealed class MainForm : Form
 
     private void UpdateGuidanceActionButtonState()
     {
-        _openGuidanceTargetButton.Text = "Open next action";
-        if (_activeConversion is not null ||
-            _guidanceListView.SelectedItems.Count == 0 ||
-            _guidanceListView.SelectedItems[0].Tag is not string selectedGuidanceTarget ||
-            string.IsNullOrWhiteSpace(selectedGuidanceTarget))
+        _openGuidanceTargetButton.Text = "Open recommended action";
+        if (_activeConversion is not null)
+        {
+            _openGuidanceTargetButton.Enabled = false;
+            return;
+        }
+
+        var selectedGuidanceTarget = _guidanceListView.SelectedItems.Count > 0
+            ? _guidanceListView.SelectedItems[0].Tag as string
+            : _guidanceListView.Items
+                .Cast<ListViewItem>()
+                .Select(item => item.Tag as string)
+                .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+        if (string.IsNullOrWhiteSpace(selectedGuidanceTarget))
         {
             _openGuidanceTargetButton.Enabled = false;
             return;
@@ -5507,7 +5559,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        _openGuidanceTargetButton.Text = BuildOpenPathButtonText(selectedGuidanceTarget, "Open next action");
+        _openGuidanceTargetButton.Text = BuildOpenPathButtonText(selectedGuidanceTarget, "Open recommended action");
     }
 
     private void UpdateReportActionButtonState()

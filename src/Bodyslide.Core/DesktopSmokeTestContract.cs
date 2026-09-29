@@ -38,7 +38,6 @@ public static class DesktopSmokeTestContract
         InspectTabTitle,
         SummaryTabTitle,
         PipelineTabTitle,
-        NextActionsTabTitle,
         ReportsTabTitle,
         CatalogTabTitle,
         ReadinessTabTitle,
