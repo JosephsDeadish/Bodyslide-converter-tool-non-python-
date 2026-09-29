@@ -237,7 +237,10 @@ internal static class Program
 
             if (index + 1 < args.Count)
             {
-                return NormalizeDiagnosticsPath(args[index + 1]);
+                if (!TryReadOptionToken(args[index + 1], out _, out _))
+                {
+                    return NormalizeDiagnosticsPath(args[index + 1]);
+                }
             }
         }
 

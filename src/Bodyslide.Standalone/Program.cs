@@ -383,14 +383,13 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
         var currentExeFullPath = Path.GetFullPath(currentExePath);
         var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
-        var launchedFromModOrganizer = IsLikelyModOrganizerLaunch(args, currentExeFullPath, Environment.CurrentDirectory) ||
-                                       (args.Length > 0 && !explicitCliLaunch);
+        var launchedFromModOrganizer = IsLikelyModOrganizerLaunch(args, currentExeFullPath, Environment.CurrentDirectory);
         WriteStartupDiagnostics(
             startupDiagnosticsPath,
             $"desktop-launch: mo2={launchedFromModOrganizer}, cli={explicitCliLaunch}, exe={currentExeFullPath}");
-        if (args.Length != 0 && explicitCliLaunch)
+        if (args.Length != 0 && (explicitCliLaunch || !launchedFromModOrganizer))
         {
-            WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: skipped (non-launcher arguments)");
+            WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: skipped (non-launcher invocation)");
             return false;
         }
 
@@ -824,7 +823,11 @@ static string? ResolveStartupDiagnosticsPath(IReadOnlyList<string> args)
 
         if (index + 1 < args.Count)
         {
-            return NormalizeDiagnosticsPath(args[index + 1]);
+            var next = args[index + 1];
+            if (!TryReadLongOptionName(next, out _))
+            {
+                return NormalizeDiagnosticsPath(next);
+            }
         }
     }
 

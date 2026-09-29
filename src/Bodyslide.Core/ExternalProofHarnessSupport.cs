@@ -732,6 +732,7 @@ internal static class ExternalProofHarnessSupport
             .ToArray();
         var componentMissingArtifacts = FilterMissingExpectedArtifacts(
             bundle.MissingExpectedArtifacts,
+            evidence,
             $"{EvidenceRootDirectory}/runtime-logs/",
             $"{EvidenceRootDirectory}/step-traces/",
             $"{EvidenceRootDirectory}/probe-observations/");
@@ -817,6 +818,7 @@ internal static class ExternalProofHarnessSupport
             ("load-order-state", $"{EvidenceRootDirectory}/load-order-state/"));
         var componentMissingArtifacts = FilterMissingExpectedArtifacts(
             bundle.MissingExpectedArtifacts,
+            evidence,
             $"{EvidenceRootDirectory}/screenshots/",
             $"{EvidenceRootDirectory}/runtime-logs/",
             $"{EvidenceRootDirectory}/scenario-observations/",
@@ -880,6 +882,7 @@ internal static class ExternalProofHarnessSupport
             ("selector-logs", $"{EvidenceRootDirectory}/selector-logs/"));
         var componentMissingArtifacts = FilterMissingExpectedArtifacts(
             bundle.MissingExpectedArtifacts,
+            evidence,
             $"{EvidenceRootDirectory}/screenshots/",
             $"{EvidenceRootDirectory}/step-traces/",
             $"{EvidenceRootDirectory}/selector-logs/");
@@ -1115,10 +1118,29 @@ internal static class ExternalProofHarnessSupport
 
     private static string[] FilterMissingExpectedArtifacts(
         IEnumerable<string> missingExpectedArtifacts,
+        IEnumerable<string> evidenceArtifacts,
         params string[] relevantPrefixes)
     {
+        var normalizedEvidence = evidenceArtifacts
+            .Where(static artifact => !string.IsNullOrWhiteSpace(artifact))
+            .Select(NormalizeEvidencePath)
+            .ToArray();
         return missingExpectedArtifacts
-            .Where(artifact => relevantPrefixes.Any(prefix => NormalizeEvidencePath(artifact).StartsWith(NormalizeEvidencePath(prefix), StringComparison.OrdinalIgnoreCase)))
+            .Where(artifact =>
+            {
+                var normalizedArtifact = NormalizeEvidencePath(artifact);
+                var matchedPrefixes = relevantPrefixes
+                    .Select(NormalizeEvidencePath)
+                    .Where(prefix => normalizedArtifact.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (matchedPrefixes.Length == 0)
+                {
+                    return false;
+                }
+
+                return matchedPrefixes.Any(prefix =>
+                    !normalizedEvidence.Any(evidence => evidence.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)));
+            })
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
