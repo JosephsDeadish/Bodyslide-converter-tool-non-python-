@@ -1098,7 +1098,8 @@ internal static class ExternalProofHarnessSupport
         string.Equals(status, "complete", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "done", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(status, "executed-pass", StringComparison.OrdinalIgnoreCase);
+        string.Equals(status, "executed-pass", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "executed-complete", StringComparison.OrdinalIgnoreCase);
 
     private static bool StatusMeansFail(string? status) =>
         string.Equals(status, "fail", StringComparison.OrdinalIgnoreCase) ||
@@ -1113,7 +1114,10 @@ internal static class ExternalProofHarnessSupport
         string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "warning", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "warn", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(status, "executed-incomplete", StringComparison.OrdinalIgnoreCase);
+        string.Equals(status, "executed-incomplete", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "planned-only", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "not-run", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "skipped", StringComparison.OrdinalIgnoreCase);
 
     private static bool? TryEvaluateWindowsHost(ImportedProofHostDetails host)
     {

@@ -8988,9 +8988,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             _ => $"Pack proof does not yet meet the minimum distinct coverage for matrix combination '{coverageKey}'."
         };
 
-    private static Dictionary<string, string> CollectMatrixCoordinateMap(IReadOnlyList<string> coordinates)
+    private static Dictionary<string, IReadOnlyList<string>> CollectMatrixCoordinateValuesMap(IReadOnlyList<string> coordinates)
     {
-        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var values = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var coordinate in coordinates)
         {
@@ -9012,28 +9012,65 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 continue;
             }
 
-            values[dimension] = value;
-        }
-
-        return values;
-    }
-
-    private static string? TryBuildMatrixCombinationSignature(
-        IReadOnlyDictionary<string, string> coordinateMap,
-        IReadOnlyList<string> dimensions)
-    {
-        var parts = new List<string>(dimensions.Count);
-        foreach (var dimension in dimensions)
-        {
-            if (!coordinateMap.TryGetValue(dimension, out var value) || string.IsNullOrWhiteSpace(value))
+            if (!values.TryGetValue(dimension, out var bucket))
             {
-                return null;
+                bucket = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                values[dimension] = bucket;
             }
 
-            parts.Add($"{dimension}:{value}");
+            bucket.Add(value);
         }
 
-        return string.Join(" | ", parts);
+        return values.ToDictionary(
+            static entry => entry.Key,
+            static entry => (IReadOnlyList<string>)entry.Value.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> BuildMatrixCombinationSignatures(
+        IReadOnlyDictionary<string, IReadOnlyList<string>> coordinateMap,
+        IReadOnlyList<string> dimensions)
+    {
+        if (dimensions.Count == 0)
+        {
+            return [];
+        }
+
+        var valueSets = new List<IReadOnlyList<string>>(dimensions.Count);
+        foreach (var dimension in dimensions)
+        {
+            if (!coordinateMap.TryGetValue(dimension, out var values) || values.Count == 0)
+            {
+                return [];
+            }
+
+            valueSets.Add(values);
+        }
+
+        var combinations = new List<string>();
+        var stack = new string[dimensions.Count];
+
+        void Expand(int depth)
+        {
+            if (depth >= dimensions.Count)
+            {
+                combinations.Add(string.Join(" | ", stack));
+                return;
+            }
+
+            var dimension = dimensions[depth];
+            foreach (var value in valueSets[depth])
+            {
+                stack[depth] = $"{dimension}:{value}";
+                Expand(depth + 1);
+            }
+        }
+
+        Expand(0);
+        return combinations
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static ConversionMatrixPackProofReport BuildConversionMatrixPackProofReport(
@@ -9136,7 +9173,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             .ToList();
         var matrixDimensions = CollectMatrixCoordinateDimensions(items.Select(item => item.MatrixCoordinates));
         var matrixCoordinateMaps = items
-            .Select(item => CollectMatrixCoordinateMap(item.MatrixCoordinates))
+            .Select(item => CollectMatrixCoordinateValuesMap(item.MatrixCoordinates))
             .ToList();
         var matrixDimensionCoverage = RequiredMatrixPackDimensions
             .Select(requirement =>
@@ -9161,9 +9198,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             .Select(requirement =>
             {
                 var combinations = matrixCoordinateMaps
-                    .Select(map => TryBuildMatrixCombinationSignature(map, requirement.Dimensions))
-                    .Where(static value => !string.IsNullOrWhiteSpace(value))
-                    .Cast<string>()
+                    .SelectMany(map => BuildMatrixCombinationSignatures(map, requirement.Dimensions))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
                     .ToList();
@@ -34605,9 +34640,11 @@ internal sealed class LocalExportService(
             .Concat(partitionSignals?.TopologyWarnings ?? [])
             .Concat(partitionSignals?.Warnings ?? [])
             .Concat(partitionSignals?.UnknownFinalPartitions ?? []);
-        var hardCaseFamily = BuildTopologyHardCaseFamily(hardCaseSignals);
+        var hardCaseFamilies = BuildTopologyHardCaseFamilies(hardCaseSignals);
+        var hardCaseFamily = hardCaseFamilies.FirstOrDefault() ?? "core-humanoid";
         var hardCaseVariant = BuildTopologyHardCaseVariant(hardCaseSignals);
-        var sourceSkeletonFamily = BuildSourceSkeletonMatrixFamily(skeletonMapping, sourceAssetSignals);
+        var sourceSkeletonFamilies = BuildSourceSkeletonMatrixFamilies(skeletonMapping, sourceAssetSignals);
+        var sourceSkeletonFamily = sourceSkeletonFamilies.FirstOrDefault() ?? "unknown";
         var skeletonVariant = skeletonMapping.SourceSkeletonUsedSparseInference
             ? $"sparse:{sourceSkeletonFamily}"
             : string.Equals(skeletonMapping.RemapCertainty?.Classification, "review-backed", StringComparison.OrdinalIgnoreCase)
@@ -34630,13 +34667,13 @@ internal sealed class LocalExportService(
                 ? "safe-remap"
                 : conversionReadiness.SkeletonRemapSafety;
         var pluginFamily = BuildPluginFamilyMatrixMode(modStackCrossValidation);
+        var pluginFamilies = BuildPluginFamilyMatrixModes(modStackCrossValidation);
         var masterChainMode = BuildMasterChainMatrixMode(modStackCrossValidation);
         var runtimePhysicsMode = string.Equals(physicsCompatibility.RequestedProfile, "none", StringComparison.OrdinalIgnoreCase)
             ? "physics-disabled"
             : $"{physicsCompatibility.RequestedProfile}-{physicsCompatibility.CollisionComplexity}";
-
-        return
-        [
+        var coordinates = new List<string>
+        {
             $"target-body:{targetBody}",
             $"target-body-family:{BuildTargetBodyFamily(targetBody)}",
             $"support-tier:{conversionReadiness.SupportTier}",
@@ -34652,7 +34689,14 @@ internal sealed class LocalExportService(
             $"plugin-family:{pluginFamily}",
             $"master-chain:{masterChainMode}",
             $"runtime-physics:{runtimePhysicsMode}"
-        ];
+        };
+
+        coordinates.AddRange(hardCaseFamilies.Select(family => $"hard-case-family:{family}"));
+        coordinates.AddRange(sourceSkeletonFamilies.Select(family => $"source-skeleton-family:{family}"));
+        coordinates.AddRange(pluginFamilies.Select(family => $"plugin-family:{family}"));
+        return coordinates
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static IReadOnlyList<string> BuildSourceAssetMatrixSignals(string? sourceAssetPath)
@@ -34711,6 +34755,130 @@ internal sealed class LocalExportService(
         }
 
         return "mixed-family";
+    }
+
+    private static IReadOnlyList<string> BuildPluginFamilyMatrixModes(ModStackCrossValidationReport? modStackCrossValidation)
+    {
+        if (modStackCrossValidation is null)
+        {
+            return ["plugin-free"];
+        }
+
+        var families = modStackCrossValidation.DistinctMeshFamilies
+            .Where(static family => !string.IsNullOrWhiteSpace(family))
+            .Select(static family => family.Trim().ToLowerInvariant().Replace(' ', '-'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (families.Count == 0)
+        {
+            families.Add(BuildPluginFamilyMatrixMode(modStackCrossValidation));
+        }
+        else
+        {
+            families.Add(BuildPluginFamilyMatrixMode(modStackCrossValidation));
+        }
+
+        return families
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildTopologyHardCaseFamilies(IEnumerable<string> signalValues)
+    {
+        var primary = BuildTopologyHardCaseFamily(signalValues);
+        var values = signalValues
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .ToArray();
+        var families = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            primary
+        };
+
+        static bool ContainsAny(IEnumerable<string> source, params string[] probes) =>
+            source.Any(value => probes.Any(probe => value.Contains(probe, StringComparison.OrdinalIgnoreCase)));
+
+        if (ContainsAny(values, "oral", "mouth", "tongue", "genital", "vagina", "shaft", "anus"))
+        {
+            families.Add("oral-genital-subpieces");
+        }
+
+        if (ContainsAny(values, "beast", "tail", "wing", "horn", "muzzle", "hoof", "paw", "draconic", "avian", "serp"))
+        {
+            families.Add("beast-custom-appendages");
+        }
+
+        if (ContainsAny(values, "cape", "cloak", "skirt", "drape", "chain", "tassel", "tentacle", "vine", "branch"))
+        {
+            families.Add("dangling-chain-cloth");
+        }
+
+        if (ContainsAny(values, "asymmetry", "scale-delta", "extreme-scale", "one-sided"))
+        {
+            families.Add("extreme-scale-asymmetry");
+        }
+
+        if (ContainsAny(values, "dense-collision", "collision-overlap", "penetration-cluster", "voxel-penetration"))
+        {
+            families.Add("collision-dense-overlap");
+        }
+
+        if (ContainsAny(values, "plate", "rigid", "mechanical", "gear", "segment", "exoskeleton"))
+        {
+            families.Add("rigid-segmented");
+        }
+
+        if (ContainsAny(values, "foot", "heel", "boot", "shoe", "ground"))
+        {
+            families.Add("footwear-world-mesh");
+        }
+
+        if (ContainsAny(values, "openwork", "window", "lattice", "loop", "hole", "boundary"))
+        {
+            families.Add("layered-openwork");
+        }
+
+        if (ContainsAny(values, "strap", "multipart", "split", "island", "layered"))
+        {
+            families.Add("multipart-straps-windows");
+        }
+
+        return families
+            .Where(static family => !string.IsNullOrWhiteSpace(family))
+            .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildSourceSkeletonMatrixFamilies(
+        SkeletonMappingResult skeletonMapping,
+        IReadOnlyList<string> sourceAssetSignals)
+    {
+        var families = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            BuildSourceSkeletonMatrixFamily(skeletonMapping, sourceAssetSignals)
+        };
+
+        foreach (var candidate in skeletonMapping.SourceSkeletonCandidates ?? [])
+        {
+            var candidateSignals = sourceAssetSignals
+                .Concat(candidate.Evidence ?? [])
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value.Trim())
+                .ToArray();
+            var candidateMapping = skeletonMapping with
+            {
+                SourceSkeleton = candidate.Label,
+                SourceSkeletonCandidates = [candidate],
+                SourceSkeletonUsedSparseInference = skeletonMapping.SourceSkeletonUsedSparseInference || candidate.UsedSparseInference
+            };
+            families.Add(BuildSourceSkeletonMatrixFamily(candidateMapping, candidateSignals));
+        }
+
+        return families
+            .Where(static family => !string.IsNullOrWhiteSpace(family))
+            .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string BuildMasterChainMatrixMode(ModStackCrossValidationReport? modStackCrossValidation)
