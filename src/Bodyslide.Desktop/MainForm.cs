@@ -198,6 +198,7 @@ public sealed class MainForm : Form
     private const int MainSplitPanel2Minimum = 220;
     private const int MaxLogCharacters = 120000;
     private const int TrimmedLogCharacters = 90000;
+    private const int MaxLoggedStepsPerResult = 80;
     private const int MaxAutoCacheLogEntries = 20;
     private const int AutoInspectDebounceMilliseconds = 700;
     private const double AutoDetectedSourceConfidenceFloor = 0.75;
@@ -3146,9 +3147,15 @@ public sealed class MainForm : Form
             {
                 var builder = new StringBuilder();
                 builder.AppendLine($"Output: {result.OutputDirectory}");
-                foreach (var step in result.Steps)
+                var displayedSteps = result.Steps.Take(MaxLoggedStepsPerResult).ToList();
+                foreach (var step in displayedSteps)
                 {
                     builder.AppendLine($"  - {step}");
+                }
+
+                if (result.Steps.Count > displayedSteps.Count)
+                {
+                    builder.AppendLine($"  - ... {result.Steps.Count - displayedSteps.Count} additional steps omitted from the desktop log for responsiveness.");
                 }
                 AppendLog(builder.ToString().TrimEnd());
             }
