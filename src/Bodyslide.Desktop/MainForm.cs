@@ -1590,13 +1590,9 @@ public sealed class MainForm : Form
                     : $"Startup input loaded from launcher: {_launchOptions.StartupInputPath}");
                 if (ShouldAutoInspectInputPath(_launchOptions.StartupInputPath))
                 {
-                    await RunStartupOperationWithTimeoutAsync(
-                        "auto-inspecting startup input",
-                        cancellationToken => InspectInputAsync(
-                            showDialogs: false,
-                            switchToInspectTab: false,
-                            automaticTrigger: true,
-                            externalCancellationToken: cancellationToken));
+                    ScheduleAutoInspectInput();
+                    _statusLabel.Text = "Ready — startup input loaded. Auto-inspection queued.";
+                    AppendLog("Startup input auto-inspection queued.");
                 }
                 else
                 {
