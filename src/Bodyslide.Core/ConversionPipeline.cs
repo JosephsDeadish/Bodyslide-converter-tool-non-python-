@@ -717,6 +717,20 @@ public sealed record ConversionMatrixProofReport(
     IReadOnlyList<string> BlockingGaps,
     IReadOnlyList<ConversionMatrixProofAxis> Axes,
     IReadOnlyList<string> ReviewArtifacts);
+public sealed record SupportCoverageSignal(
+    string Category,
+    string CoverageStatus,
+    string PhysicsStatus,
+    bool NeedsManualProof,
+    IReadOnlyList<string> Signals,
+    IReadOnlyList<string> ProofArtifacts);
+public sealed record SupportCoverageSignalsReport(
+    string TargetBody,
+    string SupportTier,
+    string ProofExecutionStatus,
+    string PhysicsCompatibilityStatus,
+    IReadOnlyList<SupportCoverageSignal> Categories,
+    DateTimeOffset GeneratedAt);
 public sealed record ModStackCrossValidationReport(
     string TargetBody,
     string TargetBodyFamily,
@@ -21762,6 +21776,21 @@ internal sealed class LocalExportService(
             RemainingGapsChecklistSupport.BuildRemainingGapsChecklistMarkdown(remainingGapsChecklist),
             cancellationToken);
         outputFiles.Add(remainingGapsChecklistPath);
+        var supportCoverageSignals = BuildSupportCoverageSignalsReport(
+            request.TargetBody,
+            conversionReadiness.SupportTier,
+            physicsCompatibility,
+            targetBodySupport,
+            inGameValidation,
+            conversionMatrixProof,
+            partitionSignals,
+            worldPhysics);
+        var supportCoverageSignalsPath = Path.Combine(outputDirectory, "support-coverage-signals.json");
+        await File.WriteAllTextAsync(
+            supportCoverageSignalsPath,
+            JsonSerializer.Serialize(supportCoverageSignals, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(supportCoverageSignalsPath);
 
         if (!string.IsNullOrWhiteSpace(zipPath))
         {
@@ -32282,6 +32311,134 @@ internal sealed class LocalExportService(
         };
     }
 
+    private static SupportCoverageSignalsReport BuildSupportCoverageSignalsReport(
+        string targetBody,
+        string supportTier,
+        PhysicsCompatibilityReport physicsCompatibility,
+        TargetBodySupportReport targetBodySupport,
+        InGameValidationReport inGameValidation,
+        ConversionMatrixProofReport conversionMatrixProof,
+        PartitionSignalReport? partitionSignals,
+        WorldObjectPhysicsReport worldPhysics)
+    {
+        var regionSignals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in targetBodySupport.ExpectedSemanticRegions)
+        {
+            regionSignals.Add(value);
+        }
+
+        foreach (var value in inGameValidation.CoreBodyRegions)
+        {
+            regionSignals.Add(value);
+        }
+
+        foreach (var value in inGameValidation.SensitiveRegions)
+        {
+            regionSignals.Add(value);
+        }
+
+        if (partitionSignals?.Regions is { Count: > 0 } partitionRegions)
+        {
+            foreach (var value in partitionRegions)
+            {
+                regionSignals.Add(value);
+            }
+        }
+
+        foreach (var value in physicsCompatibility.GeneratedPhysicsBones)
+        {
+            regionSignals.Add(value);
+        }
+
+        var proofSignalValues = conversionMatrixProof.Axes
+            .SelectMany(static axis => axis.Signals)
+            .Concat(conversionMatrixProof.BlockingGaps)
+            .Concat(conversionMatrixProof.MissingProofAxes)
+            .ToArray();
+
+        var categories = new List<SupportCoverageSignal>
+        {
+            BuildSupportCoverageCategory(
+                "heel",
+                aliases: ["heel", "heels", "foot", "feet", "ankle", "calf", "boot", "shoe"],
+                regionSignals,
+                proofSignalValues,
+                physicsCompatibility.HasSufficientPhysicsCoverage && worldPhysics.HeelAnalysis is not null,
+                ["world-physics.json", "in-game-validation.json", "preview-workbench.html"]),
+            BuildSupportCoverageCategory(
+                "mouth",
+                aliases: ["mouth", "jaw", "tongue", "throat", "muzzle", "snout"],
+                regionSignals,
+                proofSignalValues,
+                physicsCompatibility.IsCompatible,
+                ["in-game-validation.json", "conversion-matrix-proof.json", "preview-workbench.html"]),
+            BuildSupportCoverageCategory(
+                "genital",
+                aliases: ["genital", "genitals", "vagina", "labia", "anus", "shaft", "glans", "foreskin", "scrot", "sheath", "knot"],
+                regionSignals,
+                proofSignalValues,
+                physicsCompatibility.IsCompatible,
+                ["in-game-validation.json", "conversion-quality.json", "conversion-matrix-proof.json"]),
+            BuildSupportCoverageCategory(
+                "head-accessory",
+                aliases: ["head", "hair", "circlet", "helmet", "hood", "face", "ear", "horn"],
+                regionSignals,
+                proofSignalValues,
+                physicsCompatibility.IsCompatible,
+                ["conversion-quality.json", "conversion-matrix-proof.json", "preview-workbench.html"])
+        };
+
+        return new SupportCoverageSignalsReport(
+            TargetBody: targetBody,
+            SupportTier: supportTier,
+            ProofExecutionStatus: conversionMatrixProof.ProofExecutionStatus,
+            PhysicsCompatibilityStatus: physicsCompatibility.IsCompatible ? "compatible" : "needs-review",
+            Categories: categories,
+            GeneratedAt: DateTimeOffset.UtcNow);
+    }
+
+    private static SupportCoverageSignal BuildSupportCoverageCategory(
+        string category,
+        IReadOnlyList<string> aliases,
+        IReadOnlyCollection<string> regionSignals,
+        IReadOnlyCollection<string> proofSignals,
+        bool physicsCompatible,
+        IReadOnlyList<string> proofArtifacts)
+    {
+        var coverageSignals = regionSignals
+            .Where(signal => aliases.Any(alias => signal.Contains(alias, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var proofCoverageSignals = proofSignals
+            .Where(signal => aliases.Any(alias => signal.Contains(alias, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        foreach (var value in proofCoverageSignals)
+        {
+            if (!coverageSignals.Contains(value, StringComparer.OrdinalIgnoreCase))
+            {
+                coverageSignals.Add($"proof:{value}");
+            }
+        }
+
+        var coverageStatus = coverageSignals.Count switch
+        {
+            0 => "not-detected",
+            < 2 => "partial",
+            _ => "detected"
+        };
+        var needsManualProof = coverageStatus != "detected" || !physicsCompatible;
+        return new SupportCoverageSignal(
+            Category: category,
+            CoverageStatus: coverageStatus,
+            PhysicsStatus: physicsCompatible ? "compatible" : "needs-review",
+            NeedsManualProof: needsManualProof,
+            Signals: coverageSignals,
+            ProofArtifacts: proofArtifacts);
+    }
+
     private static IReadOnlyList<string> BuildExpectedGeneratedRootSupportFiles(bool hasPluginArtifacts)
     {
         var files = new List<string>
@@ -32292,6 +32449,7 @@ internal sealed class LocalExportService(
             "conversion-pipeline-profile.json",
             "conversion-quality.json",
             "conversion-matrix-proof.json",
+            "support-coverage-signals.json",
             "remaining-gaps-checklist.json",
             "remaining-gaps-checklist.md",
             "desktop-workflow-automation.json",
@@ -32335,6 +32493,7 @@ internal sealed class LocalExportService(
          fileName.Equals("conversion-pipeline-profile.json", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("conversion-matrix-proof.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("support-coverage-signals.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("remaining-gaps-checklist.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("remaining-gaps-checklist.md", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||

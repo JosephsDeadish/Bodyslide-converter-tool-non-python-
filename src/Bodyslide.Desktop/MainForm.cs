@@ -107,6 +107,8 @@ public sealed class MainForm : Form
     private readonly Label _targetDetailsLabel;
     private readonly Label _sourceDetailsLabel;
     private readonly Label _physicsDetailsLabel;
+    private readonly Label _startupHandoffStatusValueLabel;
+    private readonly Label _startupHandoffDetailsValueLabel;
     private readonly ProgressBar _progressBar;
     private readonly SplitContainer _mainSplitContainer;
     private readonly TabControl _resultsTabControl;
@@ -160,6 +162,7 @@ public sealed class MainForm : Form
     private bool _allowUserMainSplitOverride;
     private bool _startupResultLoadHandled;
     private bool _cacheInspectionInitialized;
+    private DateTimeOffset? _conversionCancellationRequestedAtUtc;
     private bool _userAdjustedMainSplit;
     private bool? _usesSingleColumnConversionLayout;
     private int? _userPreferredMainSplitDistance;
@@ -189,6 +192,8 @@ public sealed class MainForm : Form
         "pose-simulation-report.json",
         "world-physics.json",
         "plugin-patches.json",
+        "support-coverage-signals.json",
+        "runtime-stress-pass.json",
         "remaining-gaps-checklist.md",
         "remaining-gaps-pack-checklist.md",
     ];
@@ -207,6 +212,7 @@ public sealed class MainForm : Form
     private static readonly TimeSpan StartupOperationTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan ArchiveProgressUiRefreshInterval = TimeSpan.FromMilliseconds(1200);
     private static readonly TimeSpan ArchiveProgressLogInterval = TimeSpan.FromSeconds(20);
+    private const long LargeInputStressThresholdBytes = 100L * 1024L * 1024L;
 
     private enum UiTheme
     {
@@ -227,6 +233,17 @@ public sealed class MainForm : Form
 
     private sealed record GuidanceEntry(string Area, string Priority, string Guidance, string? TargetPath);
     private sealed record GuidanceBuildResult(IReadOnlyList<GuidanceEntry> Entries, bool RequiresReview, string GateStatus);
+    private sealed record RuntimeStressPassReport(
+        string InputPath,
+        string InputType,
+        long? InputSizeBytes,
+        bool LargeInputDetected,
+        int ProgressUiUpdateCount,
+        double? AverageUiUpdateGapMilliseconds,
+        double? MaxUiUpdateGapMilliseconds,
+        double? CancellationLatencyMilliseconds,
+        string Outcome,
+        DateTimeOffset RecordedAtUtc);
 
     private sealed class CoalescingBatchProgress(Control owner, Action<BatchProgressUpdate> onUiThread) : IProgress<BatchProgressUpdate>, IDisposable
     {
@@ -394,7 +411,53 @@ public sealed class MainForm : Form
         dropLabel.DragEnter += OnDragEnter;
         dropLabel.DragDrop += OnDragDrop;
         dropPanel.Controls.Add(dropLabel);
-        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Quick import", dropPanel), 0, 0);
+        var startupHandoffPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 2,
+            RowCount = 2,
+            AutoSize = true,
+            Margin = new Padding(0, 6, 0, 0),
+            Padding = new Padding(6),
+        };
+        startupHandoffPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        startupHandoffPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        startupHandoffPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        startupHandoffPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        startupHandoffPanel.Controls.Add(new Label { Text = "Status", AutoSize = true, Margin = new Padding(0, 0, 8, 0) }, 0, 0);
+        _startupHandoffStatusValueLabel = new Label
+        {
+            Text = "Direct launch",
+            AutoSize = true,
+            Dock = DockStyle.Fill
+        };
+        startupHandoffPanel.Controls.Add(_startupHandoffStatusValueLabel, 1, 0);
+        startupHandoffPanel.Controls.Add(new Label { Text = "Details", AutoSize = true, Margin = new Padding(0, 4, 8, 0) }, 0, 1);
+        _startupHandoffDetailsValueLabel = new Label
+        {
+            Text = "No launcher handoff diagnostics were provided.",
+            AutoEllipsis = true,
+            MaximumSize = new Size(980, 0),
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 4, 0, 0)
+        };
+        startupHandoffPanel.Controls.Add(_startupHandoffDetailsValueLabel, 1, 1);
+
+        var quickImportPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 1,
+            RowCount = 2,
+            AutoSize = true,
+        };
+        quickImportPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        quickImportPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        quickImportPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        quickImportPanel.Controls.Add(dropPanel, 0, 0);
+        quickImportPanel.Controls.Add(startupHandoffPanel, 0, 1);
+
+        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Quick import", quickImportPanel), 0, 0);
 
         var inputRow = CreateThreeColumnRow("Input", out _inputTextBox);
         _inputTextBox.Name = "inputPathTextBox";
@@ -1555,9 +1618,11 @@ public sealed class MainForm : Form
         {
             _allowUserMainSplitOverride = true;
             ApplyLauncherContextGuidance();
+            UpdateStartupHandoffTelemetry("Direct launch", "No launcher handoff diagnostics were provided.");
             if (!string.IsNullOrWhiteSpace(_launchOptions.StartupDiagnostics))
             {
                 AppendLog($"Launcher handoff diagnostics: {_launchOptions.StartupDiagnostics}");
+                UpdateStartupHandoffTelemetry("Launcher handoff detected", _launchOptions.StartupDiagnostics);
                 if (string.IsNullOrWhiteSpace(_statusLabel.Text) ||
                     _statusLabel.Text.StartsWith("Ready", StringComparison.OrdinalIgnoreCase))
                 {
@@ -1569,6 +1634,9 @@ public sealed class MainForm : Form
                 !string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory))
             {
                 _startupResultLoadHandled = true;
+                UpdateStartupHandoffTelemetry(
+                    _launchOptions.FromModOrganizerLauncher ? "Mod manager handoff" : "Launcher handoff",
+                    $"Startup result directory: {_launchOptions.StartupOutputDirectory}");
                 await RunStartupOperationWithTimeoutAsync(
                     "loading startup result",
                     cancellationToken => LoadResultDirectoryAsync(
@@ -1582,6 +1650,9 @@ public sealed class MainForm : Form
                 (File.Exists(_launchOptions.StartupInputPath) || Directory.Exists(_launchOptions.StartupInputPath)))
             {
                 _inputTextBox.Text = _launchOptions.StartupInputPath;
+                UpdateStartupHandoffTelemetry(
+                    _launchOptions.FromModOrganizerLauncher ? "Mod manager handoff" : "Launcher handoff",
+                    $"Startup input path: {_launchOptions.StartupInputPath}");
                 _statusLabel.Text = _launchOptions.FromModOrganizerLauncher
                     ? "Ready — input loaded from mod manager launcher."
                     : "Ready — input loaded from launcher.";
@@ -2959,6 +3030,18 @@ public sealed class MainForm : Form
         AppendLog($"Output folder: {ResolveEffectiveOutputDirectoryPreview()}");
         await Task.Yield();
 
+        var runtimeStressInputType = DetectInputType(input);
+        var runtimeStressInputSizeBytes = TryGetInputSizeBytes(input);
+        var runtimeStressLargeInputDetected = runtimeStressInputSizeBytes is { } bytes && bytes >= LargeInputStressThresholdBytes;
+        var runtimeStressIsCandidate = runtimeStressInputType is "folder" or "zip" or "7z";
+        var runtimeStressProgressUiUpdateCount = 0;
+        var runtimeStressUiGapTotalMs = 0d;
+        var runtimeStressUiGapSampleCount = 0;
+        var runtimeStressUiGapMaxMs = 0d;
+        DateTime? runtimeStressLastUiUpdateUtc = null;
+        string runtimeStressOutcome = "running";
+        _conversionCancellationRequestedAtUtc = null;
+
         try
         {
             var request = new ConversionRequest(
@@ -3027,6 +3110,20 @@ public sealed class MainForm : Form
                 {
                     return;
                 }
+
+                if (runtimeStressLastUiUpdateUtc is { } previousUiUpdateUtc)
+                {
+                    var gapMs = (now - previousUiUpdateUtc).TotalMilliseconds;
+                    runtimeStressUiGapTotalMs += gapMs;
+                    runtimeStressUiGapSampleCount++;
+                    if (gapMs > runtimeStressUiGapMaxMs)
+                    {
+                        runtimeStressUiGapMaxMs = gapMs;
+                    }
+                }
+
+                runtimeStressLastUiUpdateUtc = now;
+                runtimeStressProgressUiUpdateCount++;
 
                 lastProgressStatus = statusSuffix;
                 lastProgressUiUpdateUtc = now;
@@ -3160,23 +3257,54 @@ public sealed class MainForm : Form
                 results.Select(static result => result.OutputDirectory).ToArray(),
                 _lastPreviewPath,
                 guidanceNeedsReview));
+            runtimeStressOutcome = guidanceNeedsReview ? "completed-needs-review" : "completed";
             MessageBox.Show(this, "Conversion complete.", "SlideSmith", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (OperationCanceledException)
         {
             AppendLog("Conversion cancelled.");
             _statusLabel.Text = "Conversion cancelled.";
+            runtimeStressOutcome = "cancelled";
+            if (_conversionCancellationRequestedAtUtc is { } requestedAtUtc)
+            {
+                var latencyMs = (DateTimeOffset.UtcNow - requestedAtUtc).TotalMilliseconds;
+                AppendLog($"Cancellation latency: {latencyMs:0} ms from user request to stop.");
+            }
         }
         catch (Exception ex)
         {
             AppendLog($"Conversion failed: {ex.Message}");
             _statusLabel.Text = "Conversion failed.";
+            runtimeStressOutcome = "failed";
             MessageBox.Show(this, $"Conversion failed:\n{ex.Message}", "SlideSmith", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
+            if (runtimeStressIsCandidate && _lastOutputDirectory is not null)
+            {
+                var avgGapMs = runtimeStressUiGapSampleCount > 0
+                    ? runtimeStressUiGapTotalMs / runtimeStressUiGapSampleCount
+                    : (double?)null;
+                var cancellationLatencyMs = _conversionCancellationRequestedAtUtc is { } requestedAtUtc
+                    ? (double?)Math.Max(0d, (DateTimeOffset.UtcNow - requestedAtUtc).TotalMilliseconds)
+                    : null;
+                var runtimeStressReport = new RuntimeStressPassReport(
+                    InputPath: input,
+                    InputType: runtimeStressInputType,
+                    InputSizeBytes: runtimeStressInputSizeBytes,
+                    LargeInputDetected: runtimeStressLargeInputDetected,
+                    ProgressUiUpdateCount: runtimeStressProgressUiUpdateCount,
+                    AverageUiUpdateGapMilliseconds: avgGapMs,
+                    MaxUiUpdateGapMilliseconds: runtimeStressUiGapSampleCount > 0 ? runtimeStressUiGapMaxMs : null,
+                    CancellationLatencyMilliseconds: cancellationLatencyMs,
+                    Outcome: runtimeStressOutcome,
+                    RecordedAtUtc: DateTimeOffset.UtcNow);
+                WriteRuntimeStressPassReport(_lastOutputDirectory, runtimeStressReport);
+            }
+
             _activeConversion?.Dispose();
             _activeConversion = null;
+            _conversionCancellationRequestedAtUtc = null;
             SetBusyState(isBusy: false);
         }
     }
@@ -3471,6 +3599,7 @@ public sealed class MainForm : Form
         }
 
         _cancelButton.Text = "Cancelling...";
+        _conversionCancellationRequestedAtUtc = DateTimeOffset.UtcNow;
         _activeConversion.Cancel();
         AppendLog("Cancellation requested...");
         _statusLabel.Text = "Cancelling — waiting for the current conversion step to stop.";
@@ -3496,6 +3625,77 @@ public sealed class MainForm : Form
         _progressBar.Value = Math.Clamp(percent, 0, 100);
         _statusLabel.Text = statusText;
         _progressDetailsLabel.Text = $"Overall progress: {_progressBar.Value}%";
+    }
+
+    private static string DetectInputType(string inputPath)
+    {
+        if (Directory.Exists(inputPath))
+        {
+            return "folder";
+        }
+
+        var extension = Path.GetExtension(inputPath);
+        if (string.Equals(extension, ".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            return "zip";
+        }
+
+        if (string.Equals(extension, ".7z", StringComparison.OrdinalIgnoreCase))
+        {
+            return "7z";
+        }
+
+        return "file";
+    }
+
+    private static long? TryGetInputSizeBytes(string inputPath)
+    {
+        try
+        {
+            if (File.Exists(inputPath))
+            {
+                return new FileInfo(inputPath).Length;
+            }
+
+            if (!Directory.Exists(inputPath))
+            {
+                return null;
+            }
+
+            var totalBytes = 0L;
+            foreach (var file in Directory.EnumerateFiles(inputPath, "*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    totalBytes += new FileInfo(file).Length;
+                }
+                catch
+                {
+                }
+            }
+
+            return totalBytes;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void WriteRuntimeStressPassReport(string outputDirectory, RuntimeStressPassReport report)
+    {
+        try
+        {
+            Directory.CreateDirectory(outputDirectory);
+            var reportPath = Path.Combine(outputDirectory, "runtime-stress-pass.json");
+            var payload = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(reportPath, payload);
+            AppendLog($"Runtime stress pass report updated: {reportPath}");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Could not write runtime stress pass report: {ex.Message}");
+        }
     }
 
     private static string BuildProgressStageDisplay(BatchProgressUpdate update)
@@ -4955,7 +5155,30 @@ public sealed class MainForm : Form
         }
 
         _statusLabel.Text = "Ready — launched from mod manager context.";
+        UpdateStartupHandoffTelemetry("Mod manager context", "Launcher environment variables indicate mod manager startup context.");
         AppendLog("Mod manager context detected. Use 'Copy Mod Manager setup' for recommended executable/profile values.");
+    }
+
+    private void UpdateStartupHandoffTelemetry(string status, string details)
+    {
+        _startupHandoffStatusValueLabel.Text = string.IsNullOrWhiteSpace(status) ? "Unknown" : status.Trim();
+        _startupHandoffDetailsValueLabel.Text = TruncateForUi(details, 220);
+    }
+
+    private static string TruncateForUi(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "n/a";
+        }
+
+        var normalized = value.ReplaceLineEndings(" ").Trim();
+        if (normalized.Length <= maxLength)
+        {
+            return normalized;
+        }
+
+        return normalized[..Math.Max(0, maxLength - 1)] + "…";
     }
 
     private void CopyMo2SetupGuidance()
@@ -5363,16 +5586,19 @@ public sealed class MainForm : Form
         try
         {
             await operation(timeoutSource.Token);
+            UpdateStartupHandoffTelemetry("Startup handoff completed", $"Startup {operationLabel} completed.");
         }
         catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested)
         {
             _statusLabel.Text = "Startup work timed out. Continue manually from the buttons above.";
             AppendLog($"Startup {operationLabel} timed out after {StartupOperationTimeout.TotalSeconds:0} seconds.");
+            UpdateStartupHandoffTelemetry("Startup handoff timed out", $"Startup {operationLabel} timed out after {StartupOperationTimeout.TotalSeconds:0} seconds.");
         }
         catch (Exception ex)
         {
             _statusLabel.Text = "Startup work failed. Continue manually from the buttons above.";
             AppendLog($"Startup {operationLabel} failed: {ex.Message}");
+            UpdateStartupHandoffTelemetry("Startup handoff failed", $"Startup {operationLabel} failed: {ex.Message}");
         }
     }
 
@@ -6154,6 +6380,26 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Matrix axes", CountNestedArray(root, "Axes"), filePath);
                     AddReportMetric(reportName, "Strictly proven axes", CountObjectsWithBool(root, "Axes", "StrictlyProven", expected: true), filePath);
                     AddReportMetric(reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
+                    break;
+                case "support-coverage-signals.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    AddReportMetric(reportName, "Proof execution status", TryReadString(root, "ProofExecutionStatus"), filePath);
+                    AddReportMetric(reportName, "Physics compatibility status", TryReadString(root, "PhysicsCompatibilityStatus"), filePath);
+                    AddReportMetric(reportName, "Coverage categories", CountNestedArray(root, "Categories"), filePath);
+                    AddReportMetric(reportName, "Manual proof categories", CountObjectsWithBool(root, "Categories", "NeedsManualProof", expected: true), filePath);
+                    AddReportMetric(reportName, "Detected categories", CountObjectsWithString(root, "Categories", "CoverageStatus", "detected"), filePath);
+                    AddReportMetric(reportName, "Partial categories", CountObjectsWithString(root, "Categories", "CoverageStatus", "partial"), filePath);
+                    break;
+                case "runtime-stress-pass.json":
+                    AddReportMetric(reportName, "Input type", TryReadString(root, "InputType"), filePath);
+                    AddReportMetric(reportName, "Large input detected", FormatBool(TryReadBoolValue(root, "LargeInputDetected")), filePath);
+                    AddReportMetric(reportName, "Input size bytes", TryReadInt(root, "InputSizeBytes"), filePath);
+                    AddReportMetric(reportName, "UI updates", TryReadInt(root, "ProgressUiUpdateCount"), filePath);
+                    AddReportMetric(reportName, "Avg UI update gap ms", TryReadString(root, "AverageUiUpdateGapMilliseconds"), filePath);
+                    AddReportMetric(reportName, "Max UI update gap ms", TryReadString(root, "MaxUiUpdateGapMilliseconds"), filePath);
+                    AddReportMetric(reportName, "Cancellation latency ms", TryReadString(root, "CancellationLatencyMilliseconds"), filePath);
+                    AddReportMetric(reportName, "Outcome", TryReadString(root, "Outcome"), filePath);
                     break;
                 case "conversion-matrix-pack-proof.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
@@ -8366,6 +8612,19 @@ public sealed class MainForm : Form
         return value
             .EnumerateArray()
             .Count(item => TryReadBoolValue(item, boolPropertyName) == expected)
+            .ToString();
+    }
+
+    private static string CountObjectsWithString(JsonElement element, string arrayPropertyName, string propertyName, string expected)
+    {
+        if (!TryGetProperty(element, arrayPropertyName, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return "0";
+        }
+
+        return value
+            .EnumerateArray()
+            .Count(item => string.Equals(TryReadString(item, propertyName), expected, StringComparison.OrdinalIgnoreCase))
             .ToString();
     }
 

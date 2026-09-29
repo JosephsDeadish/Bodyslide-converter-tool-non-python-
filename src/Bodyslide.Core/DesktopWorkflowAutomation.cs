@@ -521,6 +521,26 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Strictly proven axes", CountObjectsWithBool(root, "Axes", "StrictlyProven", expected: true), filePath);
                     Add(metrics, reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
                     break;
+                case "support-coverage-signals.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    Add(metrics, reportName, "Proof execution status", TryReadString(root, "ProofExecutionStatus"), filePath);
+                    Add(metrics, reportName, "Physics compatibility status", TryReadString(root, "PhysicsCompatibilityStatus"), filePath);
+                    Add(metrics, reportName, "Coverage categories", CountNestedArray(root, "Categories"), filePath);
+                    Add(metrics, reportName, "Manual proof categories", CountObjectsWithBool(root, "Categories", "NeedsManualProof", expected: true), filePath);
+                    Add(metrics, reportName, "Detected categories", CountObjectsWithString(root, "Categories", "CoverageStatus", "detected"), filePath);
+                    Add(metrics, reportName, "Partial categories", CountObjectsWithString(root, "Categories", "CoverageStatus", "partial"), filePath);
+                    break;
+                case "runtime-stress-pass.json":
+                    Add(metrics, reportName, "Input type", TryReadString(root, "InputType"), filePath);
+                    Add(metrics, reportName, "Large input detected", FormatBool(TryReadBoolValue(root, "LargeInputDetected")), filePath);
+                    Add(metrics, reportName, "Input size bytes", TryReadString(root, "InputSizeBytes"), filePath);
+                    Add(metrics, reportName, "UI updates", TryReadString(root, "ProgressUiUpdateCount"), filePath);
+                    Add(metrics, reportName, "Avg UI update gap ms", TryReadString(root, "AverageUiUpdateGapMilliseconds"), filePath);
+                    Add(metrics, reportName, "Max UI update gap ms", TryReadString(root, "MaxUiUpdateGapMilliseconds"), filePath);
+                    Add(metrics, reportName, "Cancellation latency ms", TryReadString(root, "CancellationLatencyMilliseconds"), filePath);
+                    Add(metrics, reportName, "Outcome", TryReadString(root, "Outcome"), filePath);
+                    break;
                 case "proof-harness-bundle.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Canonical entrypoint", TryReadString(root, "CanonicalEntryPoint"), filePath);
@@ -845,6 +865,11 @@ internal static class DesktopWorkflowAutomation
     private static int CountObjectsWithBool(JsonElement element, string arrayPropertyName, string boolPropertyName, bool expected) =>
         TryGetProperty(element, arrayPropertyName, out var value) && value.ValueKind == JsonValueKind.Array
             ? value.EnumerateArray().Count(item => TryReadBoolValue(item, boolPropertyName) == expected)
+            : 0;
+
+    private static int CountObjectsWithString(JsonElement element, string arrayPropertyName, string propertyName, string expected) =>
+        TryGetProperty(element, arrayPropertyName, out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray().Count(item => string.Equals(TryReadString(item, propertyName), expected, StringComparison.OrdinalIgnoreCase))
             : 0;
 
     private static string? TryReadDistinctNestedArrayValues(JsonElement element, string arrayPropertyName, string nestedPropertyName)

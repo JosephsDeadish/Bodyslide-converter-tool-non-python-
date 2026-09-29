@@ -382,13 +382,17 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
         }
 
         var currentExeFullPath = Path.GetFullPath(currentExePath);
-        var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
-        var launcherSignal = IsExplicitLauncherSignal(args);
-        var launchedFromModOrganizer = IsLikelyModOrganizerLaunch(args, currentExeFullPath, Environment.CurrentDirectory);
+        var launchDecision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            args,
+            currentExeFullPath,
+            Environment.CurrentDirectory);
+        var explicitCliLaunch = launchDecision.ExplicitCliLaunchDetected;
+        var launcherSignal = launchDecision.LauncherSignalDetected;
+        var launchedFromModOrganizer = launchDecision.ModManagerLaunchDetected;
         WriteStartupDiagnostics(
             startupDiagnosticsPath,
             $"desktop-launch: launcherSignal={launcherSignal}, mo2={launchedFromModOrganizer}, cli={explicitCliLaunch}, exe={currentExeFullPath}");
-        if (args.Length != 0 && explicitCliLaunch && !launcherSignal)
+        if (!launchDecision.ShouldAttemptDesktopHandoff)
         {
             WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: skipped (non-launcher invocation)");
             return false;
@@ -660,7 +664,7 @@ static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<s
         return;
     }
 
-    var alreadyTagged = forwardedArgs.Any(IsMo2LauncherArg);
+    var alreadyTagged = forwardedArgs.Any(StandaloneStartupRouting.IsModManagerLauncherArgument);
     if (!alreadyTagged)
     {
         startInfo.ArgumentList.Add("--mo2-launcher");
@@ -713,91 +717,6 @@ static bool HasStartupDiagnosticsArgumentWithValue(IReadOnlyList<string> args)
 
     return false;
 }
-
-static bool IsLikelyModOrganizerLaunch(IReadOnlyList<string> args, string? executablePath, string? workingDirectory) =>
-    IsLikelyModOrganizerEnvironment() ||
-    args.Any(IsMo2LauncherArg) ||
-    HasLauncherPathOptionArgument(args) ||
-    args.Any(IsLikelyLauncherPathArgument) ||
-    (PathLooksLikeModOrganizerManagedLocation(executablePath) &&
-     PathLooksLikeModOrganizerManagedLocation(workingDirectory));
-
-static bool HasExplicitStandaloneCliSwitch(IReadOnlyList<string> args) =>
-    HasStandaloneCommandSwitch(args) || HasStandaloneConversionSwitches(args);
-
-static bool HasStandaloneCommandSwitch(IReadOnlyList<string> args) =>
-    args.Any(static arg =>
-    {
-        if (!TryReadLongOptionName(arg, out var option))
-        {
-            return false;
-        }
-
-        if (option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
-            option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
-            option.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("vortex", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return option.Equals("pause", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("help", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("h", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("list-bodies", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("list-presets", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("list-profiles", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("list-physics", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("self-check", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("conversion-guide", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("export-cache", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("body-reference", StringComparison.OrdinalIgnoreCase);
-    });
-
-static bool HasStandaloneConversionSwitches(IReadOnlyList<string> args)
-{
-    var hasTarget = false;
-    var hasConversionModifier = false;
-
-    foreach (var arg in args)
-    {
-        if (!TryReadLongOptionName(arg, out var option))
-        {
-            continue;
-        }
-
-        if (option.Equals("target", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("targets", StringComparison.OrdinalIgnoreCase))
-        {
-            hasTarget = true;
-            continue;
-        }
-
-        if (option.Equals("preset", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("presets", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("deformation-profile", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("source-body", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("physics", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("cache-path", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("zip", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("skeleton-nif", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("skeleton-nif-path", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("generate-bodyslide-files", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("custom-profiles", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("world-drop-mode", StringComparison.OrdinalIgnoreCase) ||
-            option.Equals("shared-plugin-output", StringComparison.OrdinalIgnoreCase))
-        {
-            hasConversionModifier = true;
-        }
-    }
-
-    return hasTarget || hasConversionModifier;
-}
-
-static bool IsExplicitLauncherSignal(IReadOnlyList<string> args) =>
-    IsLikelyModOrganizerEnvironment() ||
-    args.Any(IsMo2LauncherArg) ||
-    HasLauncherPathOptionArgument(args);
 
 static bool TryReadLongOptionName(string? arg, out string option)
 {
@@ -952,181 +871,6 @@ static bool IsStandaloneOptionMatch(string? arg, string optionName)
     }
 
     return option.Equals(optionName, StringComparison.OrdinalIgnoreCase);
-}
-
-static bool IsMo2LauncherArg(string? arg)
-{
-    if (string.IsNullOrWhiteSpace(arg))
-    {
-        return false;
-    }
-
-    var trimmed = arg.Trim();
-    if (trimmed.StartsWith("--", StringComparison.Ordinal))
-    {
-        trimmed = trimmed[2..];
-    }
-    else if (trimmed.StartsWith("-", StringComparison.Ordinal) || trimmed.StartsWith("/", StringComparison.Ordinal))
-    {
-        trimmed = trimmed[1..];
-    }
-
-    if (trimmed.Length == 0)
-    {
-        return false;
-    }
-
-    var separatorIndex = trimmed.IndexOf('=');
-    if (separatorIndex >= 0)
-    {
-        trimmed = trimmed[..separatorIndex];
-    }
-
-    return trimmed.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
-           trimmed.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
-           trimmed.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
-           trimmed.Equals("vortex", StringComparison.OrdinalIgnoreCase) ||
-           trimmed.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
-           trimmed.Equals("from-vortex", StringComparison.OrdinalIgnoreCase) ||
-           trimmed.Equals("from-mo2", StringComparison.OrdinalIgnoreCase);
-}
-
-static bool IsLikelyModOrganizerEnvironment()
-{
-    return HasEnvironmentVariable("MO2_INSTANCE") ||
-           HasEnvironmentVariable("USVFS_PARAMETERS") ||
-           HasEnvironmentVariable("USVFS_PROCESS") ||
-           HasEnvironmentVariable("USVFS_PROXY") ||
-           HasEnvironmentVariable("MODORGANIZER_INSTANCE") ||
-           HasEnvironmentVariable("MODORGANIZER_PATH") ||
-           HasEnvironmentVariable("MODORGANIZER_ROOT") ||
-           HasEnvironmentVariable("VORTEX_USERDATA") ||
-           HasEnvironmentVariable("VORTEX_PROFILE_ID") ||
-           HasEnvironmentVariable("VORTEX_STAGING_FOLDER") ||
-           HasEnvironmentVariable("VORTEX_INSTANCE_ID") ||
-           HasEnvironmentVariable("VORTEX_SESSION");
-}
-
-static bool HasEnvironmentVariable(string name) =>
-    !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
-
-static bool PathLooksLikeModOrganizerManagedLocation(string? path)
-{
-    if (string.IsNullOrWhiteSpace(path))
-    {
-        return false;
-    }
-
-    var normalizedPath = path.Replace('\\', '/');
-    return normalizedPath.Contains("mod organizer", StringComparison.OrdinalIgnoreCase) ||
-           normalizedPath.Contains("modorganizer", StringComparison.OrdinalIgnoreCase) ||
-           normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase) ||
-           normalizedPath.Contains("/vortex/", StringComparison.OrdinalIgnoreCase) ||
-           normalizedPath.Contains("black tree gaming", StringComparison.OrdinalIgnoreCase);
-}
-
-static bool IsLikelyLauncherPathArgument(string? arg)
-{
-    if (string.IsNullOrWhiteSpace(arg))
-    {
-        return false;
-    }
-
-    var trimmed = arg.Trim().Trim('"');
-    if (trimmed.Length == 0 || trimmed.StartsWith("--", StringComparison.Ordinal))
-    {
-        return false;
-    }
-
-    if (!trimmed.Contains('\\') &&
-        !trimmed.Contains('/') &&
-        !trimmed.Contains(':'))
-    {
-        return false;
-    }
-
-    return PathLooksLikeModOrganizerManagedLocation(trimmed);
-}
-
-static bool HasLauncherPathOptionArgument(IReadOnlyList<string> args)
-{
-    for (var index = 0; index < args.Count; index++)
-    {
-        var arg = args[index];
-        if (!TryReadLongOptionName(arg, out var option))
-        {
-            continue;
-        }
-
-        if (!option.Equals("mo2-output", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("mo2-result", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("mo2-mod", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("mo2-path", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("modorganizer-path", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("load-result", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("result", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("output", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("input", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("vortex-output", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("vortex-result", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("vortex-mod", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("vortex-path", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("vortex-stage", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("vortex-staging", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("vortex-deployment", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("mods-path", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("mod-path", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("staging-path", StringComparison.OrdinalIgnoreCase))
-        {
-            continue;
-        }
-
-        string? value = null;
-        var inlineSeparatorIndex = arg.IndexOf('=');
-        if (inlineSeparatorIndex < 0)
-        {
-            var colonIndex = arg.IndexOf(':');
-            if (colonIndex > 1)
-            {
-                inlineSeparatorIndex = colonIndex;
-            }
-        }
-
-        if (inlineSeparatorIndex >= 0)
-        {
-            if (inlineSeparatorIndex < arg.Length - 1)
-            {
-                value = arg[(inlineSeparatorIndex + 1)..];
-            }
-        }
-        else if (index + 1 < args.Count && !TryReadLongOptionName(args[index + 1], out _))
-        {
-            value = args[index + 1];
-        }
-
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            continue;
-        }
-
-        var normalized = value.Trim().Trim('"');
-        if (normalized.Length == 0)
-        {
-            continue;
-        }
-
-        if (File.Exists(normalized) || Directory.Exists(normalized))
-        {
-            return true;
-        }
-
-        if (normalized.Contains('\\') || normalized.Contains('/') || normalized.Contains(':'))
-        {
-            return true;
-        }
-    }
-
-    return false;
 }
 
 static IReadOnlyList<string> ParseDelimitedValues(string? value) =>

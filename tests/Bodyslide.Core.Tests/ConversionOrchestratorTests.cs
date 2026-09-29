@@ -20745,7 +20745,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(File.Exists(perOutputChecklistJsonPath), "remaining-gaps-checklist.json was not written for converted output.");
             var perOutputChecklistPath = Path.Combine(firstOutputDirectory, "remaining-gaps-checklist.md");
             Assert.True(File.Exists(perOutputChecklistPath), "remaining-gaps-checklist.md was not written for converted output.");
+            var supportCoverageSignalsPath = Path.Combine(firstOutputDirectory, "support-coverage-signals.json");
+            Assert.True(File.Exists(supportCoverageSignalsPath), "support-coverage-signals.json was not written for converted output.");
             using var perOutputChecklistJson = JsonDocument.Parse(await File.ReadAllTextAsync(perOutputChecklistJsonPath));
+            using var supportCoverageSignalsJson = JsonDocument.Parse(await File.ReadAllTextAsync(supportCoverageSignalsPath));
             var perOutputChecklist = await File.ReadAllTextAsync(perOutputChecklistPath);
             Assert.Equal("conversion-matrix-proof.json", perOutputChecklistJson.RootElement.GetProperty("SourceReport").GetString());
             Assert.Equal("Alien Hybrid", perOutputChecklistJson.RootElement.GetProperty("TargetBody").GetString());
@@ -20754,6 +20757,26 @@ public sealed class RealisticModPackFixtureTests
                 static category => string.Equals(category, "missing-proof-axis", StringComparison.OrdinalIgnoreCase));
             Assert.Contains("Remaining strict/universal proof gaps checklist", perOutputChecklist, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Missing proof axis:", perOutputChecklist, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("Alien Hybrid", supportCoverageSignalsJson.RootElement.GetProperty("TargetBody").GetString());
+            Assert.Contains(
+                supportCoverageSignalsJson.RootElement.GetProperty("Categories").EnumerateArray().Select(static category => category.GetProperty("Category").GetString()),
+                static category => string.Equals(category, "heel", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                supportCoverageSignalsJson.RootElement.GetProperty("Categories").EnumerateArray().Select(static category => category.GetProperty("Category").GetString()),
+                static category => string.Equals(category, "mouth", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                supportCoverageSignalsJson.RootElement.GetProperty("Categories").EnumerateArray().Select(static category => category.GetProperty("Category").GetString()),
+                static category => string.Equals(category, "genital", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                supportCoverageSignalsJson.RootElement.GetProperty("Categories").EnumerateArray().Select(static category => category.GetProperty("Category").GetString()),
+                static category => string.Equals(category, "head-accessory", StringComparison.OrdinalIgnoreCase));
+            var perOutputSnapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(firstOutputDirectory, previewPath: null);
+            Assert.Contains(
+                perOutputSnapshot.ReportMetrics,
+                metric => string.Equals(metric.ReportName, "support-coverage-signals.json", StringComparison.OrdinalIgnoreCase) &&
+                          string.Equals(metric.Property, "Coverage categories", StringComparison.OrdinalIgnoreCase) &&
+                          int.TryParse(metric.Value, out var categoryCount) &&
+                          categoryCount >= 4);
 
             var desktopSnapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath: null);
             Assert.Contains(
