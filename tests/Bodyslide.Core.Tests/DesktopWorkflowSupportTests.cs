@@ -335,6 +335,63 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_RecognizesMixedQuotedInlineAndColonModManagerPayloads()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "mods root");
+        var outputDirectory = Path.Combine(workingDirectory, "staging output");
+        var inputDirectory = Path.Combine(workingDirectory, "incoming payload");
+        Directory.CreateDirectory(outputDirectory);
+        Directory.CreateDirectory(inputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    $"/input:\"{inputDirectory}\"",
+                    $"--vortex-output=\"{outputDirectory}\"",
+                    "--from-vortex"
+                ]);
+
+            Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(workingDirectory)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_UsesLatestMixedOutputAliasAsInputFallbackWhenNoResultMarkersExist()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "mods root");
+        var inputDirectory = Path.Combine(workingDirectory, "mo2 profile");
+        var nonResultDirectory = Path.Combine(workingDirectory, "staging output");
+        Directory.CreateDirectory(inputDirectory);
+        Directory.CreateDirectory(nonResultDirectory);
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    $"/mo2-path:\"{inputDirectory}\"",
+                    $"--output:{nonResultDirectory}",
+                    "--mo2-launcher"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(nonResultDirectory, options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(workingDirectory)!, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParseLaunchOptions_ReadsStartupDiagnosticsArgumentAndPrefersMo2ResultPath()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

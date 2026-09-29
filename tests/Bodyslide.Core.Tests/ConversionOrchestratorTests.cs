@@ -12490,6 +12490,67 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public async Task SignatureBodyDetectionService_DetectsBodyFromTriSupportPayloadWithoutXmlSupportFile()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "outfit_0.nif");
+        var triPath = Path.Combine(workingDirectory, "support.tri");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllBytesAsync(
+                triPath,
+                BuildInlineTriPayload(
+                    1,
+                    ("BHUNPWaist", [(0.125f, 0f, 0f)])));
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [triPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("BHUNP", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("mesh:", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+
+        static byte[] BuildInlineTriPayload(int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+        {
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms, Encoding.ASCII, leaveOpen: true);
+            writer.Write(Encoding.ASCII.GetBytes("TRIP"));
+            writer.Write(Encoding.ASCII.GetBytes("FRTRI003"));
+            writer.Write((ushort)0);
+            writer.Write((ushort)1);
+            writer.Write((uint)vertexCount);
+            writer.Write((uint)morphs.Length);
+            writer.Write((uint)0);
+
+            foreach (var morph in morphs)
+            {
+                writer.Write((uint)Math.Clamp(morph.Name.Length, 0, byte.MaxValue));
+                writer.Write(Encoding.ASCII.GetBytes(morph.Name));
+                writer.Write((uint)morph.Deltas.Count);
+                foreach (var delta in morph.Deltas)
+                {
+                    writer.Write(delta.X);
+                    writer.Write(delta.Y);
+                    writer.Write(delta.Z);
+                    writer.Write((ushort)0);
+                }
+            }
+
+            writer.Flush();
+            return ms.ToArray();
+        }
+    }
+
+    [Fact]
     public async Task SignatureBodyDetectionService_DoesNotMisclassifyUunpReferenceAs3Ba()
     {
         var service = new SignatureBodyDetectionService();
@@ -17803,6 +17864,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(scenarioNames, static name => string.Equals(name, "Jaw/tongue pose stress sweep", StringComparison.Ordinal));
             Assert.Contains(scenarioNames, static name => string.Equals(name, "Genital/groin collision stress sweep", StringComparison.Ordinal));
             Assert.Contains(scenarioNames, static name => string.Equals(name, "Heel IK and ground-contact sweep", StringComparison.Ordinal));
+            Assert.Contains(scenarioNames, static name => string.Equals(name, "Follower/beast/custom-rig physics variance sweep", StringComparison.Ordinal));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.Contains("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
@@ -17842,6 +17904,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(scenarioNames, static name => string.Equals(name, "Jaw/tongue pose stress sweep", StringComparison.Ordinal));
             Assert.Contains(scenarioNames, static name => string.Equals(name, "Genital/groin collision stress sweep", StringComparison.Ordinal));
             Assert.Contains(scenarioNames, static name => string.Equals(name, "Heel IK and ground-contact sweep", StringComparison.Ordinal));
+            Assert.Contains(scenarioNames, static name => string.Equals(name, "Follower/beast/custom-rig physics variance sweep", StringComparison.Ordinal));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.Contains("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
@@ -18019,6 +18082,70 @@ public sealed class RealisticModPackFixtureTests
                 .First(summary => string.Equals(summary.GetProperty("Dimension").GetString(), "source-skeleton-family", StringComparison.OrdinalIgnoreCase));
             Assert.True(skeletonCoverage.GetProperty("DistinctValueCount").GetInt32() >= 1);
             Assert.True(packProof.RootElement.GetProperty("UniqueMatrixCoordinateCount").GetInt32() >= 1);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchRunner_RealisticRareTopologyFrameworkEdgeMixModPackDirectory_ExpandsRareTopologyAndRigCoverage()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticRareTopologyFrameworkEdgeMixModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(results.Count >= 2);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var packProofPath = Path.Combine(outputDirectory, "conversion-matrix-pack-proof.json");
+            Assert.True(File.Exists(packProofPath), "conversion-matrix-pack-proof.json was not written.");
+            using var packProof = JsonDocument.Parse(await File.ReadAllTextAsync(packProofPath));
+            Assert.True(packProof.RootElement.GetProperty("UniqueMatrixCoordinateCount").GetInt32() >= 1);
+
+            var checklistPath = Path.Combine(outputDirectory, "remaining-gaps-pack-checklist.md");
+            Assert.True(File.Exists(checklistPath));
+            var checklist = await File.ReadAllTextAsync(checklistPath);
+            Assert.Contains("Missing matrix", checklist, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchRunner_RealisticRareFollowerBeastPhysicsVarianceModPackDirectory_ExpandsRuntimeSkeletonFamilyVarianceCoverage()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticRareFollowerBeastPhysicsVarianceModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "Alien Hybrid", outputDirectory));
+            Assert.True(results.Count >= 2);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            foreach (var result in results)
+            {
+                var inGameJsonPath = Path.Combine(result.OutputDirectory, "in-game-validation.json");
+                Assert.True(File.Exists(inGameJsonPath));
+                using var inGameReport = JsonDocument.Parse(await File.ReadAllTextAsync(inGameJsonPath));
+                var scenarioNames = inGameReport.RootElement
+                    .GetProperty("ScenarioMatrix")
+                    .EnumerateArray()
+                    .Select(static entry => entry.GetProperty("Name").GetString())
+                    .Where(static name => !string.IsNullOrWhiteSpace(name))
+                    .ToArray();
+                Assert.Contains(scenarioNames, static name => string.Equals(name, "Follower/beast/custom-rig physics variance sweep", StringComparison.Ordinal));
+            }
         }
         finally
         {

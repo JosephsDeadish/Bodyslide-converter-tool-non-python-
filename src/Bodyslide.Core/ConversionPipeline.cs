@@ -11128,7 +11128,9 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
                 var extension = Path.GetExtension(path);
                 return extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
                        extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
-                       extension.Equals(".xml", StringComparison.OrdinalIgnoreCase);
+                       extension.Equals(".xml", StringComparison.OrdinalIgnoreCase) ||
+                       extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
+                       extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase);
             })
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(24)
@@ -11151,6 +11153,50 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
             try
             {
+                var extension = Path.GetExtension(file);
+                if (extension.Equals(".tri", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (TriMorphReader.TryRead(file, out var triPayload) && triPayload is not null)
+                    {
+                        foreach (var morph in triPayload.Morphs)
+                        {
+                            if (!string.IsNullOrWhiteSpace(morph.Name))
+                            {
+                                DiscoverBodyHintTokens(discoveredSignals, hintTokens, morph.Name);
+                            }
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (BsdMorphReader.TryRead(file, out var bsdPayload) &&
+                        !string.IsNullOrWhiteSpace(bsdPayload?.SliderName))
+                    {
+                        DiscoverBodyHintTokens(discoveredSignals, hintTokens, bsdPayload!.SliderName);
+                    }
+
+                    continue;
+                }
+
+                if (extension.Equals(".osd", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (OsdMorphReader.TryRead(file, out var osdPayload) && osdPayload is not null)
+                    {
+                        foreach (var morph in osdPayload.Morphs)
+                        {
+                            if (!string.IsNullOrWhiteSpace(morph.Name))
+                            {
+                                DiscoverBodyHintTokens(discoveredSignals, hintTokens, morph.Name);
+                            }
+                        }
+                    }
+
+                    continue;
+                }
+
                 await using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 using var reader = new StreamReader(stream);
                 var snippetLength = (int)Math.Min(192_000, stream.Length);
@@ -11182,6 +11228,25 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         }
 
         return discoveredSignals.ToArray();
+    }
+
+    private static void DiscoverBodyHintTokens(
+        HashSet<string> discoveredSignals,
+        IReadOnlySet<string> hintTokens,
+        string rawSignal)
+    {
+        if (string.IsNullOrWhiteSpace(rawSignal))
+        {
+            return;
+        }
+
+        foreach (var token in hintTokens)
+        {
+            if (rawSignal.Contains(token, StringComparison.OrdinalIgnoreCase))
+            {
+                discoveredSignals.Add(token);
+            }
+        }
     }
 
     private static IReadOnlySet<string> BuildBodySlideHintTokens()
@@ -36105,6 +36170,27 @@ internal sealed class LocalExportService(
         if (!string.Equals(physics.Profile, "none", StringComparison.OrdinalIgnoreCase) ||
            worldPhysics.RuntimePhysicsProfileGenerated)
         {
+            if (RequiresFollowerBeastCustomRigPhysicsVarianceSweep(
+                    skeletonMapping,
+                    raceCompatibility,
+                    targetBody,
+                    physics,
+                    worldPhysics))
+            {
+                var varianceRegions = sensitiveRegions.Count > 0
+                    ? sensitiveRegions
+                    : beastRegions.Count > 0
+                        ? beastRegions
+                        : (hotspotRegions.Count > 0 ? hotspotRegions : coreRegions);
+                scenarios.Add(new InGameValidationScenario(
+                    "Follower/beast/custom-rig physics variance sweep",
+                    skeletonMapping.AutomaticRemapSafety.Equals("unsafe", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
+                    BuildFollowerBeastCustomRigPhysicsVarianceSummary(skeletonMapping, raceCompatibility, targetBody, physics, worldPhysics),
+                    ["full load-order launch", "equip", "walk", "sprint", "jump / landing", "save / reload"],
+                    varianceRegions,
+                    ["skeleton-compatibility.json", "world-physics.json", "runtime-validation-plan.json", "live-game-execution.json", "mod-stack-cross-validation.json"]));
+            }
+
             if (skeletonMapping.UnsupportedBones.Count > 0 ||
                skeletonMapping.SourceSkeletonUsedSparseInference ||
                !skeletonMapping.AutomaticRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase))
@@ -36169,6 +36255,83 @@ internal sealed class LocalExportService(
         }
 
         return scenarios;
+    }
+
+    private static bool RequiresFollowerBeastCustomRigPhysicsVarianceSweep(
+        SkeletonMappingResult skeletonMapping,
+        RaceCompatibilityReport? raceCompatibility,
+        string targetBody,
+        PhysicsConfig physics,
+        WorldObjectPhysicsReport worldPhysics)
+    {
+        if (string.Equals(physics.Profile, "none", StringComparison.OrdinalIgnoreCase) &&
+            !worldPhysics.RuntimePhysicsProfileGenerated)
+        {
+            return false;
+        }
+
+        if (IsBeastOrExoticTarget(targetBody))
+        {
+            return true;
+        }
+
+        var rigSignals = new[] { skeletonMapping.SourceSkeleton }
+            .Concat(skeletonMapping.SourceSkeletonCandidates?.Select(static candidate => candidate.Label) ?? [])
+            .Concat(skeletonMapping.SourceSkeletonEvidence ?? [])
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .ToArray();
+        if (rigSignals.Any(static signal => IsFollowerBeastCustomRigSignal(signal)))
+        {
+            return true;
+        }
+
+        var raceSignals = (raceCompatibility?.Warnings ?? [])
+            .Concat(raceCompatibility?.IncompatibleRaces ?? [])
+            .Where(static value => !string.IsNullOrWhiteSpace(value));
+        return raceSignals.Any(static signal => IsFollowerBeastCustomRigSignal(signal));
+    }
+
+    private static bool IsFollowerBeastCustomRigSignal(string signal)
+    {
+        return signal.Contains("follower", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("beast", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("custom", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("sparse", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("sam", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("tng", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("ube", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("equine", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("serpentine", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("digitigrade", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("avian", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("spriggan", StringComparison.OrdinalIgnoreCase) ||
+               signal.Contains("horned", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildFollowerBeastCustomRigPhysicsVarianceSummary(
+        SkeletonMappingResult skeletonMapping,
+        RaceCompatibilityReport? raceCompatibility,
+        string targetBody,
+        PhysicsConfig physics,
+        WorldObjectPhysicsReport worldPhysics)
+    {
+        var sourceLabels = new[] { skeletonMapping.SourceSkeleton }
+            .Concat(skeletonMapping.SourceSkeletonCandidates?.Select(static candidate => candidate.Label) ?? [])
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToArray();
+        var rigSummary = sourceLabels.Length == 0
+            ? "rig-family evidence remained sparse"
+            : $"rig-family signals: {string.Join(", ", sourceLabels)}";
+        var raceWarningCount = (raceCompatibility?.Warnings.Count ?? 0) + (raceCompatibility?.IncompatibleRaces.Count ?? 0);
+        var raceSummary = raceWarningCount > 0
+            ? $"race/follower compatibility warnings: {raceWarningCount}"
+            : "no race-compatibility warnings were raised";
+        var runtimeSummary = worldPhysics.RuntimePhysicsProfileGenerated
+            ? "runtime physics profile output was generated"
+            : "runtime physics profile output stayed static";
+        return $"Follower/beast/custom-rig skeleton variance was detected for {targetBody}; {rigSummary}; requested physics profile '{physics.Profile}' with collision mode '{worldPhysics.Mode}', and {runtimeSummary}. Reconfirm chain routing and collision ownership across mixed framework states ({raceSummary}).";
     }
 
     private static IReadOnlyList<string> IntersectInGameRegions(IEnumerable<string> candidates, params string[] expectedRegions) =>
