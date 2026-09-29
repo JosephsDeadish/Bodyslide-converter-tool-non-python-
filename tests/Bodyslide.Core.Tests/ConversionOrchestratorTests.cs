@@ -20097,6 +20097,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.Equal(results.Count, packProof.RootElement.GetProperty("TotalCount").GetInt32());
             Assert.False(packProof.RootElement.GetProperty("StrictProofReady").GetBoolean());
             Assert.True(packProof.RootElement.GetProperty("NonStrictProofCount").GetInt32() > 0);
+            Assert.True(packProof.RootElement.GetProperty("ExternalValidationPendingCount").GetInt32() > 0);
+            Assert.True(packProof.RootElement.GetProperty("PlannedOnlyCount").GetInt32() > 0);
             Assert.True(packProof.RootElement.GetProperty("UniqueMatrixCoordinateCount").GetInt32() > 0);
             Assert.Equal(1, packProof.RootElement.GetProperty("UniqueTargetBodyCount").GetInt32());
             Assert.Contains(
@@ -20149,6 +20151,9 @@ public sealed class RealisticModPackFixtureTests
                 packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
                 static gap => gap is not null && gap.Contains("body × skeleton × plugin × runtime physics", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
+                static gap => gap is not null && gap.Contains("External live-game validation is still pending", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 packProof.RootElement.GetProperty("DistinctSupportTiers").EnumerateArray().Select(static item => item.GetString()),
                 static tier => string.Equals(tier, "experimental-manual-cleanup", StringComparison.OrdinalIgnoreCase));
             Assert.Equal(7, packProof.RootElement.GetProperty("Axes").GetArrayLength());
@@ -20193,8 +20198,14 @@ public sealed class RealisticModPackFixtureTests
                 packChecklistJson.RootElement.GetProperty("RemainingGaps").EnumerateArray().Select(static item => item.GetProperty("Category").GetString()),
                 static category => string.Equals(category, "missing-matrix-dimension", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                packChecklistJson.RootElement.GetProperty("RemainingGaps").EnumerateArray().Select(static item => item.GetProperty("Category").GetString()),
+                static category => string.Equals(category, "external-live-game-validation", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 packChecklistJson.RootElement.GetProperty("RemainingGaps").EnumerateArray().Select(static item => item.GetProperty("Description").GetString()),
                 static description => description is not null && description.Contains("Missing matrix combination coverage: body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                packChecklistJson.RootElement.GetProperty("RemainingGaps").EnumerateArray().Select(static item => item.GetProperty("Description").GetString()),
+                static description => description is not null && description.Contains("External live-game validation pending", StringComparison.OrdinalIgnoreCase));
             Assert.Contains("Missing matrix dimension coverage: target-body", packChecklist, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Missing matrix combination coverage: body-skeleton-plugin-runtime", packChecklist, StringComparison.OrdinalIgnoreCase);
 

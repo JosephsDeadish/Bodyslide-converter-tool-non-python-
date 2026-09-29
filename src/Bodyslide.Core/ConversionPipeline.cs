@@ -1797,6 +1797,7 @@ public sealed record ConversionMatrixPackProofItem(
     string MatrixCoordinateKey,
     IReadOnlyList<string> MatrixCoordinates,
     string ProofCoverage,
+    string ProofExecutionStatus,
     bool StrictProofReady,
     IReadOnlyList<string> MissingProofAxes,
     IReadOnlyList<string> BlockingGaps);
@@ -1811,6 +1812,10 @@ public sealed record ConversionMatrixPackProofReport(
     int UniqueTargetBodyFamilyCount,
     string ProofCoverage,
     bool StrictProofReady,
+    int ExecutedCompleteCount,
+    int ExecutedIncompleteCount,
+    int PlannedOnlyCount,
+    int ExternalValidationPendingCount,
     IReadOnlyList<string> MatrixCoordinateKeys,
     IReadOnlyList<string> DistinctTargetBodies,
     IReadOnlyList<string> DistinctTargetBodyFamilies,
@@ -1879,6 +1884,30 @@ internal static class RemainingGapsChecklistSupport
     public static RemainingGapsChecklistReport BuildRemainingGapsChecklistReport(ConversionMatrixPackProofReport report)
     {
         var checklistItems = new List<RemainingGapsChecklistItem>();
+        if (report.ExternalValidationPendingCount > 0)
+        {
+            checklistItems.Add(new RemainingGapsChecklistItem(
+                Category: "external-live-game-validation",
+                Description: $"External live-game validation pending for {report.ExternalValidationPendingCount} output(s).",
+                Source: "ExternalValidationPendingCount"));
+        }
+
+        if (report.ExecutedIncompleteCount > 0)
+        {
+            checklistItems.Add(new RemainingGapsChecklistItem(
+                Category: "proof-execution",
+                Description: $"Imported proof evidence is incomplete for {report.ExecutedIncompleteCount} output(s).",
+                Source: "ExecutedIncompleteCount"));
+        }
+
+        if (report.PlannedOnlyCount > 0)
+        {
+            checklistItems.Add(new RemainingGapsChecklistItem(
+                Category: "proof-execution",
+                Description: $"Proof execution is still planned-only for {report.PlannedOnlyCount} output(s).",
+                Source: "PlannedOnlyCount"));
+        }
+
         checklistItems.AddRange(report.MissingProofAxes
             .Where(axis => !string.IsNullOrWhiteSpace(axis))
             .Select(axis => new RemainingGapsChecklistItem(
@@ -9030,6 +9059,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                     MatrixCoordinateKey: proofReport.MatrixCoordinateKey,
                     MatrixCoordinates: proofReport.MatrixCoordinates,
                     ProofCoverage: proofReport.ProofCoverage,
+                    ProofExecutionStatus: proofReport.ProofExecutionStatus,
                     StrictProofReady: proofReport.StrictProofReady,
                     MissingProofAxes: proofReport.MissingProofAxes,
                     BlockingGaps: proofReport.BlockingGaps));
@@ -9046,6 +9076,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 MatrixCoordinateKey: "missing-proof-report",
                 MatrixCoordinates: [],
                 ProofCoverage: "missing-proof-report",
+                ProofExecutionStatus: "missing-proof-report",
                 StrictProofReady: false,
                 MissingProofAxes: missingAxes,
                 BlockingGaps:
@@ -9183,6 +9214,24 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             .ToList();
 
         var strictProofReadyCount = items.Count(item => item.StrictProofReady);
+        var executedCompleteCount = items.Count(item => IsExecutedPackProofStatus(item.ProofExecutionStatus));
+        var executedIncompleteCount = items.Count(item => IsIncompletePackProofStatus(item.ProofExecutionStatus));
+        var plannedOnlyCount = items.Count(item => IsPlannedOnlyPackProofStatus(item.ProofExecutionStatus));
+        var externalValidationPendingCount = items.Count - executedCompleteCount;
+        if (externalValidationPendingCount > 0)
+        {
+            blockingGaps.Add($"External live-game validation is still pending for {externalValidationPendingCount} of {items.Count} outputs (proof execution status not executed-pass).");
+        }
+
+        if (executedIncompleteCount > 0)
+        {
+            blockingGaps.Add($"Imported proof evidence is incomplete for {executedIncompleteCount} of {items.Count} outputs (proof execution status executed-incomplete).");
+        }
+        blockingGaps = blockingGaps
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         var strictProofReady = items.Count > 0 &&
                                strictProofReadyCount == items.Count &&
                                missingMatrixDimensions.Count == 0 &&
@@ -9204,6 +9253,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             UniqueTargetBodyFamilyCount: distinctTargetBodyFamilies.Count,
             ProofCoverage: proofCoverage,
             StrictProofReady: strictProofReady,
+            ExecutedCompleteCount: executedCompleteCount,
+            ExecutedIncompleteCount: executedIncompleteCount,
+            PlannedOnlyCount: plannedOnlyCount,
+            ExternalValidationPendingCount: externalValidationPendingCount,
             MatrixCoordinateKeys: matrixCoordinateKeys,
             DistinctTargetBodies: distinctTargetBodies,
             DistinctTargetBodyFamilies: distinctTargetBodyFamilies,
@@ -9219,6 +9272,19 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             Items: items,
             GeneratedAt: DateTimeOffset.UtcNow);
     }
+
+    private static bool IsExecutedPackProofStatus(string? status) =>
+        !string.IsNullOrWhiteSpace(status) &&
+        (status.Equals("executed-pass", StringComparison.OrdinalIgnoreCase) ||
+         status.Equals("executed-complete", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsIncompletePackProofStatus(string? status) =>
+        !string.IsNullOrWhiteSpace(status) &&
+        status.Equals("executed-incomplete", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPlannedOnlyPackProofStatus(string? status) =>
+        !string.IsNullOrWhiteSpace(status) &&
+        status.Equals("planned-only", StringComparison.OrdinalIgnoreCase);
 
     private static ConversionQualityReport? TryReadConversionQualityReport(ConversionResult result)
     {
