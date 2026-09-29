@@ -34134,6 +34134,30 @@ internal sealed class LocalExportService(
             return "beast-custom-appendages";
         }
 
+        if (signals.Any(static value => value.Contains("cape", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("cloak", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("skirt", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("drape", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("tassel", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("chain", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("tentacle", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("vine", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("branch", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("tendril", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "dangling-chain-cloth";
+        }
+
+        if (signals.Any(static value => value.Contains("plate", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("rigid", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("mechanical", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("gear", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("segment", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("exoskeleton", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "rigid-segmented";
+        }
+
         if (signals.Any(static value => value.Contains("foot", StringComparison.OrdinalIgnoreCase) ||
                                       value.Contains("heel", StringComparison.OrdinalIgnoreCase) ||
                                       value.Contains("boot", StringComparison.OrdinalIgnoreCase) ||
@@ -34174,10 +34198,38 @@ internal sealed class LocalExportService(
         }
 
         var normalized = label.ToLowerInvariant();
+        var candidateSignals = skeletonMapping.SourceSkeletonCandidates?
+            .SelectMany(static candidate => new[] { candidate.Label }.Concat(candidate.Evidence))
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .ToArray() ?? [];
+        static bool ContainsAnySignal(IEnumerable<string> signals, params string[] probes) =>
+            signals.Any(value => probes.Any(probe => value.Contains(probe, StringComparison.OrdinalIgnoreCase)));
+
         if (normalized.Contains("sparse", StringComparison.Ordinal) ||
             skeletonMapping.SourceSkeletonUsedSparseInference)
         {
-            return "custom-sparse";
+            if (ContainsAnySignal(candidateSignals, "beast", "digitigrade", "equine", "avian", "serp", "draconic", "insectoid", "aquatic", "spriggan", "alien"))
+            {
+                return "custom-sparse-beast";
+            }
+
+            if (ContainsAnySignal(candidateSignals, "sam", "sos", "tng"))
+            {
+                return "custom-sparse-male";
+            }
+
+            if (ContainsAnySignal(candidateSignals, "ube", "cbbe", "bhunp", "unp"))
+            {
+                return "custom-sparse-female";
+            }
+
+            if (ContainsAnySignal(candidateSignals, "xpmsse"))
+            {
+                return "custom-sparse-xpmsse";
+            }
+
+            return "custom-sparse-generic";
         }
 
         if (normalized.Contains("sam", StringComparison.Ordinal) ||
@@ -34218,6 +34270,13 @@ internal sealed class LocalExportService(
             normalized.Contains("biped", StringComparison.Ordinal))
         {
             return "non-skyrim-biped";
+        }
+
+        if (normalized.Contains("custom", StringComparison.Ordinal) ||
+            normalized.Contains("framework", StringComparison.Ordinal) ||
+            normalized.Contains("hybrid", StringComparison.Ordinal))
+        {
+            return "custom-framework";
         }
 
         return normalized.Replace(' ', '-');
@@ -34290,6 +34349,18 @@ internal sealed class LocalExportService(
         if (modStackCrossValidation.DistinctMeshFamilyCount == 1)
         {
             return modStackCrossValidation.DistinctMeshFamilies[0].Trim().ToLowerInvariant().Replace(' ', '-');
+        }
+
+        var normalizedFamilies = modStackCrossValidation.DistinctMeshFamilies
+            .Where(static family => !string.IsNullOrWhiteSpace(family))
+            .Select(static family => family.Trim().ToLowerInvariant().Replace(' ', '-'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
+            .Take(2)
+            .ToArray();
+        if (normalizedFamilies.Length >= 2)
+        {
+            return $"mixed-{normalizedFamilies[0]}-plus-{normalizedFamilies[1]}";
         }
 
         return "mixed-family";

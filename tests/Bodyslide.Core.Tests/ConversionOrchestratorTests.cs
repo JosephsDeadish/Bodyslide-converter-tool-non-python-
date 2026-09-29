@@ -19744,7 +19744,7 @@ public sealed class RealisticModPackFixtureTests
             var selectedProbeIds = complete ? probeIds : probeIds.Take(Math.Max(1, probeIds.Count - 1)).ToArray();
             var selectedScenarioNames = complete ? scenarios.Keys.ToArray() : scenarios.Keys.Take(Math.Max(1, scenarios.Count - 1)).ToArray();
             var selectedFlows = complete ? flows : flows.Take(Math.Max(1, flows.Count - 1)).ToArray();
-            var status = complete ? "pass" : "incomplete";
+            var status = complete ? "completed" : "incomplete";
 
             var payload = new
             {
@@ -19798,7 +19798,12 @@ public sealed class RealisticModPackFixtureTests
                     ValidationSaveProfile = scenarios[name],
                     ObservedSignals = new[] { "runtime-scenarios-dispatched", "host-observations-captured" },
                     MissingSignals = Array.Empty<string>(),
-                    EvidenceArtifacts = new[] { $"proof-evidence/scenario-observations/{BuildScenarioEvidenceKey(name)}/notes.txt" },
+                    EvidenceArtifacts = new[]
+                    {
+                        complete
+                            ? $"proof-evidence/scenario-observations/{BuildScenarioEvidenceKey(name).Replace('-', '_')}/notes.txt"
+                            : $"proof-evidence/scenario-observations/{BuildScenarioEvidenceKey(name)}/notes.txt"
+                    },
                     Notes = Array.Empty<string>()
                 }).ToArray(),
                 ProbeResults = selectedProbeIds.Select(id => new

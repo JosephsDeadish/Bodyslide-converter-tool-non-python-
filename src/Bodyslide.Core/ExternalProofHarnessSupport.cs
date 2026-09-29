@@ -795,7 +795,7 @@ internal static class ExternalProofHarnessSupport
             .ToArray();
         var scenarioEvidenceMismatches = scenarioResults.Values
             .Where(result => expectedScenarioProfiles.TryGetValue(result.Scenario, out var profile) &&
-                             !ContainsEvidencePrefix(result.EvidenceArtifacts, $"{EvidenceRootDirectory}/scenario-observations/{BuildScenarioEvidenceKey(profile.Name)}/"))
+                             !HasScenarioEvidenceLayout(result.EvidenceArtifacts, profile.Name))
             .Select(static result => $"scenario-evidence:{result.Scenario}")
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -1003,7 +1003,7 @@ internal static class ExternalProofHarnessSupport
             return "executed-fail";
         }
 
-        return missingCount > 0 || string.Equals(componentStatus, "incomplete", StringComparison.OrdinalIgnoreCase)
+        return missingCount > 0 || StatusMeansIncomplete(componentStatus)
             ? "executed-incomplete"
             : "executed-fail";
     }
@@ -1077,12 +1077,26 @@ internal static class ExternalProofHarnessSupport
         string.Equals(status, "pass", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "passed", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(status, "success", StringComparison.OrdinalIgnoreCase);
+        string.Equals(status, "success", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "complete", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "done", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "executed-pass", StringComparison.OrdinalIgnoreCase);
 
     private static bool StatusMeansFail(string? status) =>
         string.Equals(status, "fail", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(status, "error", StringComparison.OrdinalIgnoreCase);
+        string.Equals(status, "error", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "fatal", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "executed-fail", StringComparison.OrdinalIgnoreCase);
+
+    private static bool StatusMeansIncomplete(string? status) =>
+        string.Equals(status, "incomplete", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "partial", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "warning", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "warn", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "executed-incomplete", StringComparison.OrdinalIgnoreCase);
 
     private static bool HostLooksWindows(ImportedProofHostDetails host) =>
         !string.IsNullOrWhiteSpace(host.OperatingSystem) &&
@@ -1113,6 +1127,100 @@ internal static class ExternalProofHarnessSupport
     {
         var normalizedPrefix = NormalizeEvidencePath(expectedPrefix);
         return evidenceArtifacts.Any(artifact => NormalizeEvidencePath(artifact).StartsWith(normalizedPrefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasScenarioEvidenceLayout(IEnumerable<string> evidenceArtifacts, string scenarioName)
+    {
+        var canonicalPrefix = $"{EvidenceRootDirectory}/scenario-observations/{BuildScenarioEvidenceKey(scenarioName)}/";
+        if (ContainsEvidencePrefix(evidenceArtifacts, canonicalPrefix))
+        {
+            return true;
+        }
+
+        var loosePrefix = $"{EvidenceRootDirectory}/scenario-observations/{BuildLooseScenarioEvidenceKey(scenarioName)}/";
+        if (ContainsEvidencePrefix(evidenceArtifacts, loosePrefix))
+        {
+            return true;
+        }
+
+        var expectedSignature = BuildScenarioComparisonSignature(scenarioName);
+        if (expectedSignature.Length == 0)
+        {
+            return false;
+        }
+
+        return evidenceArtifacts
+            .Select(ExtractScenarioObservationFolderKey)
+            .Where(static key => !string.IsNullOrWhiteSpace(key))
+            .Select(BuildScenarioComparisonSignature)
+            .Any(signature => signature.Equals(expectedSignature, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string BuildLooseScenarioEvidenceKey(string scenarioName)
+    {
+        if (string.IsNullOrWhiteSpace(scenarioName))
+        {
+            return "scenario";
+        }
+
+        var key = scenarioName
+            .Trim()
+            .ToLowerInvariant()
+            .Replace(' ', '_')
+            .Replace('/', '_')
+            .Replace('\\', '_')
+            .Replace(':', '_')
+            .Replace('-', '_');
+        while (key.Contains("__", StringComparison.Ordinal))
+        {
+            key = key.Replace("__", "_", StringComparison.Ordinal);
+        }
+
+        return key.Trim('_');
+    }
+
+    private static string ExtractScenarioObservationFolderKey(string? evidencePath)
+    {
+        var normalized = NormalizeEvidencePath(evidencePath);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        var marker = $"{EvidenceRootDirectory}/scenario-observations/";
+        var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return string.Empty;
+        }
+
+        var remaining = normalized[(markerIndex + marker.Length)..];
+        var separatorIndex = remaining.IndexOf('/');
+        if (separatorIndex < 0)
+        {
+            return remaining.Trim();
+        }
+
+        return remaining[..separatorIndex].Trim();
+    }
+
+    private static string BuildScenarioComparisonSignature(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var character in value.Trim().ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(character);
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static string NormalizeEvidencePath(string? path) =>
