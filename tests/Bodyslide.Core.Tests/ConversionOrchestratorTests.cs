@@ -20031,6 +20031,173 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 matrixProof.RootElement.GetProperty("ImportedEvidenceArtifacts").EnumerateArray().Select(static item => item.GetString()),
                 static value => value is not null && value.StartsWith("proof-evidence/", StringComparison.OrdinalIgnoreCase));
+
+            var malformedPayload = new
+            {
+                contractVersion = "1.0",
+                harnessKind = "external-proof-malformed-variant-runner",
+                status = (string?)null,
+                hostDetails = new
+                {
+                    platform = 11,
+                    runner = true,
+                    launcher = (string?)null,
+                    modOrganizer = 123,
+                    profile = false,
+                    observationMode = (object?)null,
+                    hostCapabilities = new object?[] { null, 42, true, new { value = "ui-screenshot-capture" } }
+                },
+                components = new object[]
+                {
+                    new
+                    {
+                        name = "runtime-automation",
+                        result = true,
+                        items = probeIds,
+                        missingItems = Array.Empty<string>(),
+                        evidencePaths = new[] { "proof-evidence/runtime-logs/runtime.log", "proof-evidence/step-traces/runtime.json" },
+                        notes = Array.Empty<string>()
+                    },
+                    new
+                    {
+                        name = "live-game-execution",
+                        result = 1,
+                        items = scenarios.Keys.ToArray(),
+                        missingItems = Array.Empty<string>(),
+                        evidencePaths = new[] { "proof-evidence/scenario-observations/", "proof-evidence/screenshots/live-game.png", "proof-evidence/runtime-logs/live-game.log", "proof-evidence/load-order-state/loadorder.txt" },
+                        notes = Array.Empty<string>()
+                    },
+                    new
+                    {
+                        name = "desktop-e2e",
+                        result = (string?)null,
+                        items = flows,
+                        missingItems = Array.Empty<string>(),
+                        evidencePaths = new[] { "proof-evidence/screenshots/desktop.png", "proof-evidence/selector-logs/selectors.json", "proof-evidence/step-traces/desktop.json" },
+                        notes = Array.Empty<string>()
+                    }
+                },
+                scenarios = scenarios.Select(entry => new
+                {
+                    name = entry.Key,
+                    result = true,
+                    profile = entry.Value,
+                    observedSignals = new[] { "runtime-scenarios-dispatched" },
+                    missingSignals = Array.Empty<string>(),
+                    artifacts = new[] { $"proof-evidence/scenario-observations/{entry.Key.Replace(' ', '_').ToLowerInvariant()}/notes.txt" },
+                    notes = Array.Empty<string>()
+                }).ToArray(),
+                probes = probeIds.Select(id => new
+                {
+                    id,
+                    result = 1,
+                    observedSignals = new[] { "assertion-passed", "artifact-captured" },
+                    missingSignals = Array.Empty<string>(),
+                    artifacts = new object[] { new { value = $"proof-evidence/probe-observations/{id}.json" } },
+                    notes = Array.Empty<string>()
+                }).ToArray(),
+                missingArtifacts = Array.Empty<string>(),
+                missingScenarios = Array.Empty<string>(),
+                missingProbes = Array.Empty<string>(),
+                notes = new[] { "Malformed-but-recoverable typed/null status and host fields should not trigger import errors." }
+            };
+
+            await File.WriteAllTextAsync(
+                Path.Combine(outputDirectory, "proof-result-bundle.json"),
+                JsonSerializer.Serialize(malformedPayload, new JsonSerializerOptions { WriteIndented = true }));
+
+            DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath: null);
+
+            using var malformedRuntimePlan = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-plan.json")));
+            using var malformedMatrixProof = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-matrix-proof.json")));
+            using var malformedLiveGame = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "live-game-execution.json")));
+            using var malformedWindowsUi = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "windows-ui-e2e-automation.json")));
+
+            Assert.NotEqual("import-error", malformedRuntimePlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
+            Assert.NotEqual("import-error", malformedMatrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
+            Assert.NotEqual("import-error", malformedLiveGame.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
+            Assert.NotEqual("import-error", malformedWindowsUi.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
+            Assert.Contains(
+                malformedMatrixProof.RootElement.GetProperty("ImportedHostDetails").EnumerateArray().Select(static item => item.GetString()),
+                static value => string.Equals(value, "os:11", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                malformedMatrixProof.RootElement.GetProperty("ImportedHostDetails").EnumerateArray().Select(static item => item.GetString()),
+                static value => string.Equals(value, "runner:True", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                malformedMatrixProof.RootElement.GetProperty("ImportedHostDetails").EnumerateArray().Select(static item => item.GetString()),
+                static value => string.Equals(value, "mod-manager:123", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                malformedMatrixProof.RootElement.GetProperty("ImportedHostDetails").EnumerateArray().Select(static item => item.GetString()),
+                static value => string.Equals(value, "save-profile:False", StringComparison.OrdinalIgnoreCase));
+
+            var missingHostPayload = new
+            {
+                contractVersion = "1.0",
+                harnessKind = "external-proof-missing-host-variant",
+                status = 1,
+                components = new object[]
+                {
+                    new
+                    {
+                        name = "runtime-automation",
+                        result = 1,
+                        items = probeIds,
+                        missingItems = Array.Empty<string>(),
+                        evidencePaths = new[] { "proof-evidence/runtime-logs/runtime.log", "proof-evidence/step-traces/runtime.json" },
+                        notes = Array.Empty<string>()
+                    },
+                    new
+                    {
+                        name = "live-game-execution",
+                        result = true,
+                        items = scenarios.Keys.ToArray(),
+                        missingItems = Array.Empty<string>(),
+                        evidencePaths = new[] { "proof-evidence/scenario-observations/", "proof-evidence/screenshots/live-game.png", "proof-evidence/runtime-logs/live-game.log", "proof-evidence/load-order-state/loadorder.txt" },
+                        notes = Array.Empty<string>()
+                    },
+                    new
+                    {
+                        name = "desktop-e2e",
+                        result = "pass",
+                        items = flows,
+                        missingItems = Array.Empty<string>(),
+                        evidencePaths = new[] { "proof-evidence/screenshots/desktop.png", "proof-evidence/selector-logs/selectors.json", "proof-evidence/step-traces/desktop.json" },
+                        notes = Array.Empty<string>()
+                    }
+                },
+                scenarios = scenarios.Select(entry => new
+                {
+                    name = entry.Key,
+                    result = 1,
+                    profile = entry.Value,
+                    observedSignals = new[] { "runtime-scenarios-dispatched" },
+                    missingSignals = Array.Empty<string>(),
+                    artifacts = new[] { $"proof-evidence/scenario-observations/{entry.Key.Replace(' ', '_').ToLowerInvariant()}/notes.txt" },
+                    notes = Array.Empty<string>()
+                }).ToArray(),
+                probes = probeIds.Select(id => new
+                {
+                    id,
+                    result = true,
+                    observedSignals = new[] { "assertion-passed", "artifact-captured" },
+                    missingSignals = Array.Empty<string>(),
+                    artifacts = new[] { $"proof-evidence/probe-observations/{id}.json" },
+                    notes = Array.Empty<string>()
+                }).ToArray(),
+                missingArtifacts = Array.Empty<string>(),
+                missingScenarios = Array.Empty<string>(),
+                missingProbes = Array.Empty<string>(),
+                notes = new[] { "Host details intentionally missing; import should still recover." }
+            };
+
+            await File.WriteAllTextAsync(
+                Path.Combine(outputDirectory, "proof-result-bundle.json"),
+                JsonSerializer.Serialize(missingHostPayload, new JsonSerializerOptions { WriteIndented = true }));
+
+            DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath: null);
+            using var missingHostMatrixProof = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-matrix-proof.json")));
+            Assert.NotEqual("import-error", missingHostMatrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
+            Assert.Empty(missingHostMatrixProof.RootElement.GetProperty("ImportedHostDetails").EnumerateArray());
         }
         finally
         {
@@ -20592,20 +20759,23 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
                 summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase) &&
-                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
+                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean() &&
+                           summary.GetProperty("DistinctCombinationCount").GetInt32() >= 3);
             Assert.Contains(
                 packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
                 summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "body-hardcase-runtime", StringComparison.OrdinalIgnoreCase) &&
-                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
+                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean() &&
+                           summary.GetProperty("DistinctCombinationCount").GetInt32() >= 4);
             Assert.Contains(
                 packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
                 summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase) &&
-                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean());
+                           summary.GetProperty("MeetsMinimumCoverage").GetBoolean() &&
+                           summary.GetProperty("DistinctCombinationCount").GetInt32() >= 3);
 
             Assert.Contains(
                 packProof.RootElement.GetProperty("MatrixDimensionCoverage").EnumerateArray(),
                 summary => string.Equals(summary.GetProperty("Dimension").GetString(), "hard-case-family", StringComparison.OrdinalIgnoreCase) &&
-                           summary.GetProperty("DistinctValueCount").GetInt32() >= 4);
+                           summary.GetProperty("DistinctValueCount").GetInt32() >= 5);
             Assert.Contains(
                 packProof.RootElement.GetProperty("MatrixDimensionCoverage").EnumerateArray(),
                 summary => string.Equals(summary.GetProperty("Dimension").GetString(), "source-skeleton-family", StringComparison.OrdinalIgnoreCase) &&

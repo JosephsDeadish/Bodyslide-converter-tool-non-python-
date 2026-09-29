@@ -8875,9 +8875,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         ("target-body", 2),
         ("target-body-family", 2),
         ("topology-family", 2),
-        ("hard-case-family", 4),
+        ("hard-case-family", 5),
         ("skeleton-mode", 2),
-        ("source-skeleton-family", 2),
+        ("source-skeleton-family", 3),
         ("plugin-stack", 2),
         ("plugin-family", 2),
         ("master-chain", 2),
@@ -8889,9 +8889,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
     private static readonly (string CoverageKey, string[] Dimensions, int MinimumDistinctCombinationCount)[] RequiredMatrixPackCombinations =
     [
-        ("body-skeleton-plugin-runtime", ["target-body-family", "source-skeleton-family", "plugin-family", "runtime-physics"], 2),
-        ("body-hardcase-runtime", ["target-body-family", "hard-case-family", "runtime-physics"], 3),
-        ("hardcase-skeleton-master", ["hard-case-family", "source-skeleton-family", "master-chain"], 2)
+        ("body-skeleton-plugin-runtime", ["target-body-family", "source-skeleton-family", "plugin-family", "runtime-physics"], 3),
+        ("body-hardcase-runtime", ["target-body-family", "hard-case-family", "runtime-physics"], 4),
+        ("hardcase-skeleton-master", ["hard-case-family", "source-skeleton-family", "master-chain"], 3)
     ];
 
     private static string InferMatrixPackTargetBodyFamily(string targetBody)
