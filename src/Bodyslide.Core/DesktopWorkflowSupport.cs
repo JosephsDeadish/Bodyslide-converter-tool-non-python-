@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Bodyslide.Core;
 
 internal sealed record DesktopLaunchOptions(
@@ -114,6 +116,41 @@ internal static class DesktopWorkflowSupport
     public static bool IsAutoSelectionText(string? selected) =>
         string.IsNullOrWhiteSpace(selected) ||
         selected.Trim().Equals("(auto)", StringComparison.OrdinalIgnoreCase);
+
+    public static string BuildMo2SetupGuidance(
+        string processPath,
+        string desktopPath,
+        string workingDirectory,
+        string? cliPath,
+        bool looksLikeCliTarget)
+    {
+        var guidance = new StringBuilder()
+            .AppendLine("Recommended mod manager setup for SlideSmith")
+            .AppendLine($"Title: SlideSmith (Desktop)")
+            .AppendLine($"Binary: {desktopPath}")
+            .AppendLine($"Start in: {workingDirectory}")
+            .AppendLine("MO2 note: keep Binary and Start in on the exact desktop executable folder so the VFS/USVFS hook can inject mods before startup.")
+            .AppendLine("Arguments (MO2): --mo2-launcher")
+            .AppendLine("Arguments (Vortex): --vortex-launcher")
+            .AppendLine();
+
+        if (looksLikeCliTarget && !desktopPath.Equals(processPath, StringComparison.OrdinalIgnoreCase))
+        {
+            guidance.AppendLine($"Detected current process as CLI ({processPath}) and switched suggested MO2 binary to desktop executable ({desktopPath}).")
+                .AppendLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(cliPath))
+        {
+            guidance.AppendLine("Optional CLI entry:")
+                .AppendLine("Title: SlideSmith CLI")
+                .AppendLine($"Binary: {cliPath}")
+                .AppendLine($"Start in: {Path.GetDirectoryName(cliPath)}")
+                .AppendLine("Arguments: --mo2-launcher");
+        }
+
+        return guidance.ToString();
+    }
 
     public static string? ResolveDisplayedSourceBody(
         string? comboText,

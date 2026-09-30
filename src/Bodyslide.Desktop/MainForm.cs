@@ -5675,32 +5675,16 @@ public sealed class MainForm : Form
         var workingDirectory = Path.GetDirectoryName(desktopPath) ?? processDirectory;
         var cliPath = FindSiblingCliExecutable(workingDirectory);
 
-        var guidance = new StringBuilder()
-            .AppendLine("Recommended mod manager setup for SlideSmith")
-            .AppendLine($"Title: SlideSmith (Desktop)")
-            .AppendLine($"Binary: {desktopPath}")
-            .AppendLine($"Start in: {workingDirectory}")
-            .AppendLine("MO2 note: keep Binary and Start in on the exact desktop executable folder so the VFS/USVFS hook can inject mods before startup.")
-            .AppendLine("Arguments (MO2): --mo2-launcher")
-            .AppendLine("Arguments (Vortex): --vortex-launcher")
-            .AppendLine();
-        if (looksLikeCliTarget && !desktopPath.Equals(processPath, StringComparison.OrdinalIgnoreCase))
-        {
-            guidance.AppendLine($"Detected current process as CLI ({processPath}) and switched suggested MO2 binary to desktop executable ({desktopPath}).")
-                .AppendLine();
-        }
-        if (!string.IsNullOrWhiteSpace(cliPath))
-        {
-            guidance.AppendLine("Optional CLI entry:")
-                .AppendLine("Title: SlideSmith CLI")
-                .AppendLine($"Binary: {cliPath}")
-                .AppendLine($"Start in: {Path.GetDirectoryName(cliPath)}")
-                .AppendLine("Arguments: --mo2-launcher");
-        }
+        var guidance = DesktopWorkflowSupport.BuildMo2SetupGuidance(
+            processPath,
+            desktopPath,
+            workingDirectory,
+            cliPath,
+            looksLikeCliTarget);
 
         try
         {
-            Clipboard.SetText(guidance.ToString());
+            Clipboard.SetText(guidance);
             AppendLog("Copied recommended mod manager setup to clipboard.");
             _statusLabel.Text = "Copied mod manager setup guidance to clipboard.";
         }

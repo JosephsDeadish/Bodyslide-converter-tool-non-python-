@@ -745,6 +745,29 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void BuildMo2SetupGuidance_IncludesVfsNotesAndOptionalCliEntry()
+    {
+        var processPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "cli", "SlideSmith-CLI.exe");
+        var desktopPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "desktop", "SlideSmith.exe");
+        var workingDirectory = Path.GetDirectoryName(desktopPath)!;
+        var guidance = DesktopWorkflowSupport.BuildMo2SetupGuidance(
+            processPath,
+            desktopPath,
+            workingDirectory,
+            processPath,
+            looksLikeCliTarget: true);
+
+        Assert.Contains("Recommended mod manager setup for SlideSmith", guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MO2 note: keep Binary and Start in on the exact desktop executable folder", guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"Binary: {desktopPath}", guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"Start in: {workingDirectory}", guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Detected current process as CLI", guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Optional CLI entry:", guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"Binary: {processPath}", guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Arguments: --mo2-launcher", guidance, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ParseLaunchOptions_UsesExistingPathAsStartupInputWhenItIsNotASlideSmithResult()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
