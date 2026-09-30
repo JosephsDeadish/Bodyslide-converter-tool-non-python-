@@ -392,10 +392,11 @@ internal static class BodySlideSourceProjectSupport
     private static IEnumerable<SearchLocation> EnumerateLikelyBodySlideRoots(string sourceRoot, ImportedArmor armor)
     {
         var roots = new Dictionary<string, SearchOption>(StringComparer.OrdinalIgnoreCase);
+        var existingDirectoryCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
         static void AddRoot(IDictionary<string, SearchOption> map, string? root, SearchOption searchOption)
         {
-            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            if (string.IsNullOrWhiteSpace(root))
             {
                 return;
             }
@@ -408,25 +409,57 @@ internal static class BodySlideSourceProjectSupport
             map[root] = searchOption;
         }
 
+        bool DirectoryExistsCached(string? directory)
+        {
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return false;
+            }
+
+            if (existingDirectoryCache.TryGetValue(directory, out var exists))
+            {
+                return exists;
+            }
+
+            exists = Directory.Exists(directory);
+            existingDirectoryCache[directory] = exists;
+            return exists;
+        }
+
         if (Directory.Exists(sourceRoot))
         {
             foreach (var candidateRoot in EnumerateAncestorDirectories(sourceRoot))
             {
-                AddRoot(roots, Path.Combine(candidateRoot, "BodySlide"), SearchOption.AllDirectories);
-                AddRoot(roots, Path.Combine(candidateRoot, "CalienteTools", "BodySlide"), SearchOption.AllDirectories);
+                var bodySlideRoot = Path.Combine(candidateRoot, "BodySlide");
+                if (DirectoryExistsCached(bodySlideRoot))
+                {
+                    AddRoot(roots, bodySlideRoot, SearchOption.AllDirectories);
+                }
+
+                var calienteToolsBodySlideRoot = Path.Combine(candidateRoot, "CalienteTools", "BodySlide");
+                if (DirectoryExistsCached(calienteToolsBodySlideRoot))
+                {
+                    AddRoot(roots, calienteToolsBodySlideRoot, SearchOption.AllDirectories);
+                }
             }
         }
 
-        foreach (var meshFile in armor.MeshFiles)
+        foreach (var meshFile in armor.MeshFiles.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var directory = Path.GetDirectoryName(meshFile);
-            AddRoot(roots, directory, SearchOption.TopDirectoryOnly);
+            if (DirectoryExistsCached(directory))
+            {
+                AddRoot(roots, directory, SearchOption.TopDirectoryOnly);
+            }
         }
 
-        foreach (var bodyReferenceFile in armor.BodyReferenceFiles)
+        foreach (var bodyReferenceFile in armor.BodyReferenceFiles.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var directory = Path.GetDirectoryName(bodyReferenceFile);
-            AddRoot(roots, directory, SearchOption.TopDirectoryOnly);
+            if (DirectoryExistsCached(directory))
+            {
+                AddRoot(roots, directory, SearchOption.TopDirectoryOnly);
+            }
         }
 
         return roots.Select(static pair => new SearchLocation(pair.Key, pair.Value));
