@@ -235,7 +235,9 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     error = string.Empty;
     cachePath = null;
 
-    if (args.Length >= 2 && !args[0].StartsWith("--", StringComparison.Ordinal))
+    if (args.Length >= 2 &&
+        !args[0].StartsWith("--", StringComparison.Ordinal) &&
+        !StandaloneStartupRouting.IsLikelyLauncherPathArgument(args[0]))
     {
         request = new ConversionRequest(args[0], args[1], args.Length > 2 ? args[2] : null);
         return true;

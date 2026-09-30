@@ -178,6 +178,24 @@ public sealed class StandaloneStartupRoutingTests
     }
 
     [Fact]
+    public void EvaluateDesktopLaunchDecision_Mo2ManagedPositionalInput_DoesNotLookLikeExplicitCli()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            [
+                @"D:\Mod Organizer 2\mods\Some Armor Pack\meshes\armor\sample_1.nif",
+                "CBBE"
+            ],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+        Assert.False(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Fact]
     public void EvaluateDesktopLaunchDecision_RealWorldMo2PortableLauncherSignature_PrefersDesktop()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(

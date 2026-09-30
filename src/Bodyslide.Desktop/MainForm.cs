@@ -7351,9 +7351,9 @@ public sealed class MainForm : Form
             }
 
             add(
-                "Conversion summary",
+                "Results summary",
                 failedCount > 0 || highRiskCount > 0 ? "Warning" : "Info",
-                $"Batch summary: {successCount}/{totalCount} succeeded, {failedCount} failed, {needsReviewCount} need review, {highRiskCount} are high risk. Pack status: {packStatus}.",
+                $"Summary: {successCount}/{totalCount} succeeded, {failedCount} failed, {needsReviewCount} need review, {highRiskCount} are high risk. Pack status: {packStatus}.",
                 reportPath);
 
             if (failedCount > 0)
@@ -7361,7 +7361,7 @@ public sealed class MainForm : Form
                 add(
                     "Next step",
                     "Warning",
-                    $"Failed conversions detected ({failedCount}). Recommended flow: 1) open batch-report.json, 2) re-run failed items only, 3) validate conversion-quality.json before packaging.",
+                    $"Failed conversions detected ({failedCount}). Open the batch report, re-run the failed items, then review the quality check before installing or sharing.",
                     reportPath);
             }
             else if (needsReviewCount > 0 || highRiskCount > 0)
@@ -7369,7 +7369,7 @@ public sealed class MainForm : Form
                 add(
                     "Next step",
                     "Action",
-                    $"Partial conversion state: {needsReviewCount} need review and {highRiskCount} are high risk. Review preview-workbench + conversion-quality before treating this pack as release-ready.",
+                    $"Partial conversion state: {needsReviewCount} need review and {highRiskCount} are high risk. Review the preview and quality check before treating this pack as release-ready.",
                     reportPath);
             }
 
@@ -7394,7 +7394,7 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             requiresReview = true;
-            add("Conversion summary", "Warning", $"Could not read batch-report.json: {ex.Message}", reportPath);
+            add("Results summary", "Warning", $"Could not read the batch report: {ex.Message}", reportPath);
         }
     }
 
@@ -7431,9 +7431,9 @@ public sealed class MainForm : Form
             }
 
             add(
-                "Validation",
+                "Quality check",
                 validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
-                $"{ConversionValidationPresentation.GetGateLabel(validationSummary.Status)}: {ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status)} Score {validationSummary.Score}. Open conversion-quality.json for the full breakdown.",
+                $"{ConversionValidationPresentation.GetGateLabel(validationSummary.Status)}: {ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status)} Score {validationSummary.Score}. Open the quality report for the full breakdown.",
                 qualityPath);
 
             if (!validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase))
@@ -7443,7 +7443,7 @@ public sealed class MainForm : Form
                     ConversionValidationPresentation.GetGateRank(validationSummary.Status) >= ConversionValidationPresentation.GetGateRank("high-risk")
                         ? "Warning"
                         : "Action",
-                    $"Validation is {ConversionValidationPresentation.GetGateLabel(validationSummary.Status)} for {targetBody}. Use preview-workbench and top listed issues to resolve blockers, then re-run conversion before publishing.",
+                    $"The quality check is {ConversionValidationPresentation.GetGateLabel(validationSummary.Status)} for {targetBody}. Use the Preview tab and top listed issues to resolve blockers, then re-run the conversion before publishing.",
                     qualityPath);
             }
 
@@ -7476,7 +7476,7 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             requiresReview = true;
-            add("Validation status", "Warning", $"Could not read conversion-quality.json: {ex.Message}", qualityPath);
+            add("Quality check", "Warning", $"Could not read the quality report: {ex.Message}", qualityPath);
         }
     }
 
@@ -7753,7 +7753,7 @@ public sealed class MainForm : Form
             }
 
             add(
-                "Install readiness",
+                "Install check",
                 string.Equals(normalizedStatus, "ready", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
                 $"Pack readiness: {status}. Needs review: {needsReviewCount}. High risk: {highRiskCount}. Open armor-pack-validation.json before installing or sharing.",
                 reportPath);
@@ -7771,7 +7771,7 @@ public sealed class MainForm : Form
                     }
 
                     add(
-                        "Packaging checks",
+                        "Install checks",
                         count > 0 ? "Action" : "Info",
                         guidance,
                         ResolveGuidanceTargetPath(outputDirectory, previewPath, code, reportPath));
@@ -7781,7 +7781,7 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             requiresReview = true;
-            add("Packaging", "Warning", $"Could not read armor-pack-validation.json: {ex.Message}", reportPath);
+            add("Install check", "Warning", $"Could not read the install check report: {ex.Message}", reportPath);
         }
     }
 
@@ -7860,9 +7860,9 @@ public sealed class MainForm : Form
             }
 
             add(
-                "Plugin support",
+                "Plugin check",
                 "Info",
-                $"Open plugin-patches.json if the mod ships ESP/ESM/ESL files. Review {rewriteMappings} rewrite mapping(s) and {patchSteps} proposed patch step(s) in xEdit context before release.",
+                $"Open the plugin patch report if the mod ships ESP/ESM/ESL files. Review {rewriteMappings} rewrite mapping(s) and {patchSteps} proposed patch step(s) in xEdit before release.",
                 ResolveGuidanceTargetPath(outputDirectory, previewPath, "plugin-rewrite-verification-warning", patchPath));
 
             if (TryGetProperty(root, "PluginInstallHints", out var pluginInstallHints) && pluginInstallHints.ValueKind == JsonValueKind.Array)
@@ -8454,7 +8454,7 @@ public sealed class MainForm : Form
 
         if (IsPackagingReviewGuidanceCode(normalized))
         {
-            return "Packaging checks";
+            return "Install checks";
         }
 
         return "Next action";

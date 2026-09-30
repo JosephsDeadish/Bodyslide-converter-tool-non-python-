@@ -356,7 +356,11 @@ public static class StandaloneStartupRouting
             return false;
         }
 
-        return !TryReadOptionName(args[0], out _) &&
-               !TryReadOptionName(args[1], out _);
+        if (TryReadOptionName(args[0], out _) || TryReadOptionName(args[1], out _))
+        {
+            return false;
+        }
+
+        return !IsLikelyLauncherPathArgument(args[0]);
     }
 }
