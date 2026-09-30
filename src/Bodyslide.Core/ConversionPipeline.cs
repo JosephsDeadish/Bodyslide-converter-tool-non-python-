@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -11258,31 +11259,38 @@ internal static class ArchiveExtractionHelper
         Action<long>? onBytesCopied = null,
         long reportIntervalBytes = long.MaxValue)
     {
-        var buffer = new byte[ExtractionCopyBufferSizeBytes];
-        long copiedBytes = 0;
-        long lastReportedBytes = 0;
-        while (true)
+        var buffer = ArrayPool<byte>.Shared.Rent(ExtractionCopyBufferSizeBytes);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var read = input.Read(buffer, 0, buffer.Length);
-            if (read <= 0)
+            long copiedBytes = 0;
+            long lastReportedBytes = 0;
+            while (true)
             {
-                break;
+                cancellationToken.ThrowIfCancellationRequested();
+                var read = input.Read(buffer, 0, buffer.Length);
+                if (read <= 0)
+                {
+                    break;
+                }
+
+                output.Write(buffer, 0, read);
+                copiedBytes += read;
+                if (onBytesCopied is not null &&
+                    copiedBytes - lastReportedBytes >= reportIntervalBytes)
+                {
+                    lastReportedBytes = copiedBytes;
+                    onBytesCopied(copiedBytes);
+                }
             }
 
-            output.Write(buffer, 0, read);
-            copiedBytes += read;
-            if (onBytesCopied is not null &&
-                copiedBytes - lastReportedBytes >= reportIntervalBytes)
+            if (onBytesCopied is not null && copiedBytes > 0 && copiedBytes != lastReportedBytes)
             {
-                lastReportedBytes = copiedBytes;
                 onBytesCopied(copiedBytes);
             }
         }
-
-        if (onBytesCopied is not null && copiedBytes > 0 && copiedBytes != lastReportedBytes)
+        finally
         {
-            onBytesCopied(copiedBytes);
+            ArrayPool<byte>.Shared.Return(buffer, clearArray: false);
         }
     }
 
