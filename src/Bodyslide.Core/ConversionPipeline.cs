@@ -21137,10 +21137,16 @@ internal sealed class LocalExportService(
         IReadOnlyDictionary<int, TransferIslandEdgeNetwork> EdgeNetworks,
         bool HasExplicitTopology);
 
+    private const int MaxMeshTransferTopologySnapshotCacheEntries = 128;
+    private const int MaxMeshTransferTopologyBufferSnapshotCacheEntries = 64;
     private static readonly ConcurrentDictionary<string, MeshTransferTopologySnapshot> MeshTransferTopologySnapshotCache =
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, MeshTransferTopologySnapshot> MeshTransferTopologyBufferSnapshotCache =
         new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object MeshTransferTopologySnapshotCacheSync = new();
+    private static readonly object MeshTransferTopologyBufferSnapshotCacheSync = new();
+    private static readonly Queue<string> MeshTransferTopologySnapshotCacheOrder = new();
+    private static readonly Queue<string> MeshTransferTopologyBufferSnapshotCacheOrder = new();
 
     public async Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
         ConversionRequest request,
@@ -23124,10 +23130,19 @@ internal sealed class LocalExportService(
             return null;
         }
 
-        return MeshTransferTopologySnapshotCache.GetOrAdd(
+        if (MeshTransferTopologySnapshotCache.TryGetValue(cacheKey, out var cachedSnapshot))
+        {
+            return cachedSnapshot;
+        }
+
+        var createdSnapshot = CreateMeshTransferTopologySnapshot(meshFile);
+        return CacheMeshTransferTopologySnapshot(
+            MeshTransferTopologySnapshotCache,
+            MeshTransferTopologySnapshotCacheOrder,
+            MeshTransferTopologySnapshotCacheSync,
             cacheKey,
-            static (_, path) => CreateMeshTransferTopologySnapshot(path),
-            meshFile);
+            createdSnapshot,
+            MaxMeshTransferTopologySnapshotCacheEntries);
     }
 
     internal static MeshTransferTopologySnapshot? GetMeshTransferTopologySnapshotFromBytes(byte[] bytes, string? sourceIdentity)
@@ -23138,10 +23153,19 @@ internal sealed class LocalExportService(
         }
 
         var cacheKey = BuildMeshTransferTopologyByteCacheKey(bytes, sourceIdentity);
-        return MeshTransferTopologyBufferSnapshotCache.GetOrAdd(
+        if (MeshTransferTopologyBufferSnapshotCache.TryGetValue(cacheKey, out var cachedSnapshot))
+        {
+            return cachedSnapshot;
+        }
+
+        var createdSnapshot = CreateMeshTransferTopologySnapshot(bytes, cacheKey);
+        return CacheMeshTransferTopologySnapshot(
+            MeshTransferTopologyBufferSnapshotCache,
+            MeshTransferTopologyBufferSnapshotCacheOrder,
+            MeshTransferTopologyBufferSnapshotCacheSync,
             cacheKey,
-            static (_, state) => CreateMeshTransferTopologySnapshot(state.Bytes, state.CacheKey),
-            (Bytes: bytes, CacheKey: cacheKey));
+            createdSnapshot,
+            MaxMeshTransferTopologyBufferSnapshotCacheEntries);
     }
 
     private static string? BuildMeshTransferTopologyCacheKey(string meshFile)
@@ -23172,6 +23196,34 @@ internal sealed class LocalExportService(
             : sourceIdentity.Trim();
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
         return $"{normalizedIdentity}|{bytes.Length}|{hash}";
+    }
+
+    private static MeshTransferTopologySnapshot CacheMeshTransferTopologySnapshot(
+        ConcurrentDictionary<string, MeshTransferTopologySnapshot> cache,
+        Queue<string> cacheOrder,
+        object cacheSync,
+        string cacheKey,
+        MeshTransferTopologySnapshot snapshot,
+        int maxEntries)
+    {
+        lock (cacheSync)
+        {
+            if (cache.TryGetValue(cacheKey, out var cachedSnapshot))
+            {
+                return cachedSnapshot;
+            }
+
+            cache[cacheKey] = snapshot;
+            cacheOrder.Enqueue(cacheKey);
+
+            while (cache.Count > maxEntries && cacheOrder.Count > 0)
+            {
+                var oldestKey = cacheOrder.Dequeue();
+                cache.TryRemove(oldestKey, out _);
+            }
+
+            return snapshot;
+        }
     }
 
     private static MeshTransferTopologySnapshot CreateMeshTransferTopologySnapshot(string meshFile)
