@@ -456,7 +456,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
-            Text = "Drag and drop a .nif, plugin (.esp/.esm/.esl), archive (.zip/.7z/.tar/.tar.gz/.tgz), or armor folder here",
+            Text = "Drag and drop a .nif, plugin (.esp/.esm/.esl), archive (.zip/.7z/.rar/.tar/.tar.gz/.tgz), or armor folder here",
             AllowDrop = true,
         };
         dropLabel.DragEnter += OnDragEnter;
@@ -512,7 +512,7 @@ public sealed class MainForm : Form
 
         var inputRow = CreateThreeColumnRow("Input", out _inputTextBox);
         _inputTextBox.Name = "inputPathTextBox";
-        _inputTextBox.PlaceholderText = "Select armor input (.nif/.esp/.esm/.esl/.zip/.7z/.tar) or an armor folder";
+        _inputTextBox.PlaceholderText = "Select armor input (.nif/.esp/.esm/.esl/.zip/.7z/.rar/.tar) or an armor folder";
         _inputTextBox.AllowDrop = true;
         _inputTextBox.DragEnter += OnDragEnter;
         _inputTextBox.DragDrop += OnDragDrop;
@@ -2602,7 +2602,7 @@ public sealed class MainForm : Form
     {
         using var fileDialog = new OpenFileDialog
         {
-            Filter = "Armor Files (*.nif;*.esp;*.esm;*.esl;*.zip;*.7z;*.tar;*.tar.gz;*.tgz)|*.nif;*.esp;*.esm;*.esl;*.zip;*.7z;*.tar;*.tar.gz;*.tgz|All Files (*.*)|*.*",
+            Filter = "Armor Files (*.nif;*.esp;*.esm;*.esl;*.zip;*.7z;*.rar;*.tar;*.tar.gz;*.tgz)|*.nif;*.esp;*.esm;*.esl;*.zip;*.7z;*.rar;*.tar;*.tar.gz;*.tgz|All Files (*.*)|*.*",
             CheckFileExists = true,
             Multiselect = false,
         };
@@ -3789,6 +3789,11 @@ public sealed class MainForm : Form
         if (string.Equals(extension, ".7z", StringComparison.OrdinalIgnoreCase))
         {
             return "7z";
+        }
+
+        if (string.Equals(extension, ".rar", StringComparison.OrdinalIgnoreCase))
+        {
+            return "rar";
         }
 
         if (string.Equals(extension, ".tar", StringComparison.OrdinalIgnoreCase))

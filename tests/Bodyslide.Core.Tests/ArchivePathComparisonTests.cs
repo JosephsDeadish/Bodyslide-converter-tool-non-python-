@@ -11,6 +11,28 @@ namespace Bodyslide.Core.Tests
     public class ArchivePathComparisonTests
     {
         [Fact]
+        public void IsSupportedArchive_RecognizesRarExtensionWhenFileExists()
+        {
+            var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(workingDirectory);
+
+            try
+            {
+                var rarPath = Path.Combine(workingDirectory, "pack.RAR");
+                File.WriteAllText(rarPath, "placeholder");
+
+                Assert.True(ArchiveExtractionHelper.IsSupportedArchive(rarPath));
+            }
+            finally
+            {
+                if (Directory.Exists(workingDirectory))
+                {
+                    Directory.Delete(workingDirectory, recursive: true);
+                }
+            }
+        }
+
+        [Fact]
         public void PathComparison_IsCaseInsensitiveOnWindows()
         {
             var root = @"C:\Temp\Extract\";
