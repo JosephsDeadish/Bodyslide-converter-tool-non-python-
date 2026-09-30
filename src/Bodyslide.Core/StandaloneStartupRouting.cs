@@ -25,7 +25,7 @@ public static class StandaloneStartupRouting
         var modManagerLaunch = !explicitCliLaunch && IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
         var shouldAttemptDesktopHandoff = strictLauncherMode
             ? args.Count == 0 || launcherSignal
-            : args.Count == 0 || launcherSignal || !explicitCliLaunch;
+            : !explicitCliLaunch;
         var routingReason = strictLauncherMode
             ? shouldAttemptDesktopHandoff
                 ? launcherSignal
@@ -123,7 +123,7 @@ public static class StandaloneStartupRouting
 
     public static bool IsLikelyLauncherPathArgument(string? arg)
     {
-        if (string.IsNullOrWhiteSpace(arg))
+        if (string.IsNullOrWhiteSpace(arg) || TryReadOptionName(arg, out _))
         {
             return false;
         }

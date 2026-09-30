@@ -159,6 +159,20 @@ public sealed class StandaloneStartupRoutingTests
     }
 
     [Fact]
+    public void EvaluateDesktopLaunchDecision_SlashPrefixedMo2OutputArgument_IsDetected()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["/mo2-output:D:\\MO2\\mods\\SomePack"],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+    }
+
+    [Fact]
     public void EvaluateDesktopLaunchDecision_RealWorldMo2ProfileGameAndInputSignature_PrefersDesktop()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(

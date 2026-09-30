@@ -517,6 +517,11 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
 static IReadOnlyList<string> EnumerateDesktopExeCandidates(IReadOnlyList<string> candidateDirectories)
 {
+    if (candidateDirectories.Count == 0)
+    {
+        return [];
+    }
+
     var preferred = new[]
     {
         Path.Combine(candidateDirectories[0], "SlideSmith.exe"),
@@ -537,6 +542,11 @@ static IReadOnlyList<string> EnumerateDesktopExeCandidates(IReadOnlyList<string>
 
 static IReadOnlyList<string> EnumerateDesktopDllCandidates(IReadOnlyList<string> candidateDirectories)
 {
+    if (candidateDirectories.Count == 0)
+    {
+        return [];
+    }
+
     var preferred = new[]
     {
         Path.Combine(candidateDirectories[0], "SlideSmith.Desktop.dll"),
@@ -645,14 +655,9 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
         catch (Exception fallbackEx)
         {
             WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: fallback failed for {desktopExePath} ({fallbackEx.GetType().Name}: {fallbackEx.Message})");
-            if (!launchedFromModOrganizer)
-            {
-                launchedProcess = null;
-                return false;
-            }
+            launchedProcess = null;
+            return false;
         }
-        launchedProcess = null;
-        return false;
     }
 }
 
