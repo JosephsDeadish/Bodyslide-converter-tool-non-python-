@@ -2325,7 +2325,7 @@ public sealed class MainForm : Form
         }
         catch (WebView2RuntimeNotFoundException)
         {
-            checks.Add(new RuntimeReadinessCheck("Preview runtime", "Warning", "WebView2 runtime not found; preview-workbench.html (or preview.html fallback) will open in your default browser instead."));
+            checks.Add(new RuntimeReadinessCheck("Preview runtime", "OK", "WebView2 runtime not found; preview-workbench.html (or preview.html fallback) will open in your default browser instead."));
         }
         catch (Exception ex)
         {
@@ -2473,10 +2473,15 @@ public sealed class MainForm : Form
 
         if (!_launchOptions.FromModOrganizerLauncher && mo2EnvironmentDetected)
         {
+            var launcherInputDetected =
+                !string.IsNullOrWhiteSpace(_launchOptions.StartupInputPath) ||
+                !string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory);
             checks.Add(new RuntimeReadinessCheck(
                 "Mod manager launcher arguments",
-                "Warning",
-                "Mod manager environment variables were detected but a launcher flag was not present. Add --mo2-launcher (MO2) or --vortex-launcher (Vortex) for deterministic startup routing."));
+                launcherInputDetected ? "OK" : "Warning",
+                launcherInputDetected
+                    ? "Launcher startup arguments were detected from mod manager context even without an explicit launcher flag."
+                    : "Mod manager environment variables were detected but a launcher flag was not present. Add --mo2-launcher (MO2) or --vortex-launcher (Vortex) for deterministic startup routing."));
         }
     }
 
