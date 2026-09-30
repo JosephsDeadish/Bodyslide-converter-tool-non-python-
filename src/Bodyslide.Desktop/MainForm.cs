@@ -577,13 +577,37 @@ public sealed class MainForm : Form
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        modeRow.Controls.Add(new Label
+        var modeHeaderRow = new TableLayoutPanel
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            Margin = new Padding(0, 0, 0, 6),
+        };
+        modeHeaderRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        modeHeaderRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        var modeHeaderLabel = new Label
         {
             AutoSize = true,
             Margin = new Padding(0, 0, 0, 6),
             Text = "Step 1: choose a quick preset or switch to manual mode if you want to pick the TO body yourself."
-        }, 0, 0);
-        modeRow.SetColumnSpan(modeRow.Controls[modeRow.Controls.Count - 1], 2);
+        };
+        modeHeaderRow.Controls.Add(modeHeaderLabel, 0, 0);
+        var creatorSupportButton = new Button
+        {
+            Name = "creatorSupportButton",
+            Text = "❤ Support creator",
+            AutoSize = true,
+            MinimumSize = new Size(170, 34),
+            Font = new Font(Font, FontStyle.Bold),
+            Margin = new Padding(8, 0, 0, 0),
+        };
+        creatorSupportButton.Click += (_, _) => OpenCreatorSupportLink();
+        creatorSupportButton.MouseEnter += (_, _) =>
+            _optionToolTip.SetToolTip(creatorSupportButton, GetRandomCreatorSupportTooltip());
+        modeHeaderRow.Controls.Add(creatorSupportButton, 1, 0);
+        modeRow.Controls.Add(modeHeaderRow, 0, 0);
+        modeRow.SetColumnSpan(modeHeaderRow, 2);
         var modeSelectorPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -671,19 +695,8 @@ public sealed class MainForm : Form
             Margin = new Padding(0),
         };
         autoMapTargetButton.Click += (_, _) => ApplyAutoMappedTargetFromSource();
-        var creatorSupportButton = new Button
-        {
-            Name = "creatorSupportButton",
-            Text = "❤ Support creator",
-            AutoSize = true,
-            Margin = new Padding(8, 0, 0, 0),
-        };
-        creatorSupportButton.Click += (_, _) => OpenCreatorSupportLink();
-        creatorSupportButton.MouseEnter += (_, _) =>
-            _optionToolTip.SetToolTip(creatorSupportButton, GetRandomCreatorSupportTooltip());
         modeQuickActionsPanel.Controls.Add(useRecommendedSetupButton);
         modeQuickActionsPanel.Controls.Add(autoMapTargetButton);
-        modeQuickActionsPanel.Controls.Add(creatorSupportButton);
         modeRow.Controls.Add(modeQuickActionsPanel, 0, 2);
         modeRow.SetColumnSpan(modeQuickActionsPanel, 2);
         _showAdvancedOptionsCheckBox = new CheckBox
@@ -2510,7 +2523,7 @@ public sealed class MainForm : Form
         checks.Add(new RuntimeReadinessCheck(
             "Mod manager health check",
             "OK",
-            "Mod manager context detected. Verify the launcher targets the desktop executable and passes a launcher flag."));
+            "Mod manager context detected. Verify the launcher targets the desktop executable, keeps Start in on the same folder, and passes a launcher flag so MO2's VFS can hook before startup."));
 
         var executablePath = Environment.ProcessPath ?? Application.ExecutablePath;
         var executableName = Path.GetFileName(executablePath);
@@ -2526,7 +2539,7 @@ public sealed class MainForm : Form
             checks.Add(new RuntimeReadinessCheck(
                 "Mod manager executable target",
                 "Warning",
-                $"Current launch path looks like CLI ({executableName}). Set launcher Binary to {suggestedDesktopPath}, Start In to {Path.GetDirectoryName(suggestedDesktopPath) ?? "desktop folder"}, and use --mo2-launcher (MO2) or --vortex-launcher (Vortex). Use 'Copy Mod Manager setup' for a ready-to-paste fix."));
+                $"Current launch path looks like CLI ({executableName}). MO2's VFS/USVFS hook needs the desktop executable as Binary and the same folder as Start in so it can inject mods before startup. Set launcher Binary to {suggestedDesktopPath}, Start In to {Path.GetDirectoryName(suggestedDesktopPath) ?? "desktop folder"}, and use --mo2-launcher (MO2) or --vortex-launcher (Vortex). Use 'Copy Mod Manager setup' for a ready-to-paste fix."));
         }
         else
         {
@@ -2545,8 +2558,8 @@ public sealed class MainForm : Form
                 "Mod manager launcher arguments",
                 launcherInputDetected ? "OK" : "Warning",
                 launcherInputDetected
-                    ? "Launcher startup arguments were detected from mod manager context even without an explicit launcher flag."
-                    : "Mod manager environment variables were detected but a launcher flag was not present. Add --mo2-launcher (MO2) or --vortex-launcher (Vortex) for deterministic startup routing."));
+                    ? "Launcher startup arguments were detected from mod manager context even without an explicit launcher flag. Keep Binary and Start in on the desktop executable folder so MO2's VFS can inject correctly."
+                    : "Mod manager environment variables were detected but a launcher flag was not present. Add --mo2-launcher (MO2) or --vortex-launcher (Vortex), and keep Binary + Start in on the desktop executable folder so MO2's VFS can hook before startup."));
         }
     }
 
@@ -5667,6 +5680,7 @@ public sealed class MainForm : Form
             .AppendLine($"Title: SlideSmith (Desktop)")
             .AppendLine($"Binary: {desktopPath}")
             .AppendLine($"Start in: {workingDirectory}")
+            .AppendLine("MO2 note: keep Binary and Start in on the exact desktop executable folder so the VFS/USVFS hook can inject mods before startup.")
             .AppendLine("Arguments (MO2): --mo2-launcher")
             .AppendLine("Arguments (Vortex): --vortex-launcher")
             .AppendLine();

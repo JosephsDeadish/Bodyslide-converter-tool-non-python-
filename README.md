@@ -163,7 +163,7 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 
 Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.
 
-For Mod Organizer 2, set the executable to `<mod>\CalienteTools\SlideSmith\SlideSmith.exe` with `--mo2-launcher`.
+For Mod Organizer 2, set the executable to `<mod>\CalienteTools\SlideSmith\SlideSmith.exe` with `--mo2-launcher` and keep the Start In folder on the same `CalienteTools\SlideSmith` path so MO2's VFS/USVFS hook can inject mods before startup.
 
 If `SlideSmith-CLI.exe` is launched with **no arguments**, the CLI now auto-opens the desktop GUI when `SlideSmith.exe` is available either in the same folder or in a sibling `desktop/` folder (bundle layout), instead of just printing usage and exiting.
 
