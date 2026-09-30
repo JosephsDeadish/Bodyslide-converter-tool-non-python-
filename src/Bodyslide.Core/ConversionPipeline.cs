@@ -10756,8 +10756,9 @@ internal static class ArchiveExtractionHelper
     public sealed record ArchiveExtractionProgress(int ProcessedEntries, int? TotalEntries, string CurrentEntry);
 
     private static readonly string[] SupportedArchiveSuffixes = [".zip", ".7z", ".tar", ".tgz", ".tar.gz"];
-    private const long EntryProgressReportIntervalBytes = 8L * 1024 * 1024;
+    private const long EntryProgressReportIntervalBytes = 32L * 1024 * 1024;
     private const int ExtractionCopyBufferSizeBytes = 1024 * 1024;
+    private static readonly TimeSpan ExtractionProgressMinInterval = TimeSpan.FromMilliseconds(250);
 
     public static bool IsSupportedArchive(string path)
     {
@@ -10836,6 +10837,7 @@ internal static class ArchiveExtractionHelper
         using var archive = ZipFile.OpenRead(archivePath);
         var totalEntries = archive.Entries.Count();
         var processedEntries = 0;
+        var lastProgressUtc = DateTime.MinValue;
         foreach (var entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -10860,7 +10862,7 @@ internal static class ArchiveExtractionHelper
             {
                 Directory.CreateDirectory(destinationPath);
                 processedEntries++;
-                onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, entry.FullName));
+                EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, totalEntries, entry.FullName, force: true);
                 continue;
             }
 
@@ -10870,7 +10872,13 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
-            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, $"copying:{entry.FullName} (0/{FormatByteCount(entry.Length)})"));
+            EmitArchiveProgress(
+                onProgress,
+                ref lastProgressUtc,
+                processedEntries,
+                totalEntries,
+                $"copying:{entry.FullName} (0/{FormatByteCount(entry.Length)})",
+                force: true);
             using var entryStream = entry.Open();
             using var outputStream = File.Create(destinationPath);
             CopyStreamWithCancellation(
@@ -10884,14 +10892,16 @@ internal static class ArchiveExtractionHelper
                         return;
                     }
 
-                    onProgress(new ArchiveExtractionProgress(
+                    EmitArchiveProgress(
+                        onProgress,
+                        ref lastProgressUtc,
                         processedEntries,
                         totalEntries,
-                        $"copying:{entry.FullName} ({FormatByteCount(copiedBytes)}/{FormatByteCount(entry.Length)})"));
+                        $"copying:{entry.FullName} ({FormatByteCount(copiedBytes)}/{FormatByteCount(entry.Length)})");
                 },
                 EntryProgressReportIntervalBytes);
             processedEntries++;
-            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, entry.FullName));
+            EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, totalEntries, entry.FullName, force: true);
         }
     }
 
@@ -10908,8 +10918,9 @@ internal static class ArchiveExtractionHelper
         }
 
         using var archive = SevenZipArchive.OpenArchive(archivePath, new ReaderOptions());
-        var totalEntries = archive.Entries.Count();
+        int? totalEntries = null;
         var processedEntries = 0;
+        var lastProgressUtc = DateTime.MinValue;
         foreach (var entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -10933,7 +10944,7 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
-            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, $"copying:{entry.Key}"));
+            EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, totalEntries, $"copying:{entry.Key}", force: true);
             using var entryStream = entry.OpenEntryStream();
             using var outputStream = File.Create(destinationPath);
             CopyStreamWithCancellation(
@@ -10947,14 +10958,16 @@ internal static class ArchiveExtractionHelper
                         return;
                     }
 
-                    onProgress(new ArchiveExtractionProgress(
+                    EmitArchiveProgress(
+                        onProgress,
+                        ref lastProgressUtc,
                         processedEntries,
                         totalEntries,
-                        $"copying:{entry.Key} ({FormatByteCount(copiedBytes)})"));
+                        $"copying:{entry.Key} ({FormatByteCount(copiedBytes)})");
                 },
                 EntryProgressReportIntervalBytes);
             processedEntries++;
-            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, entry.Key));
+            EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, totalEntries, entry.Key, force: true);
 
             if (entry.LastModifiedTime is { } lastModified)
             {
@@ -10978,6 +10991,7 @@ internal static class ArchiveExtractionHelper
         using var reader = new TarReader(tarStream, leaveOpen: true);
         TarEntry? entry;
         var processedEntries = 0;
+        var lastProgressUtc = DateTime.MinValue;
         while ((entry = reader.GetNextEntry()) is not null)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -10999,7 +11013,7 @@ internal static class ArchiveExtractionHelper
             {
                 Directory.CreateDirectory(destinationPath);
                 processedEntries++;
-                onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, null, entry.Name));
+                EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, null, entry.Name, force: true);
                 continue;
             }
 
@@ -11014,7 +11028,7 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
-            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, null, $"copying:{entry.Name}"));
+            EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, null, $"copying:{entry.Name}", force: true);
             using var outputStream = File.Create(destinationPath);
             if (entry.DataStream is { } entryStream)
             {
@@ -11029,15 +11043,17 @@ internal static class ArchiveExtractionHelper
                             return;
                         }
 
-                        onProgress(new ArchiveExtractionProgress(
+                        EmitArchiveProgress(
+                            onProgress,
+                            ref lastProgressUtc,
                             processedEntries,
                             null,
-                            $"copying:{entry.Name} ({FormatByteCount(copiedBytes)})"));
+                            $"copying:{entry.Name} ({FormatByteCount(copiedBytes)})");
                     },
                     EntryProgressReportIntervalBytes);
             }
             processedEntries++;
-            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, null, entry.Name));
+            EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, null, entry.Name, force: true);
 
             File.SetLastWriteTimeUtc(destinationPath, entry.ModificationTime.UtcDateTime);
         }
@@ -11101,6 +11117,29 @@ internal static class ArchiveExtractionHelper
         }
 
         return $"{value:0.##} {units[unitIndex]}";
+    }
+
+    private static void EmitArchiveProgress(
+        Action<ArchiveExtractionProgress>? onProgress,
+        ref DateTime lastProgressUtc,
+        int processedEntries,
+        int? totalEntries,
+        string currentEntry,
+        bool force = false)
+    {
+        if (onProgress is null)
+        {
+            return;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        if (!force && nowUtc - lastProgressUtc < ExtractionProgressMinInterval)
+        {
+            return;
+        }
+
+        lastProgressUtc = nowUtc;
+        onProgress(new ArchiveExtractionProgress(processedEntries, totalEntries, currentEntry));
     }
 }
 
