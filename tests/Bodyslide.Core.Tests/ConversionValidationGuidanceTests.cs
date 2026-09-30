@@ -384,7 +384,24 @@ public sealed class ConversionValidationGuidanceTests
             var bodyOutputPath = bodyOutputPathElement.GetString();
             Assert.False(string.IsNullOrWhiteSpace(bodyOutputPath));
 
-            var hasMatchingOutputPath = ospPaths.Any(ospPath =>
+            var profileStem = Path.GetFileNameWithoutExtension(profilePath);
+            if (profileStem.EndsWith(".slidesmith-body", StringComparison.OrdinalIgnoreCase))
+            {
+                profileStem = profileStem[..^".slidesmith-body".Length];
+            }
+
+            var matchingOspPaths = ospPaths
+                .Where(ospPath => string.Equals(
+                    Path.GetFileNameWithoutExtension(ospPath),
+                    profileStem,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (matchingOspPaths.Length == 0)
+            {
+                continue;
+            }
+
+            var hasMatchingOutputPath = matchingOspPaths.Any(ospPath =>
             {
                 var ospText = File.ReadAllText(ospPath);
                 var match = System.Text.RegularExpressions.Regex.Match(ospText, "<OutputPath>(.*?)</OutputPath>");
