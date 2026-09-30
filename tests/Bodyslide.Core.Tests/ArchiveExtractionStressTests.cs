@@ -56,6 +56,43 @@ public sealed class ArchiveExtractionStressTests
                 Directory.Delete(tempRoot, recursive: true);
             }
         }
+
+        [Fact]
+        public void ExtractToTemporaryWorkspace_SevenZip_ReportsTotalEntriesAndBytes()
+        {
+            var tempRoot = Path.Combine(Path.GetTempPath(), "slidesmith-archive-stress-7z-progress", Guid.NewGuid().ToString("N"));
+            var archivePath = Path.Combine(tempRoot, "input.7z");
+            Directory.CreateDirectory(tempRoot);
+            CreateSevenZipWithMultiplePayloads(archivePath);
+
+            string? extractionDirectory = null;
+            try
+            {
+                ArchiveExtractionHelper.ArchiveExtractionProgress? lastProgress = null;
+                extractionDirectory = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(
+                    archivePath,
+                    "slidesmith-archive-stress-7z-progress-run",
+                    cancellationToken: CancellationToken.None,
+                    onProgress: progress => lastProgress = progress);
+
+                Assert.NotNull(lastProgress);
+                Assert.Equal(2, lastProgress!.TotalEntries);
+                Assert.True(lastProgress.TotalBytesEstimated is >= (2 * 8L));
+                Assert.True(lastProgress.TotalBytesCopied >= 2 * 8L);
+            }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(extractionDirectory) && Directory.Exists(extractionDirectory))
+                {
+                    Directory.Delete(extractionDirectory, recursive: true);
+                }
+
+                if (Directory.Exists(tempRoot))
+                {
+                    Directory.Delete(tempRoot, recursive: true);
+                }
+            }
+        }
     }
 
     [Theory]
@@ -176,6 +213,37 @@ public sealed class ArchiveExtractionStressTests
             if (File.Exists(payloadPath))
             {
                 File.Delete(payloadPath);
+            }
+        }
+
+        private static void CreateSevenZipWithMultiplePayloads(string archivePath)
+        {
+            var payloadRoot = Path.Combine(Path.GetDirectoryName(archivePath)!, $"{Guid.NewGuid():N}");
+            Directory.CreateDirectory(payloadRoot);
+            var payloadFiles = new[]
+            {
+                Path.Combine(payloadRoot, "a.bin"),
+                Path.Combine(payloadRoot, "b.bin")
+            };
+
+            try
+            {
+                File.WriteAllBytes(payloadFiles[0], new byte[8]);
+                File.WriteAllBytes(payloadFiles[1], new byte[12]);
+                using var archiveStream = File.Create(archivePath);
+                using var writer = SevenZipWriter.OpenWriter(archiveStream, CompressionType.LZMA2);
+                foreach (var payloadFile in payloadFiles)
+                {
+                    using var payloadStream = File.OpenRead(payloadFile);
+                    writer.Write(Path.GetFileName(payloadFile), payloadStream, DateTime.UtcNow);
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(payloadRoot))
+                {
+                    Directory.Delete(payloadRoot, recursive: true);
+                }
             }
         }
     }
