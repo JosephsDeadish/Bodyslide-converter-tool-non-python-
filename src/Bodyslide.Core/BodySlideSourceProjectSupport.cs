@@ -478,12 +478,17 @@ internal static class BodySlideSourceProjectSupport
     }
 
     private static IEnumerable<string> EnumerateSupportedFiles(string root) =>
-        Directory.EnumerateFiles(root, "*.osp", SearchOption.TopDirectoryOnly)
-            .Concat(Directory.EnumerateFiles(root, "*.osd", SearchOption.TopDirectoryOnly))
-            .Concat(Directory.EnumerateFiles(root, "*.bsd", SearchOption.TopDirectoryOnly))
-            .Concat(Directory.EnumerateFiles(root, "*.tri", SearchOption.TopDirectoryOnly))
-            .Concat(Directory.EnumerateFiles(root, "*.xml", SearchOption.TopDirectoryOnly)
-                .Where(IsLikelyBodySlideSupportXml));
+        Directory.EnumerateFiles(root, "*", SearchOption.TopDirectoryOnly)
+            .Where(path =>
+            {
+                var extension = Path.GetExtension(path);
+                return extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
+                       extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
+                       extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase) ||
+                       extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
+                       (extension.Equals(".xml", StringComparison.OrdinalIgnoreCase) &&
+                        IsLikelyBodySlideSupportXml(path));
+            });
 
     private static IEnumerable<string> EnumerateOspFiles(string root, SearchOption searchOption)
     {
