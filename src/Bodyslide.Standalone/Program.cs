@@ -522,10 +522,8 @@ static IReadOnlyList<string> EnumerateDesktopExeCandidates(string executableDire
         Path.Combine(siblingDesktopDirectory, "SlideSmith-Desktop.exe")
     };
 
-    var discovered = EnumerateDirectoryCandidates(executableDirectory, "*.exe")
-        .Concat(EnumerateDirectoryCandidates(siblingDesktopDirectory, "*.exe"))
-        .Concat(EnumerateDirectoryCandidatesRecursive(executableDirectory, "*.exe"))
-        .Concat(EnumerateDirectoryCandidatesRecursive(siblingDesktopDirectory, "*.exe"))
+    var discovered = EnumerateLikelyDesktopCandidateDirectories(executableDirectory, siblingDesktopDirectory)
+        .SelectMany(static directory => EnumerateDirectoryCandidates(directory, "*.exe"))
         .Where(static path => Path.GetFileName(path).Contains("desktop", StringComparison.OrdinalIgnoreCase));
 
     return preferred
@@ -545,9 +543,8 @@ static IReadOnlyList<string> EnumerateDesktopDllCandidates(string executableDire
         Path.Combine(siblingDesktopDirectory, "SlideSmith.dll")
     };
 
-    var discovered = EnumerateDirectoryCandidates(siblingDesktopDirectory, "*.dll")
-        .Concat(EnumerateDirectoryCandidatesRecursive(executableDirectory, "*.dll"))
-        .Concat(EnumerateDirectoryCandidatesRecursive(siblingDesktopDirectory, "*.dll"))
+    var discovered = EnumerateLikelyDesktopCandidateDirectories(executableDirectory, siblingDesktopDirectory)
+        .SelectMany(static directory => EnumerateDirectoryCandidates(directory, "*.dll"))
         .Where(static path => Path.GetFileName(path).Contains("desktop", StringComparison.OrdinalIgnoreCase) ||
                               Path.GetFileName(path).Equals("SlideSmith.dll", StringComparison.OrdinalIgnoreCase));
 
@@ -576,23 +573,21 @@ static IReadOnlyList<string> EnumerateDirectoryCandidates(string directory, stri
     }
 }
 
-static IReadOnlyList<string> EnumerateDirectoryCandidatesRecursive(string directory, string pattern)
+static IReadOnlyList<string> EnumerateLikelyDesktopCandidateDirectories(string executableDirectory, string siblingDesktopDirectory)
 {
-    if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+    return new[]
     {
-        return [];
+        executableDirectory,
+        siblingDesktopDirectory,
+        Path.Combine(executableDirectory, "desktop"),
+        Path.Combine(executableDirectory, "bin"),
+        Path.Combine(executableDirectory, "publish"),
+        Path.Combine(siblingDesktopDirectory, "bin"),
+        Path.Combine(siblingDesktopDirectory, "publish")
     }
-
-    try
-    {
-        return Directory
-            .EnumerateFiles(directory, pattern, SearchOption.AllDirectories)
-            .ToArray();
-    }
-    catch
-    {
-        return [];
-    }
+    .Where(static directory => !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 }
 
 static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, string? startupDiagnosticsPath, out Process? launchedProcess)
