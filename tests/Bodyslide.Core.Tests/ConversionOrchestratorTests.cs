@@ -16275,6 +16275,63 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_DirectoryWithSharedTextures_PlacesTexturesOnceAtModRoot()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var meshOneDirectory = Path.Combine(inputDirectory, "meshes", "armor", "iron");
+        var meshTwoDirectory = Path.Combine(inputDirectory, "meshes", "armor", "steel");
+        var textureDirectory = Path.Combine(inputDirectory, "textures", "armor", "shared");
+        Directory.CreateDirectory(meshOneDirectory);
+        Directory.CreateDirectory(meshTwoDirectory);
+        Directory.CreateDirectory(textureDirectory);
+
+        await File.WriteAllTextAsync(Path.Combine(meshOneDirectory, "iron_cuirass_0.nif"), "mesh-one");
+        await File.WriteAllTextAsync(Path.Combine(meshTwoDirectory, "steel_boots_0.nif"), "mesh-two");
+        await File.WriteAllBytesAsync(Path.Combine(textureDirectory, "sharedarmor.dds"), [0x44, 0x44, 0x53, 0x20]);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "3BA", outputDirectory, OutputZip: true));
+
+            Assert.True(result.Success);
+
+            var sharedTexturePath = Path.Combine(outputDirectory, "textures", "armor", "shared", "sharedarmor.dds");
+            Assert.True(File.Exists(sharedTexturePath), "Expected the shared texture to be staged once at the mod root.");
+            Assert.Single(Directory.GetFiles(outputDirectory, "sharedarmor.dds", SearchOption.AllDirectories));
+
+            var zipPath = outputDirectory + ".zip";
+            using var archive = ZipFile.OpenRead(zipPath);
+            var textureEntries = archive.Entries
+                .Where(entry => entry.FullName.EndsWith("sharedarmor.dds", StringComparison.OrdinalIgnoreCase))
+                .Select(entry => entry.FullName.Replace('\\', '/'))
+                .ToArray();
+
+            Assert.Single(textureEntries);
+            Assert.Equal("textures/armor/shared/sharedarmor.dds", textureEntries[0]);
+            Assert.DoesNotContain(
+                archive.Entries,
+                entry => entry.FullName.Replace('\\', '/').Contains("/textures/armor/shared/", StringComparison.OrdinalIgnoreCase) &&
+                         entry.FullName.Contains("meshes/slidesmith", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            if (Directory.Exists(workingDirectory))
+            {
+                Directory.Delete(workingDirectory, recursive: true);
+            }
+
+            var zipPath = outputDirectory + ".zip";
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticModPackDirectory_WithMixedPlugins_PreservesContextualPluginMeshes()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace();

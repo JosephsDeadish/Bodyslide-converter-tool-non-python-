@@ -21294,10 +21294,10 @@ internal sealed class LocalExportService(
             armor.SourcePath,
             outputDirectory,
             request.SharedPluginOutputDirectory);
+        var assetOutputDirectory = request.SharedPluginOutputDirectory ?? outputDirectory;
         var copiedSupportAssets = await CopySupportAssetsAsync(
             armor,
-            outputDirectory,
-            request.SharedPluginOutputDirectory,
+            assetOutputDirectory,
             supportAssets,
             cancellationToken);
         outputFiles.AddRange(copiedSupportAssets);
@@ -21305,14 +21305,14 @@ internal sealed class LocalExportService(
         // Generate flat-normal DDS stubs for any diffuse textures that have no matching _n.dds.
         // Missing normal maps cause purple-tinted or visually broken surfaces in-game; a flat
         // stub (pointing straight out in tangent space) prevents that and can be replaced later.
-        var generatedNormals = await GenerateMissingNormalMapStubsAsync(armor, textureSummary, outputDirectory, cancellationToken);
+        var generatedNormals = await GenerateMissingNormalMapStubsAsync(armor, textureSummary, assetOutputDirectory, cancellationToken);
         outputFiles.AddRange(generatedNormals);
 
         // Generate auxiliary texture stubs (specular _s, parallax _p, glow _g, roughness _r) for any diffuse
         // textures that are missing those companions.  Neutral stubs avoid black/broken surfaces
         // and can be overridden by the user with real textures later.
         var (generatedSpecular, generatedParallax, generatedGlow, generatedRoughness, generatedSubsurface) =
-            await GenerateMissingAuxTextureStubsAsync(armor, textureSummary, outputDirectory, cancellationToken);
+            await GenerateMissingAuxTextureStubsAsync(armor, textureSummary, assetOutputDirectory, cancellationToken);
         outputFiles.AddRange(generatedSpecular);
         outputFiles.AddRange(generatedParallax);
         outputFiles.AddRange(generatedGlow);
@@ -22870,7 +22870,6 @@ internal sealed class LocalExportService(
     private static async Task<IReadOnlyList<string>> CopySupportAssetsAsync(
         ImportedArmor armor,
         string outputDirectory,
-        string? sharedPluginOutputDirectory,
         SupportAssetDiscoveryResult supportAssets,
         CancellationToken cancellationToken)
     {
@@ -22899,27 +22898,21 @@ internal sealed class LocalExportService(
                 continue;
             }
 
-            // Plugin files are shared across all per-armor outputs; route them to the shared
-            // plugin directory so only one copy exists rather than one per armor sub-folder.
             var ext = Path.GetExtension(fullSource);
-            var isPlugin = ext is ".esp" or ".esm" or ".esl";
-            var destRoot = isPlugin && !string.IsNullOrWhiteSpace(sharedPluginOutputDirectory)
-                ? sharedPluginOutputDirectory
-                : outputDirectory;
-
             string destinationPath;
-            if (isPlugin && !string.IsNullOrWhiteSpace(sharedPluginOutputDirectory))
+            if (ext.Equals(".esp", StringComparison.OrdinalIgnoreCase) ||
+                ext.Equals(".esm", StringComparison.OrdinalIgnoreCase) ||
+                ext.Equals(".esl", StringComparison.OrdinalIgnoreCase))
             {
-                // Place the plugin directly at the root of the shared directory (no sub-folders).
-                destinationPath = Path.GetFullPath(Path.Combine(destRoot, Path.GetFileName(fullSource)));
+                destinationPath = Path.GetFullPath(Path.Combine(outputDirectory, Path.GetFileName(fullSource)));
             }
             else
             {
                 var relativePath = GetSafeRelativeAssetPath(armor.SourcePath, fullSource);
-                destinationPath = Path.GetFullPath(Path.Combine(destRoot, relativePath));
-                if (!destinationPath.StartsWith(Path.GetFullPath(destRoot), StringComparison.OrdinalIgnoreCase))
+                destinationPath = Path.GetFullPath(Path.Combine(outputDirectory, relativePath));
+                if (!destinationPath.StartsWith(Path.GetFullPath(outputDirectory), StringComparison.OrdinalIgnoreCase))
                 {
-                    destinationPath = Path.Combine(destRoot, Path.GetFileName(fullSource));
+                    destinationPath = Path.Combine(outputDirectory, Path.GetFileName(fullSource));
                 }
             }
 
