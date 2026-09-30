@@ -130,6 +130,7 @@ internal static class DesktopWorkflowSupport
             .AppendLine($"Binary: {desktopPath}")
             .AppendLine($"Start in: {workingDirectory}")
             .AppendLine("MO2 note: keep Binary and Start in on the exact desktop executable folder so the VFS/USVFS hook can inject mods before startup.")
+            .AppendLine("Troubleshooting: pass startup diagnostics with --startup-diagnostics or --launcher-handoff-diagnostics when you need launcher handoff logs.")
             .AppendLine("Arguments (MO2): --mo2-launcher")
             .AppendLine("Arguments (Vortex): --vortex-launcher")
             .AppendLine();

@@ -7926,12 +7926,15 @@ public sealed class MainForm : Form
                     var reason = TryReadString(step, "ManualReviewReason");
                     var action = TryReadString(step, "SuggestedXEditAction");
                     var priority = TryReadString(step, "ReviewPriority");
+                    var routingReason = string.IsNullOrWhiteSpace(reason)
+                        ? "routing reason unavailable"
+                        : $"routing reason: {reason}";
 
                     requiresReview = true;
                     add(
                         "Linked armor family",
                         string.Equals(priority, "high", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
-                        $"{armorRecord} ({sourcePlugin}): {action ?? reason ?? "Review linked ARMA members in xEdit before release."}",
+                        $"{armorRecord} ({sourcePlugin}): {action ?? "Review linked ARMA members in xEdit before release."} ({routingReason})",
                         patchPath);
                 }
             }

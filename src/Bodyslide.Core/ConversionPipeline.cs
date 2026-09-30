@@ -16230,6 +16230,8 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
                 }
             }
             catch (IOException) { /* Skip unreadable skeleton files */ }
+            catch (UnauthorizedAccessException) { /* Skip unreadable skeleton files */ }
+            catch (NotSupportedException) { /* Skip unreadable skeleton files */ }
         }
 
         // Custom bones from the skeleton NIF widen what the target can accept.

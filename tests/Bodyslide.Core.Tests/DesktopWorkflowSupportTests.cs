@@ -759,6 +759,7 @@ public sealed class DesktopWorkflowSupportTests
 
         Assert.Contains("Recommended mod manager setup for SlideSmith", guidance, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("MO2 note: keep Binary and Start in on the exact desktop executable folder", guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Troubleshooting: pass startup diagnostics", guidance, StringComparison.OrdinalIgnoreCase);
         Assert.Contains($"Binary: {desktopPath}", guidance, StringComparison.OrdinalIgnoreCase);
         Assert.Contains($"Start in: {workingDirectory}", guidance, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Detected current process as CLI", guidance, StringComparison.OrdinalIgnoreCase);
