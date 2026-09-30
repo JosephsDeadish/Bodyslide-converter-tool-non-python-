@@ -5743,20 +5743,19 @@ public sealed class MainForm : Form
 
     private static string? FindSiblingDesktopExecutable(string executableDirectory)
     {
-        var siblingDesktopDirectory = Path.GetFullPath(Path.Combine(executableDirectory, "..", "desktop"));
-        foreach (var candidate in new[]
-                 {
-                     Path.Combine(executableDirectory, "SlideSmith.exe"),
-                     Path.Combine(executableDirectory, "Bodyslide.Desktop.exe"),
-                     Path.Combine(executableDirectory, "SlideSmith-Desktop.exe"),
-                     Path.Combine(siblingDesktopDirectory, "SlideSmith.exe"),
-                     Path.Combine(siblingDesktopDirectory, "Bodyslide.Desktop.exe"),
-                     Path.Combine(siblingDesktopDirectory, "SlideSmith-Desktop.exe")
-                 })
+        foreach (var directory in DesktopLaunchPathResolver.GetLikelyDesktopCandidateDirectories(executableDirectory))
         {
-            if (File.Exists(candidate))
+            foreach (var candidate in new[]
+                     {
+                         Path.Combine(directory, "SlideSmith.exe"),
+                         Path.Combine(directory, "Bodyslide.Desktop.exe"),
+                         Path.Combine(directory, "SlideSmith-Desktop.exe")
+                     })
             {
-                return candidate;
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
             }
         }
 
