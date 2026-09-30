@@ -17813,6 +17813,71 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void BuildPluginRewritePlan_PrefersLeftRightAlignedSourceMeshVariant_WhenPluginPathSignalsSide()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/gauntlets/dragon_gauntlet_l_0.nif",
+            "/tmp/meshes/armor/gauntlets/dragon_gauntlet_r_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["DragonGauntlets.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    ["meshes/armor/gauntlets/dragon_gauntlet_right_0.nif"],
+                    FormId: 0x00004322u,
+                    EditorId: "DragonGauntletRightAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal(
+            "/tmp/meshes/armor/gauntlets/dragon_gauntlet_r_0.nif",
+            sourceMeshMap["meshes/armor/gauntlets/dragon_gauntlet_right_0.nif"]);
+    }
+
+    [Fact]
+    public void InferFallbackSupport_UsesPathSegmentEvidenceForProfileAndBodyInference()
+    {
+        var armor = new ImportedArmor(
+            SourcePath: "/tmp/mod",
+            MeshFiles:
+            [
+                "/tmp/mod/meshes/cbbe/curvy/dragonscale/dragonscale_cuirass.nif"
+            ],
+            TextureFiles:
+            [
+                "/tmp/mod/textures/cbbe/curvy/dragonscale/dragonscale_d.dds"
+            ],
+            PhysicsFiles: [],
+            BodyReferenceFiles: []);
+
+        var fallback = BodySlideSourceProjectSupport.InferFallbackSupport(armor, targetBody: "UUNP");
+
+        Assert.NotNull(fallback);
+        Assert.Equal("curvy", fallback!.DeformationProfile);
+        Assert.Contains(fallback.Signals, static signal => signal.Equals("profile:curvy", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticFailureMessyBodyLayoutModPackDirectory_ResolvesBodyLayoutAliasesWhileKeepingFailureGuidance()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureMessyBodyLayoutModPack");

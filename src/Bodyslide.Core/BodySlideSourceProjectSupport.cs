@@ -121,13 +121,7 @@ internal static class BodySlideSourceProjectSupport
         string targetBody,
         VanillaArmorEntry? vanillaEntry = null)
     {
-        var evidence = armor.MeshFiles
-            .Concat(armor.TextureFiles)
-            .Concat(armor.PhysicsFiles)
-            .Concat(armor.BodyReferenceFiles)
-            .Select(path => Path.GetFileNameWithoutExtension(path) ?? path)
-            .Where(static value => !string.IsNullOrWhiteSpace(value))
-            .ToArray();
+        var evidence = BuildFallbackEvidenceTokens(armor);
         if (evidence.Length == 0)
         {
             return vanillaEntry is null
@@ -149,6 +143,48 @@ internal static class BodySlideSourceProjectSupport
             inferredSourceBody?.BodyName,
             inferredProfile,
             signals.Order(StringComparer.OrdinalIgnoreCase).ToArray());
+    }
+
+    private static string[] BuildFallbackEvidenceTokens(ImportedArmor armor)
+    {
+        var evidence = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in armor.MeshFiles
+                     .Concat(armor.TextureFiles)
+                     .Concat(armor.PhysicsFiles)
+                     .Concat(armor.BodyReferenceFiles))
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            var fileStem = Path.GetFileNameWithoutExtension(path);
+            if (!string.IsNullOrWhiteSpace(fileStem))
+            {
+                evidence.Add(fileStem);
+            }
+
+            var normalizedPath = path.Replace('\\', '/');
+            foreach (var segment in normalizedPath
+                         .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (segment.Length > 1)
+                {
+                    evidence.Add(segment);
+                }
+            }
+
+            var condensedToken = new string(normalizedPath
+                .Where(char.IsLetterOrDigit)
+                .Select(char.ToLowerInvariant)
+                .ToArray());
+            if (condensedToken.Length > 4)
+            {
+                evidence.Add(condensedToken);
+            }
+        }
+
+        return evidence.ToArray();
     }
 
     private static async Task<BodySlideSourceSupport> ExtractSourceSupportAsync(

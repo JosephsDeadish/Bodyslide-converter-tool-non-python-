@@ -2240,6 +2240,8 @@ internal readonly record struct MeshPathVariantSignals(
     bool IsWorld,
     bool IsFemale,
     bool IsMale,
+    bool IsLeft,
+    bool IsRight,
     bool IsLowWeight,
     bool IsHighWeight);
 
@@ -5864,6 +5866,7 @@ internal static class NifGeometrySignatureReader
         (typeName.Contains("TriShape", StringComparison.Ordinal) ||
          typeName.Contains("TriStrips", StringComparison.Ordinal) ||
          typeName.Contains("Geometry", StringComparison.Ordinal) ||
+         typeName.Contains("Shape", StringComparison.Ordinal) ||
          typeName.Contains("Mesh", StringComparison.Ordinal) ||
          typeName.Contains("Lines", StringComparison.Ordinal));
 
@@ -30882,6 +30885,8 @@ internal sealed class LocalExportService(
         score += ScoreVariantSignalAlignment(pluginSignals.IsWorld, sourceSignals.IsWorld, matchBonus: 180, mismatchPenalty: 120);
         score += ScoreVariantSignalAlignment(pluginSignals.IsFemale, sourceSignals.IsFemale, matchBonus: 260, mismatchPenalty: 220);
         score += ScoreVariantSignalAlignment(pluginSignals.IsMale, sourceSignals.IsMale, matchBonus: 260, mismatchPenalty: 220);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsLeft, sourceSignals.IsLeft, matchBonus: 260, mismatchPenalty: 230, unexpectedSourcePenalty: 180);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsRight, sourceSignals.IsRight, matchBonus: 260, mismatchPenalty: 230, unexpectedSourcePenalty: 180);
         score += ScoreVariantSignalAlignment(pluginSignals.IsLowWeight, sourceSignals.IsLowWeight, matchBonus: 320, mismatchPenalty: 260);
         score += ScoreVariantSignalAlignment(pluginSignals.IsHighWeight, sourceSignals.IsHighWeight, matchBonus: 320, mismatchPenalty: 260);
         return score;
@@ -30913,6 +30918,10 @@ internal sealed class LocalExportService(
                 || fileStemTokens.Any(IsFemaleVariantToken),
             IsMale: tokens.Any(IsMaleVariantToken)
                 || fileStemTokens.Any(IsMaleVariantToken),
+            IsLeft: tokens.Any(IsLeftVariantToken)
+                || fileStemTokens.Any(IsLeftVariantToken),
+            IsRight: tokens.Any(IsRightVariantToken)
+                || fileStemTokens.Any(IsRightVariantToken),
             IsLowWeight: HasLowWeightVariantSuffix(Path.GetFileNameWithoutExtension(path) ?? path),
             IsHighWeight: HasHighWeightVariantSuffix(Path.GetFileNameWithoutExtension(path) ?? path));
     }
@@ -31137,6 +31146,24 @@ internal sealed class LocalExportService(
             || normalizedToken.EndsWith("male", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsLeftVariantToken(string token)
+    {
+        var normalizedToken = NormalizeVariantSignalToken(token);
+        return normalizedToken is "left" or "l" or "lh" or "lt" or "lft"
+            || normalizedToken.StartsWith("left", StringComparison.OrdinalIgnoreCase)
+            || normalizedToken.EndsWith("left", StringComparison.OrdinalIgnoreCase)
+            || normalizedToken.StartsWith("lh", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRightVariantToken(string token)
+    {
+        var normalizedToken = NormalizeVariantSignalToken(token);
+        return normalizedToken is "right" or "r" or "rh" or "rt" or "rgt"
+            || normalizedToken.StartsWith("right", StringComparison.OrdinalIgnoreCase)
+            || normalizedToken.EndsWith("right", StringComparison.OrdinalIgnoreCase)
+            || normalizedToken.StartsWith("rh", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string NormalizeVariantSignalToken(string token)
     {
         if (string.IsNullOrWhiteSpace(token))
@@ -31161,6 +31188,8 @@ internal sealed class LocalExportService(
                 "inventory" or "inv" or "dropmodel" or "dropped" => "world",
             "f" or "fem" => "female",
             "m" or "masc" => "male",
+            "left" or "l" or "lt" or "lh" or "lft" => "left",
+            "right" or "r" or "rt" or "rh" or "rgt" => "right",
             _ => normalizedToken
         };
     }
