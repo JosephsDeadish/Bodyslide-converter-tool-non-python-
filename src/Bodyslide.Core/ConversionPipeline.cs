@@ -1733,7 +1733,14 @@ public sealed record BatchProgressUpdate(
     string? Stage = null,
     int StageIndex = 0,
     int StageCount = 0,
-    bool IsItemCompleted = true);
+    bool IsItemCompleted = true,
+    long? ExtractionTotalBytesCopied = null,
+    long? ExtractionTotalBytesEstimated = null,
+    long? ExtractionEntryBytesCopied = null,
+    long? ExtractionEntryBytesTotal = null,
+    long? ExtractionElapsedMilliseconds = null,
+    double? ExtractionThroughputMiBPerSecond = null,
+    string? ExtractionArchiveFormat = null);
 
 public sealed record ArmorPackValidationIssueCount(string Code, int Count);
 public sealed record ArmorPackValidationItem(
@@ -8138,6 +8145,55 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 IsItemCompleted: false)));
     }
 
+    private static string DetectArchiveFormat(string path)
+    {
+        if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            return "zip";
+        }
+
+        if (path.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
+        {
+            return "7z";
+        }
+
+        if (path.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tar.gz";
+        }
+
+        if (path.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tar";
+        }
+
+        return "archive";
+    }
+
+    private static string FormatByteCountCompact(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return $"{bytes} B";
+        }
+
+        var kib = bytes / 1024d;
+        if (kib < 1024d)
+        {
+            return $"{kib:0.##} KiB";
+        }
+
+        var mib = kib / 1024d;
+        if (mib < 1024d)
+        {
+            return $"{mib:0.##} MiB";
+        }
+
+        var gib = mib / 1024d;
+        return $"{gib:0.##} GiB";
+    }
+
     public async Task<IReadOnlyList<ConversionResult>> ConvertAsync(
         ConversionRequest request,
         CancellationToken cancellationToken = default,
@@ -8150,6 +8206,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         if (ArchiveExtractionHelper.IsSupportedArchive(request.InputPath))
         {
             var archiveLabel = Path.GetFileName(request.InputPath);
+            var archiveFormat = DetectArchiveFormat(request.InputPath);
             var lastArchiveProgressReportUtc = DateTime.MinValue;
             progress?.Report(new BatchProgressUpdate(
                 Completed: 0,
@@ -8159,7 +8216,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 Stage: "Extracting archive",
                 StageIndex: 1,
                 StageCount: 3,
-                IsItemCompleted: false));
+                IsItemCompleted: false,
+                ExtractionArchiveFormat: archiveFormat));
             var extractedArchive = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(
                 request.InputPath,
                 "bodyslide-batch-extract",
@@ -8195,15 +8253,32 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                     {
                         currentEntry = currentEntry[..72] + "…";
                     }
+
+                    var throughputSuffix = extractionProgress.ThroughputMiBPerSecond is double throughput && throughput > 0d
+                        ? $" @ {throughput:0.##} MiB/s"
+                        : string.Empty;
+                    var copiedSuffix = extractionProgress.TotalBytesEstimated is > 0
+                        ? $" [{FormatByteCountCompact(extractionProgress.TotalBytesCopied)}/{FormatByteCountCompact(extractionProgress.TotalBytesEstimated.Value)}]"
+                        : extractionProgress.TotalBytesCopied > 0
+                            ? $" [{FormatByteCountCompact(extractionProgress.TotalBytesCopied)}]"
+                            : string.Empty;
+
                     progress?.Report(new BatchProgressUpdate(
                         Completed: 0,
                         Total: 1,
                         CurrentFile: archiveLabel,
                         Success: false,
-                        Stage: $"Extracting archive ({progressSuffix} entries) — {currentEntry}",
+                        Stage: $"Extracting archive ({progressSuffix} entries) — {currentEntry}{copiedSuffix}{throughputSuffix}",
                         StageIndex: 1,
                         StageCount: 3,
-                        IsItemCompleted: false));
+                        IsItemCompleted: false,
+                        ExtractionTotalBytesCopied: extractionProgress.TotalBytesCopied,
+                        ExtractionTotalBytesEstimated: extractionProgress.TotalBytesEstimated,
+                        ExtractionEntryBytesCopied: extractionProgress.EntryBytesCopied,
+                        ExtractionEntryBytesTotal: extractionProgress.EntryBytesTotal,
+                        ExtractionElapsedMilliseconds: extractionProgress.ElapsedMilliseconds,
+                        ExtractionThroughputMiBPerSecond: extractionProgress.ThroughputMiBPerSecond,
+                        ExtractionArchiveFormat: archiveFormat));
                     lastArchiveProgressReportUtc = nowUtc;
                 });
             progress?.Report(new BatchProgressUpdate(
@@ -8214,7 +8289,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 Stage: "Scanning extracted archive",
                 StageIndex: 2,
                 StageCount: 3,
-                IsItemCompleted: false));
+                IsItemCompleted: false,
+                ExtractionArchiveFormat: archiveFormat));
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();

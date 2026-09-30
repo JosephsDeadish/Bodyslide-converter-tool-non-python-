@@ -539,6 +539,15 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Avg UI update gap ms", TryReadString(root, "AverageUiUpdateGapMilliseconds"), filePath);
                     Add(metrics, reportName, "Max UI update gap ms", TryReadString(root, "MaxUiUpdateGapMilliseconds"), filePath);
                     Add(metrics, reportName, "Cancellation latency ms", TryReadString(root, "CancellationLatencyMilliseconds"), filePath);
+                    Add(metrics, reportName, "Archive format", TryReadString(root, "ArchiveFormat"), filePath);
+                    Add(metrics, reportName, "Archive extraction samples", TryReadString(root, "ArchiveProgressSampleCount"), filePath);
+                    Add(metrics, reportName, "Archive bytes copied", TryReadString(root, "ArchiveBytesCopied"), filePath);
+                    Add(metrics, reportName, "Archive bytes estimated", TryReadString(root, "ArchiveBytesEstimated"), filePath);
+                    Add(metrics, reportName, "Archive throughput P10 MiB/s", TryReadString(root, "ArchiveThroughputP10MiBPerSecond"), filePath);
+                    Add(metrics, reportName, "Archive throughput P50 MiB/s", TryReadString(root, "ArchiveThroughputP50MiBPerSecond"), filePath);
+                    Add(metrics, reportName, "Archive throughput P90 MiB/s", TryReadString(root, "ArchiveThroughputP90MiBPerSecond"), filePath);
+                    Add(metrics, reportName, "Archive throughput baseline MiB/s", TryReadString(root, "ArchiveThroughputBaselineMiBPerSecond"), filePath);
+                    Add(metrics, reportName, "Archive throughput below baseline", FormatBool(TryReadBoolValue(root, "ArchiveThroughputBelowBaseline")), filePath);
                     Add(metrics, reportName, "Outcome", TryReadString(root, "Outcome"), filePath);
                     break;
                 case "proof-harness-bundle.json":

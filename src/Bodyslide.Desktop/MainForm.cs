@@ -213,6 +213,10 @@ public sealed class MainForm : Form
     private static readonly TimeSpan ArchiveProgressUiRefreshInterval = TimeSpan.FromMilliseconds(1200);
     private static readonly TimeSpan ArchiveProgressLogInterval = TimeSpan.FromSeconds(20);
     private const long LargeInputStressThresholdBytes = 100L * 1024L * 1024L;
+    private const double ZipThroughputBaselineMiBPerSecond = 8.0;
+    private const double SevenZipThroughputBaselineMiBPerSecond = 2.0;
+    private const double TarThroughputBaselineMiBPerSecond = 18.0;
+    private const double TarGzThroughputBaselineMiBPerSecond = 6.0;
 
     private enum UiTheme
     {
@@ -242,6 +246,15 @@ public sealed class MainForm : Form
         double? AverageUiUpdateGapMilliseconds,
         double? MaxUiUpdateGapMilliseconds,
         double? CancellationLatencyMilliseconds,
+        string? ArchiveFormat,
+        int ArchiveProgressSampleCount,
+        long? ArchiveBytesCopied,
+        long? ArchiveBytesEstimated,
+        double? ArchiveThroughputP10MiBPerSecond,
+        double? ArchiveThroughputP50MiBPerSecond,
+        double? ArchiveThroughputP90MiBPerSecond,
+        double? ArchiveThroughputBaselineMiBPerSecond,
+        bool ArchiveThroughputBelowBaseline,
         string Outcome,
         DateTimeOffset RecordedAtUtc);
 
@@ -3057,6 +3070,10 @@ public sealed class MainForm : Form
         var runtimeStressUiGapTotalMs = 0d;
         var runtimeStressUiGapSampleCount = 0;
         var runtimeStressUiGapMaxMs = 0d;
+        var runtimeStressArchiveThroughputSamples = new List<double>();
+        string? runtimeStressArchiveFormat = null;
+        long? runtimeStressArchiveBytesCopied = null;
+        long? runtimeStressArchiveBytesEstimated = null;
         DateTime? runtimeStressLastUiUpdateUtc = null;
         string runtimeStressOutcome = "running";
         _conversionCancellationRequestedAtUtc = null;
@@ -3114,11 +3131,36 @@ public sealed class MainForm : Form
                 var activeItem = update.IsItemCompleted
                     ? completed
                     : Math.Min(total, Math.Max(1, completed + 1));
+                var stageLogLabel = BuildProgressLogStage(update);
                 var statusSuffix = string.IsNullOrWhiteSpace(update.Stage)
                     ? update.CurrentFile
-                    : $"{update.CurrentFile} — {BuildProgressLogStage(update.Stage)}";
+                    : $"{update.CurrentFile} — {stageLogLabel}";
                 var now = DateTime.UtcNow;
                 var isArchiveExtractionStage = IsArchiveExtractionStage(update.Stage);
+                if (isArchiveExtractionStage)
+                {
+                    runtimeStressArchiveFormat ??= string.IsNullOrWhiteSpace(update.ExtractionArchiveFormat)
+                        ? null
+                        : update.ExtractionArchiveFormat.Trim();
+                    if (update.ExtractionTotalBytesCopied is { } copiedBytes)
+                    {
+                        runtimeStressArchiveBytesCopied = runtimeStressArchiveBytesCopied is { } existingCopied
+                            ? Math.Max(existingCopied, copiedBytes)
+                            : copiedBytes;
+                    }
+
+                    if (update.ExtractionTotalBytesEstimated is { } estimatedBytes && estimatedBytes > 0)
+                    {
+                        runtimeStressArchiveBytesEstimated = runtimeStressArchiveBytesEstimated is { } existingEstimated
+                            ? Math.Max(existingEstimated, estimatedBytes)
+                            : estimatedBytes;
+                    }
+
+                    if (update.ExtractionThroughputMiBPerSecond is > 0d throughput)
+                    {
+                        runtimeStressArchiveThroughputSamples.Add(throughput);
+                    }
+                }
                 var uiRefreshInterval = isArchiveExtractionStage
                     ? ArchiveProgressUiRefreshInterval
                     : TimeSpan.FromMilliseconds(250);
@@ -3184,7 +3226,7 @@ public sealed class MainForm : Form
                     activeStageName = NormalizeProgressStageName(update.Stage);
                 }
 
-                var logStage = BuildProgressLogStage(update.Stage);
+                var logStage = stageLogLabel;
                 var logSignature = isArchiveExtractionStage
                     ? $"{activeItem}/{total}|Extracting archive"
                     : $"{activeItem}/{total}|{logStage}";
@@ -3307,6 +3349,18 @@ public sealed class MainForm : Form
                 var cancellationLatencyMs = _conversionCancellationRequestedAtUtc is { } requestedAtUtc
                     ? (double?)Math.Max(0d, (DateTimeOffset.UtcNow - requestedAtUtc).TotalMilliseconds)
                     : null;
+                var archiveP10Throughput = CalculatePercentile(runtimeStressArchiveThroughputSamples, 10d);
+                var archiveP50Throughput = CalculatePercentile(runtimeStressArchiveThroughputSamples, 50d);
+                var archiveP90Throughput = CalculatePercentile(runtimeStressArchiveThroughputSamples, 90d);
+                var archiveThroughputBaseline = GetArchiveThroughputBaselineMiBPerSecond(runtimeStressArchiveFormat ?? runtimeStressInputType);
+                var archiveThroughputBelowBaseline = archiveThroughputBaseline is { } baseline &&
+                                                    archiveP10Throughput is { } p10 &&
+                                                    p10 < baseline;
+                if (archiveThroughputBelowBaseline)
+                {
+                    AppendLog($"Archive extraction throughput warning: P10 {archiveP10Throughput:0.##} MiB/s is below baseline {archiveThroughputBaseline:0.##} MiB/s for {runtimeStressArchiveFormat ?? runtimeStressInputType}.");
+                }
+
                 var runtimeStressReport = new RuntimeStressPassReport(
                     InputPath: input,
                     InputType: runtimeStressInputType,
@@ -3316,6 +3370,15 @@ public sealed class MainForm : Form
                     AverageUiUpdateGapMilliseconds: avgGapMs,
                     MaxUiUpdateGapMilliseconds: runtimeStressUiGapSampleCount > 0 ? runtimeStressUiGapMaxMs : null,
                     CancellationLatencyMilliseconds: cancellationLatencyMs,
+                    ArchiveFormat: runtimeStressArchiveFormat,
+                    ArchiveProgressSampleCount: runtimeStressArchiveThroughputSamples.Count,
+                    ArchiveBytesCopied: runtimeStressArchiveBytesCopied,
+                    ArchiveBytesEstimated: runtimeStressArchiveBytesEstimated,
+                    ArchiveThroughputP10MiBPerSecond: archiveP10Throughput,
+                    ArchiveThroughputP50MiBPerSecond: archiveP50Throughput,
+                    ArchiveThroughputP90MiBPerSecond: archiveP90Throughput,
+                    ArchiveThroughputBaselineMiBPerSecond: archiveThroughputBaseline,
+                    ArchiveThroughputBelowBaseline: archiveThroughputBelowBaseline,
                     Outcome: runtimeStressOutcome,
                     RecordedAtUtc: DateTimeOffset.UtcNow);
                 WriteRuntimeStressPassReport(_lastOutputDirectory, runtimeStressReport);
@@ -3664,7 +3727,64 @@ public sealed class MainForm : Form
             return "7z";
         }
 
+        if (string.Equals(extension, ".tar", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tar";
+        }
+
+        if (inputPath.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(extension, ".tgz", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tar.gz";
+        }
+
         return "file";
+    }
+
+    private static double? GetArchiveThroughputBaselineMiBPerSecond(string? archiveFormat)
+    {
+        if (string.IsNullOrWhiteSpace(archiveFormat))
+        {
+            return null;
+        }
+
+        return archiveFormat.Trim().ToLowerInvariant() switch
+        {
+            "zip" => ZipThroughputBaselineMiBPerSecond,
+            "7z" => SevenZipThroughputBaselineMiBPerSecond,
+            "tar" => TarThroughputBaselineMiBPerSecond,
+            "tar.gz" or "tgz" => TarGzThroughputBaselineMiBPerSecond,
+            _ => null
+        };
+    }
+
+    private static double? CalculatePercentile(IReadOnlyList<double> values, double percentile)
+    {
+        if (values.Count == 0)
+        {
+            return null;
+        }
+
+        var sorted = values
+            .Where(static value => !double.IsNaN(value) && !double.IsInfinity(value) && value > 0d)
+            .OrderBy(static value => value)
+            .ToList();
+        if (sorted.Count == 0)
+        {
+            return null;
+        }
+
+        var normalizedPercentile = Math.Clamp(percentile, 0d, 100d) / 100d;
+        var position = normalizedPercentile * (sorted.Count - 1);
+        var lowerIndex = (int)Math.Floor(position);
+        var upperIndex = (int)Math.Ceiling(position);
+        if (lowerIndex == upperIndex)
+        {
+            return sorted[lowerIndex];
+        }
+
+        var weight = position - lowerIndex;
+        return sorted[lowerIndex] + (sorted[upperIndex] - sorted[lowerIndex]) * weight;
     }
 
     private static long? TryGetInputSizeBytes(string inputPath)
@@ -3719,7 +3839,7 @@ public sealed class MainForm : Form
 
     private static string BuildProgressStageDisplay(BatchProgressUpdate update)
     {
-        var stageName = BuildProgressLogStage(update.Stage);
+        var stageName = BuildProgressLogStage(update);
         if (update.StageCount <= 0)
         {
             return stageName;
@@ -3875,8 +3995,9 @@ public sealed class MainForm : Form
             ? "Processing"
             : stage.Trim();
 
-    private static string BuildProgressLogStage(string? stage)
+    private static string BuildProgressLogStage(BatchProgressUpdate update)
     {
+        var stage = update.Stage;
         if (string.IsNullOrWhiteSpace(stage))
         {
             return "Processing";
@@ -3899,9 +4020,10 @@ public sealed class MainForm : Form
                 copiedTarget = fileName;
             }
 
+            var extractionSuffix = BuildArchiveExtractionTelemetrySuffix(update);
             return string.IsNullOrWhiteSpace(copiedTarget)
                 ? "Extracting archive — copying entry data"
-                : $"Extracting archive — copying {copiedTarget}";
+                : $"Extracting archive — copying {copiedTarget}{extractionSuffix}";
         }
 
         if (value.StartsWith("Extracting archive", StringComparison.OrdinalIgnoreCase))
@@ -3913,7 +4035,58 @@ public sealed class MainForm : Form
             }
         }
 
-        return value;
+        return value + BuildArchiveExtractionTelemetrySuffix(update);
+    }
+
+    private static string BuildArchiveExtractionTelemetrySuffix(BatchProgressUpdate update)
+    {
+        if (!IsArchiveExtractionStage(update.Stage))
+        {
+            return string.Empty;
+        }
+
+        var parts = new List<string>();
+        if (update.ExtractionTotalBytesCopied is { } copiedBytes && copiedBytes > 0)
+        {
+            if (update.ExtractionTotalBytesEstimated is { } estimatedBytes && estimatedBytes > 0)
+            {
+                parts.Add($"{FormatByteCount(copiedBytes)}/{FormatByteCount(estimatedBytes)}");
+            }
+            else
+            {
+                parts.Add(FormatByteCount(copiedBytes));
+            }
+        }
+
+        if (update.ExtractionThroughputMiBPerSecond is > 0d throughput)
+        {
+            parts.Add($"{throughput:0.##} MiB/s");
+        }
+
+        return parts.Count == 0 ? string.Empty : $" ({string.Join(" • ", parts)})";
+    }
+
+    private static string FormatByteCount(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return $"{bytes} B";
+        }
+
+        var kib = bytes / 1024d;
+        if (kib < 1024d)
+        {
+            return $"{kib:0.##} KiB";
+        }
+
+        var mib = kib / 1024d;
+        if (mib < 1024d)
+        {
+            return $"{mib:0.##} MiB";
+        }
+
+        var gib = mib / 1024d;
+        return $"{gib:0.##} GiB";
     }
 
     private static bool IsArchiveExtractionStage(string? stage)
@@ -6466,6 +6639,15 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Avg UI update gap ms", TryReadString(root, "AverageUiUpdateGapMilliseconds"), filePath);
                     AddReportMetric(reportName, "Max UI update gap ms", TryReadString(root, "MaxUiUpdateGapMilliseconds"), filePath);
                     AddReportMetric(reportName, "Cancellation latency ms", TryReadString(root, "CancellationLatencyMilliseconds"), filePath);
+                    AddReportMetric(reportName, "Archive format", TryReadString(root, "ArchiveFormat"), filePath);
+                    AddReportMetric(reportName, "Archive extraction samples", TryReadInt(root, "ArchiveProgressSampleCount"), filePath);
+                    AddReportMetric(reportName, "Archive bytes copied", TryReadString(root, "ArchiveBytesCopied"), filePath);
+                    AddReportMetric(reportName, "Archive bytes estimated", TryReadString(root, "ArchiveBytesEstimated"), filePath);
+                    AddReportMetric(reportName, "Archive throughput P10 MiB/s", TryReadString(root, "ArchiveThroughputP10MiBPerSecond"), filePath);
+                    AddReportMetric(reportName, "Archive throughput P50 MiB/s", TryReadString(root, "ArchiveThroughputP50MiBPerSecond"), filePath);
+                    AddReportMetric(reportName, "Archive throughput P90 MiB/s", TryReadString(root, "ArchiveThroughputP90MiBPerSecond"), filePath);
+                    AddReportMetric(reportName, "Archive throughput baseline MiB/s", TryReadString(root, "ArchiveThroughputBaselineMiBPerSecond"), filePath);
+                    AddReportMetric(reportName, "Archive throughput below baseline", FormatBool(TryReadBoolValue(root, "ArchiveThroughputBelowBaseline")), filePath);
                     AddReportMetric(reportName, "Outcome", TryReadString(root, "Outcome"), filePath);
                     break;
                 case "conversion-matrix-pack-proof.json":
