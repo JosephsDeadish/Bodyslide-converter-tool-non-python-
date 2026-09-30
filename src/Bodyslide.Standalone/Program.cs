@@ -411,8 +411,8 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
             return false;
         }
 
-        var siblingDesktopDirectory = Path.GetFullPath(Path.Combine(executableDirectory, "..", "desktop"));
-        foreach (var desktopExePath in EnumerateDesktopExeCandidates(executableDirectory, siblingDesktopDirectory))
+        var desktopCandidateDirectories = DesktopLaunchPathResolver.GetLikelyDesktopCandidateDirectories(executableDirectory);
+        foreach (var desktopExePath in EnumerateDesktopExeCandidates(desktopCandidateDirectories))
         {
             if (!File.Exists(desktopExePath))
             {
@@ -452,7 +452,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
             }
         }
 
-        foreach (var desktopDllPath in EnumerateDesktopDllCandidates(executableDirectory, siblingDesktopDirectory))
+        foreach (var desktopDllPath in EnumerateDesktopDllCandidates(desktopCandidateDirectories))
         {
             if (!File.Exists(desktopDllPath))
             {
@@ -508,23 +508,19 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
     return false;
 }
 
-static IReadOnlyList<string> EnumerateDesktopExeCandidates(string executableDirectory, string siblingDesktopDirectory)
+static IReadOnlyList<string> EnumerateDesktopExeCandidates(IReadOnlyList<string> candidateDirectories)
 {
     var preferred = new[]
     {
-        Path.Combine(executableDirectory, "SlideSmith.exe"),
-        Path.Combine(executableDirectory, "SlideSmith.Desktop.exe"),
-        Path.Combine(executableDirectory, "Bodyslide.Desktop.exe"),
-        Path.Combine(executableDirectory, "SlideSmith-Desktop.exe"),
-        Path.Combine(siblingDesktopDirectory, "SlideSmith.exe"),
-        Path.Combine(siblingDesktopDirectory, "SlideSmith.Desktop.exe"),
-        Path.Combine(siblingDesktopDirectory, "Bodyslide.Desktop.exe"),
-        Path.Combine(siblingDesktopDirectory, "SlideSmith-Desktop.exe")
+        Path.Combine(candidateDirectories[0], "SlideSmith.exe"),
+        Path.Combine(candidateDirectories[0], "SlideSmith.Desktop.exe"),
+        Path.Combine(candidateDirectories[0], "Bodyslide.Desktop.exe"),
+        Path.Combine(candidateDirectories[0], "SlideSmith-Desktop.exe")
     };
 
-    var discovered = EnumerateLikelyDesktopCandidateDirectories(executableDirectory, siblingDesktopDirectory)
+    var discovered = candidateDirectories
         .SelectMany(static directory => EnumerateDirectoryCandidates(directory, "*.exe"))
-        .Where(static path => Path.GetFileName(path).Contains("desktop", StringComparison.OrdinalIgnoreCase));
+        .Where(IsDesktopExecutableCandidate);
 
     return preferred
         .Concat(discovered)
@@ -532,26 +528,57 @@ static IReadOnlyList<string> EnumerateDesktopExeCandidates(string executableDire
         .ToArray();
 }
 
-static IReadOnlyList<string> EnumerateDesktopDllCandidates(string executableDirectory, string siblingDesktopDirectory)
+static IReadOnlyList<string> EnumerateDesktopDllCandidates(IReadOnlyList<string> candidateDirectories)
 {
     var preferred = new[]
     {
-        Path.Combine(executableDirectory, "SlideSmith.Desktop.dll"),
-        Path.Combine(executableDirectory, "Bodyslide.Desktop.dll"),
-        Path.Combine(siblingDesktopDirectory, "SlideSmith.Desktop.dll"),
-        Path.Combine(siblingDesktopDirectory, "Bodyslide.Desktop.dll"),
-        Path.Combine(siblingDesktopDirectory, "SlideSmith.dll")
+        Path.Combine(candidateDirectories[0], "SlideSmith.Desktop.dll"),
+        Path.Combine(candidateDirectories[0], "Bodyslide.Desktop.dll"),
+        Path.Combine(candidateDirectories[0], "SlideSmith.dll")
     };
 
-    var discovered = EnumerateLikelyDesktopCandidateDirectories(executableDirectory, siblingDesktopDirectory)
+    var discovered = candidateDirectories
         .SelectMany(static directory => EnumerateDirectoryCandidates(directory, "*.dll"))
-        .Where(static path => Path.GetFileName(path).Contains("desktop", StringComparison.OrdinalIgnoreCase) ||
-                              Path.GetFileName(path).Equals("SlideSmith.dll", StringComparison.OrdinalIgnoreCase));
+        .Where(IsDesktopDllCandidate);
 
     return preferred
         .Concat(discovered)
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToArray();
+}
+
+static bool IsDesktopExecutableCandidate(string path)
+{
+    var fileName = Path.GetFileName(path);
+    if (string.IsNullOrWhiteSpace(fileName))
+    {
+        return false;
+    }
+
+    if (fileName.Contains("desktop", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    return fileName.Equals("SlideSmith.exe", StringComparison.OrdinalIgnoreCase) &&
+           Path.GetFileName(Path.GetDirectoryName(path))?.Equals("desktop", StringComparison.OrdinalIgnoreCase) == true;
+}
+
+static bool IsDesktopDllCandidate(string path)
+{
+    var fileName = Path.GetFileName(path);
+    if (string.IsNullOrWhiteSpace(fileName))
+    {
+        return false;
+    }
+
+    if (fileName.Contains("desktop", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    return fileName.Equals("SlideSmith.dll", StringComparison.OrdinalIgnoreCase) &&
+           Path.GetFileName(Path.GetDirectoryName(path))?.Equals("desktop", StringComparison.OrdinalIgnoreCase) == true;
 }
 
 static IReadOnlyList<string> EnumerateDirectoryCandidates(string directory, string pattern)
@@ -571,23 +598,6 @@ static IReadOnlyList<string> EnumerateDirectoryCandidates(string directory, stri
     {
         return [];
     }
-}
-
-static IReadOnlyList<string> EnumerateLikelyDesktopCandidateDirectories(string executableDirectory, string siblingDesktopDirectory)
-{
-    return new[]
-    {
-        executableDirectory,
-        siblingDesktopDirectory,
-        Path.Combine(executableDirectory, "desktop"),
-        Path.Combine(executableDirectory, "bin"),
-        Path.Combine(executableDirectory, "publish"),
-        Path.Combine(siblingDesktopDirectory, "bin"),
-        Path.Combine(siblingDesktopDirectory, "publish")
-    }
-    .Where(static directory => !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-    .Distinct(StringComparer.OrdinalIgnoreCase)
-    .ToArray();
 }
 
 static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, string? startupDiagnosticsPath, out Process? launchedProcess)
