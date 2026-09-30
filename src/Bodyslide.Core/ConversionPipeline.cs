@@ -31207,19 +31207,21 @@ internal sealed class LocalExportService(
     private static bool IsLeftVariantToken(string token)
     {
         var normalizedToken = NormalizeVariantSignalToken(token);
-        return normalizedToken is "left" or "l" or "lh" or "lt" or "lft"
+        return normalizedToken is "left" or "l" or "lh" or "lt" or "lft" or "lhs" or "ls" or
+            "lhand" or "larm" or "lleg" or "lfoot" or
+            "lefthand" or "leftarm" or "leftleg" or "leftfoot" or "leftside"
             || normalizedToken.StartsWith("left", StringComparison.OrdinalIgnoreCase)
-            || normalizedToken.EndsWith("left", StringComparison.OrdinalIgnoreCase)
-            || normalizedToken.StartsWith("lh", StringComparison.OrdinalIgnoreCase);
+            || normalizedToken.EndsWith("left", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsRightVariantToken(string token)
     {
         var normalizedToken = NormalizeVariantSignalToken(token);
-        return normalizedToken is "right" or "r" or "rh" or "rt" or "rgt"
+        return normalizedToken is "right" or "r" or "rh" or "rt" or "rgt" or "rhs" or "rs" or
+            "rhand" or "rarm" or "rleg" or "rfoot" or
+            "righthand" or "rightarm" or "rightleg" or "rightfoot" or "rightside"
             || normalizedToken.StartsWith("right", StringComparison.OrdinalIgnoreCase)
-            || normalizedToken.EndsWith("right", StringComparison.OrdinalIgnoreCase)
-            || normalizedToken.StartsWith("rh", StringComparison.OrdinalIgnoreCase);
+            || normalizedToken.EndsWith("right", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeVariantSignalToken(string token)
@@ -31246,8 +31248,12 @@ internal sealed class LocalExportService(
                 "inventory" or "inv" or "dropmodel" or "dropped" => "world",
             "f" or "fem" => "female",
             "m" or "masc" => "male",
-            "left" or "l" or "lt" or "lh" or "lft" => "left",
-            "right" or "r" or "rt" or "rh" or "rgt" => "right",
+            "left" or "l" or "lt" or "lh" or "lft" or "lhs" or "ls" or
+                "lhand" or "larm" or "lleg" or "lfoot" or
+                "lefthand" or "leftarm" or "leftleg" or "leftfoot" or "leftside" => "left",
+            "right" or "r" or "rt" or "rh" or "rgt" or "rhs" or "rs" or
+                "rhand" or "rarm" or "rleg" or "rfoot" or
+                "righthand" or "rightarm" or "rightleg" or "rightfoot" or "rightside" => "right",
             _ => normalizedToken
         };
     }

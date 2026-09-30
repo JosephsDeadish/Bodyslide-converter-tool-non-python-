@@ -18998,6 +18998,67 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void BuildPluginRewritePlan_PrefersMirroredPartsUsingDirectorySideAliasesLhsRhsAndLeftRightSide()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/dragon/lhs/dragon_glove_0.nif",
+            "/tmp/meshes/armor/dragon/rhs/dragon_glove_0.nif",
+            "/tmp/meshes/armor/dragon/leftside/dragon_boot_0.nif",
+            "/tmp/meshes/armor/dragon/rightside/dragon_boot_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["DragonMirroredAliasParts.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    [
+                        "meshes/armor/dragon/rightside/dragon_glove_0.nif",
+                        "meshes/armor/dragon/lhs/dragon_boot_0.nif"
+                    ],
+                    FormId: 0x00004325u,
+                    EditorId: "DragonMirroredAliasPartsAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal("/tmp/meshes/armor/dragon/rhs/dragon_glove_0.nif", sourceMeshMap["meshes/armor/dragon/rightside/dragon_glove_0.nif"]);
+        Assert.Equal("/tmp/meshes/armor/dragon/leftside/dragon_boot_0.nif", sourceMeshMap["meshes/armor/dragon/lhs/dragon_boot_0.nif"]);
+    }
+
+    [Fact]
+    public void CanonicalizeComparablePathToken_DoesNotMisclassifyRhinoOrLharmonyAsSideSignals()
+    {
+        var method = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService")!
+            .GetMethod("CanonicalizeComparablePathToken", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        Assert.Equal("rhino", method!.Invoke(null, ["rhino"]) as string);
+        Assert.Equal("lharmony", method.Invoke(null, ["lharmony"]) as string);
+        Assert.Equal("right", method.Invoke(null, ["rhs"]) as string);
+        Assert.Equal("left", method.Invoke(null, ["lhs"]) as string);
+        Assert.Equal("right", method.Invoke(null, ["rightside"]) as string);
+        Assert.Equal("left", method.Invoke(null, ["leftside"]) as string);
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticModularStandaloneAddonModPackDirectory_ResolvesStandaloneArmaFamilyContext()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticModularStandaloneAddonModPack");
