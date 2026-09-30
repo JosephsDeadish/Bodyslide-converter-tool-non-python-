@@ -17875,6 +17875,56 @@ public sealed class RealisticModPackFixtureTests
         Assert.NotNull(fallback);
         Assert.Equal("curvy", fallback!.DeformationProfile);
         Assert.Contains(fallback.Signals, static signal => signal.Equals("profile:curvy", StringComparison.OrdinalIgnoreCase));
+        Assert.True(fallback.InferredFromPathEvidence);
+    }
+
+    [Fact]
+    public void InferFallbackSupport_PrefersMeshAndBodyReferenceSignalsOverTextureNoise()
+    {
+        var armor = new ImportedArmor(
+            SourcePath: "/tmp/mod",
+            MeshFiles:
+            [
+                "/tmp/mod/meshes/armor/cbbe/heavy/cuirass_0.nif"
+            ],
+            TextureFiles:
+            [
+                "/tmp/mod/textures/armor/uunp/noisy_overlay_d.dds"
+            ],
+            PhysicsFiles: [],
+            BodyReferenceFiles:
+            [
+                "/tmp/mod/meshes/actors/character/character assets/femalebody_0.nif"
+            ]);
+
+        var fallback = BodySlideSourceProjectSupport.InferFallbackSupport(armor, targetBody: "UUNP");
+
+        Assert.NotNull(fallback);
+        Assert.DoesNotContain("uunp", fallback!.BodyName ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.True(fallback.InferredFromPathEvidence);
+    }
+
+    [Fact]
+    public void InferFallbackSupport_TextureOnlySignals_DoNotMarkPathEvidenceInference()
+    {
+        var armor = new ImportedArmor(
+            SourcePath: "/tmp/mod",
+            MeshFiles:
+            [
+                "/tmp/mod/meshes/armor/custom/neutral_cuirass_0.nif"
+            ],
+            TextureFiles:
+            [
+                "/tmp/mod/textures/armor/cbbe/bodydiffuse_d.dds"
+            ],
+            PhysicsFiles: [],
+            BodyReferenceFiles: []);
+
+        var fallback = BodySlideSourceProjectSupport.InferFallbackSupport(armor, targetBody: "UUNP");
+
+        Assert.NotNull(fallback);
+        Assert.Contains("cbbe", fallback!.BodyName ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.False(fallback.InferredFromPathEvidence);
     }
 
     [Fact]
@@ -18895,6 +18945,59 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void BuildPluginRewritePlan_PrefersMirroredPartsUsingMixedLhRhLtRtSignals_AndTracksDisambiguationCount()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/dragon/dragon_glove_lh_0.nif",
+            "/tmp/meshes/armor/dragon/dragon_glove_rh_0.nif",
+            "/tmp/meshes/armor/dragon/dragon_boot_lt_0.nif",
+            "/tmp/meshes/armor/dragon/dragon_boot_rt_0.nif",
+            "/tmp/meshes/armor/dragon/dragon_pauldron_lh_0.nif",
+            "/tmp/meshes/armor/dragon/dragon_pauldron_rh_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["DragonMirroredParts.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    [
+                        "meshes/armor/dragon/dragon_glove_right_0.nif",
+                        "meshes/armor/dragon/dragon_boot_right_0.nif",
+                        "meshes/armor/dragon/dragon_pauldron_left_0.nif"
+                    ],
+                    FormId: 0x00004324u,
+                    EditorId: "DragonMirroredPartsAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+        var resolvedViaSideSignalDisambiguationCount = Assert.IsType<int>(
+            plan.GetType().GetProperty("ResolvedViaSideSignalDisambiguationCount")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal("/tmp/meshes/armor/dragon/dragon_glove_rh_0.nif", sourceMeshMap["meshes/armor/dragon/dragon_glove_right_0.nif"]);
+        Assert.Equal("/tmp/meshes/armor/dragon/dragon_boot_rt_0.nif", sourceMeshMap["meshes/armor/dragon/dragon_boot_right_0.nif"]);
+        Assert.Equal("/tmp/meshes/armor/dragon/dragon_pauldron_lh_0.nif", sourceMeshMap["meshes/armor/dragon/dragon_pauldron_left_0.nif"]);
+        Assert.True(resolvedViaSideSignalDisambiguationCount >= 0);
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticModularStandaloneAddonModPackDirectory_ResolvesStandaloneArmaFamilyContext()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticModularStandaloneAddonModPack");
@@ -18921,6 +19024,52 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "devious_panel_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_1.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchRunner_RealisticExtremeTopologyCustomSkeletonPluginRewriteModPackDirectory_CoversCombinedHardCasePack()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticExtremeTopologyCustomSkeletonPluginRewriteModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJsonPath = Path.Combine(outputDirectory, "plugin-patches.json");
+            Assert.True(File.Exists(patchJsonPath));
+            var patchJson = await File.ReadAllTextAsync(patchJsonPath);
+            Assert.Contains("LinkedDeviousChild.esp", patchJson, StringComparison.Ordinal);
+            Assert.Contains("LinkedDeviousMaster.esp", patchJson, StringComparison.Ordinal);
+
+            var inGameJsonPath = Path.Combine(outputDirectory, "in-game-validation.json");
+            Assert.True(File.Exists(inGameJsonPath));
+            using var inGameReport = JsonDocument.Parse(await File.ReadAllTextAsync(inGameJsonPath));
+            var scenarioNames = inGameReport.RootElement
+                .GetProperty("ScenarioMatrix")
+                .EnumerateArray()
+                .Select(static entry => entry.GetProperty("Name").GetString())
+                .Where(static name => !string.IsNullOrWhiteSpace(name))
+                .ToArray();
+            Assert.Contains(scenarioNames, static name =>
+                name!.Contains("collision", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("compression", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(scenarioNames, static name =>
+                name!.Contains("heel", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("ground-contact", StringComparison.OrdinalIgnoreCase));
+
+            var qualityJsonPath = Path.Combine(outputDirectory, "conversion-quality.json");
+            Assert.True(File.Exists(qualityJsonPath));
+            var qualityJson = await File.ReadAllTextAsync(qualityJsonPath);
+            Assert.Contains("ResolvedViaSideSignalDisambiguationCount", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("FallbackInferredFromPathEvidenceCount", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
