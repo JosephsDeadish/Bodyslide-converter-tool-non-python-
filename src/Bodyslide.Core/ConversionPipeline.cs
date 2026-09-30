@@ -189,7 +189,8 @@ public sealed record SourceAssetSupportMetrics(
     string? InferredSourceBody = null,
     IReadOnlyList<string>? InferenceSignals = null,
     string? InferredDeformationProfile = null,
-    bool HasOsdPayloads = false);
+    bool HasOsdPayloads = false,
+    int FallbackInferredFromPathEvidenceCount = 0);
 public sealed record MorphPayloadReuseSummary(
     int RequestedVariantCount,
     int ReusedVariantCount,
@@ -1540,7 +1541,8 @@ public sealed record PluginRewriteVerificationReport(
     IReadOnlyList<string>? PatchPluginMasterOrderMismatches = null,
     IReadOnlyList<string>? UnverifiedPatchedPlugins = null,
     IReadOnlyList<string>? Warnings = null,
-    IReadOnlyList<UnresolvedPluginTieGroup>? UnresolvedTieGroups = null);
+    IReadOnlyList<UnresolvedPluginTieGroup>? UnresolvedTieGroups = null,
+    int ResolvedViaSideSignalDisambiguationCount = 0);
 
 internal sealed record PluginInstallHint(
     string SourcePlugin,
@@ -1618,7 +1620,9 @@ public sealed record ConversionQualityReport(
     PartitionSignalReport? PartitionSignals = null,
     CageTopologyReport? CageTopology = null,
     IReadOnlyList<string>? SuggestedBodyProfileArtifacts = null,
-    TargetBodySupportReport? TargetBodySupport = null);
+    TargetBodySupportReport? TargetBodySupport = null,
+    int ResolvedViaSideSignalDisambiguationCount = 0,
+    int FallbackInferredFromPathEvidenceCount = 0);
 
 public sealed record TopologyCorrespondenceReport(
     string Classification,
@@ -2220,7 +2224,8 @@ internal sealed record PluginRewritePlan(
     IReadOnlyList<string> MissingConvertedMatches,
     IReadOnlyList<string> AmbiguousConvertedMatches,
     int DetectedMeshPathCount,
-    IReadOnlyList<UnresolvedPluginTieGroup>? UnresolvedTieGroups = null);
+    IReadOnlyList<UnresolvedPluginTieGroup>? UnresolvedTieGroups = null,
+    int ResolvedViaSideSignalDisambiguationCount = 0);
 
 public sealed record PluginTieFamilyHint(
     string FamilyPath,
@@ -21789,7 +21794,9 @@ internal sealed class LocalExportService(
             PartitionSignals:          partitionSignals,
             CageTopology:              cageTopology,
             SuggestedBodyProfileArtifacts: suggestedBodyProfileArtifacts,
-            TargetBodySupport:         targetBodySupport);
+            TargetBodySupport:         targetBodySupport,
+            ResolvedViaSideSignalDisambiguationCount: pluginRewriteVerification?.ResolvedViaSideSignalDisambiguationCount ?? 0,
+            FallbackInferredFromPathEvidenceCount: morphs.SourceAssetSupport?.FallbackInferredFromPathEvidenceCount ?? 0);
         await File.WriteAllTextAsync(
             qualityPath,
             JsonSerializer.Serialize(provisionalQualityReport, new JsonSerializerOptions { WriteIndented = true }),
@@ -22094,7 +22101,9 @@ internal sealed class LocalExportService(
             PartitionSignals:          partitionSignals,
             CageTopology:              cageTopology,
             SuggestedBodyProfileArtifacts: suggestedBodyProfileArtifacts,
-            TargetBodySupport:         targetBodySupport);
+            TargetBodySupport:         targetBodySupport,
+            ResolvedViaSideSignalDisambiguationCount: pluginRewriteVerification?.ResolvedViaSideSignalDisambiguationCount ?? 0,
+            FallbackInferredFromPathEvidenceCount: morphs.SourceAssetSupport?.FallbackInferredFromPathEvidenceCount ?? 0);
         await File.WriteAllTextAsync(
             qualityPath,
             JsonSerializer.Serialize(qualityReport, new JsonSerializerOptions { WriteIndented = true }),
@@ -29987,6 +29996,7 @@ internal sealed class LocalExportService(
         var pendingAmbiguous = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var relatedPluginMeshPaths = BuildRelatedPluginMeshPathMap(pluginAnalysis);
         var sourceMeshVariantCounts = BuildSourceMeshVariantCountMap(sourceMeshPaths);
+        var resolvedViaSideSignalDisambiguationCount = 0;
 
         // Collect paths from both ARMA (ArmorAddon) and ARMO (Armor) records.
         var allPaths = pluginAnalysis.ArmorAddons
@@ -30006,7 +30016,13 @@ internal sealed class LocalExportService(
                 continue;
             }
 
-            if (!TryResolveSourceMeshForPluginPath(originalPath, sourceMeshPaths, sourceMeshVariantCounts, out var sourceMeshPath, out var ambiguousMatches))
+            if (!TryResolveSourceMeshForPluginPath(
+                    originalPath,
+                    sourceMeshPaths,
+                    sourceMeshVariantCounts,
+                    out var sourceMeshPath,
+                    out var ambiguousMatches,
+                    out var resolvedViaSideSignalDisambiguation))
             {
                 if (ambiguousMatches.Count > 0)
                 {
@@ -30022,6 +30038,10 @@ internal sealed class LocalExportService(
 
             rewrites[originalPath] = BuildPluginConvertedMeshPath(targetBody, originalPath, sourceMeshPath);
             sourceMeshMap[originalPath] = sourceMeshPath;
+            if (resolvedViaSideSignalDisambiguation)
+            {
+                resolvedViaSideSignalDisambiguationCount++;
+            }
         }
 
         var madeProgress = true;
@@ -30069,7 +30089,8 @@ internal sealed class LocalExportService(
             missing.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
             ambiguous.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
             allPaths.Count,
-            unresolvedTieGroups);
+            unresolvedTieGroups,
+            resolvedViaSideSignalDisambiguationCount);
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> BuildRelatedPluginMeshPathMap(PluginAnalysisResult pluginAnalysis)
@@ -30420,10 +30441,12 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> sourceMeshPaths,
         IReadOnlyDictionary<string, int> sourceMeshVariantCounts,
         out string sourceMeshPath,
-        out IReadOnlyList<string> ambiguousMatches)
+        out IReadOnlyList<string> ambiguousMatches,
+        out bool resolvedViaSideSignalDisambiguation)
     {
         sourceMeshPath = string.Empty;
         ambiguousMatches = [];
+        resolvedViaSideSignalDisambiguation = false;
 
         var fileName = Path.GetFileName(pluginMeshPath);
         if (string.IsNullOrWhiteSpace(fileName))
@@ -30460,7 +30483,42 @@ internal sealed class LocalExportService(
         }
 
         sourceMeshPath = bestMatches[0].Path;
+        resolvedViaSideSignalDisambiguation = WasResolvedBySideSignalDisambiguation(
+            pluginMeshPath,
+            sourceMeshPath,
+            candidates.Select(static candidate => candidate.Path));
         return true;
+    }
+
+    private static bool WasResolvedBySideSignalDisambiguation(
+        string pluginMeshPath,
+        string selectedSourceMeshPath,
+        IEnumerable<string> candidateSourceMeshPaths)
+    {
+        var pluginSignals = ExtractMeshPathVariantSignals(pluginMeshPath);
+        var pluginLeft = pluginSignals.IsLeft;
+        var pluginRight = pluginSignals.IsRight;
+        if (!pluginLeft && !pluginRight)
+        {
+            return false;
+        }
+
+        var selectedSignals = ExtractMeshPathVariantSignals(selectedSourceMeshPath);
+        if (pluginLeft && !selectedSignals.IsLeft)
+        {
+            return false;
+        }
+
+        if (pluginRight && !selectedSignals.IsRight)
+        {
+            return false;
+        }
+
+        var oppositeSideCandidateExists = candidateSourceMeshPaths
+            .Where(path => !path.Equals(selectedSourceMeshPath, StringComparison.OrdinalIgnoreCase))
+            .Select(ExtractMeshPathVariantSignals)
+            .Any(signals => (pluginLeft && signals.IsRight) || (pluginRight && signals.IsLeft));
+        return oppositeSideCandidateExists;
     }
 
     private static bool TryResolveAmbiguousSourceMeshFromContext(
@@ -31405,7 +31463,8 @@ internal sealed class LocalExportService(
             PatchPluginMasterOrderMismatches: patchPluginMasterOrderMismatches,
             UnverifiedPatchedPlugins: unverifiedPatchedPlugins,
             Warnings: warnings,
-            UnresolvedTieGroups: pluginRewritePlan.UnresolvedTieGroups);
+            UnresolvedTieGroups: pluginRewritePlan.UnresolvedTieGroups,
+            ResolvedViaSideSignalDisambiguationCount: pluginRewritePlan.ResolvedViaSideSignalDisambiguationCount);
     }
 
     private static LinkedArmorAddonVerificationSummary BuildLinkedArmorAddonVerificationSummary(

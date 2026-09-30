@@ -13,7 +13,8 @@ internal sealed record ResolvedBodySlideSliders(
 internal sealed record FallbackBodySlideInference(
     string? BodyName,
     string? DeformationProfile,
-    IReadOnlyList<string> Signals);
+    IReadOnlyList<string> Signals,
+    bool InferredFromPathEvidence = false);
 
 internal static class BodySlideSourceProjectSupport
 {
@@ -139,52 +140,77 @@ internal static class BodySlideSourceProjectSupport
 
         var signals = new HashSet<string>(inferredSourceBody?.Signals ?? [], StringComparer.OrdinalIgnoreCase);
         signals.UnionWith(profileSignals);
+        var inferredFromPathEvidence = inferredSourceBody is not null &&
+                                       signals.Any(IsPathEvidenceSignal);
         return new FallbackBodySlideInference(
             inferredSourceBody?.BodyName,
             inferredProfile,
-            signals.Order(StringComparer.OrdinalIgnoreCase).ToArray());
+            signals.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+            inferredFromPathEvidence);
     }
 
-    private static string[] BuildFallbackEvidenceTokens(ImportedArmor armor)
+    private static FallbackEvidenceToken[] BuildFallbackEvidenceTokens(ImportedArmor armor)
     {
-        var evidence = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in armor.MeshFiles
-                     .Concat(armor.TextureFiles)
-                     .Concat(armor.PhysicsFiles)
-                     .Concat(armor.BodyReferenceFiles))
+        var evidence = new List<FallbackEvidenceToken>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddPathEvidenceTokens(armor.MeshFiles, "mesh");
+        AddPathEvidenceTokens(armor.BodyReferenceFiles, "body-reference");
+        AddPathEvidenceTokens(armor.PhysicsFiles, "physics");
+        AddPathEvidenceTokens(armor.TextureFiles, "texture");
+        return evidence.ToArray();
+
+        void AddPathEvidenceTokens(IEnumerable<string> paths, string sourceCategory)
         {
-            if (string.IsNullOrWhiteSpace(path))
+            foreach (var path in paths)
             {
-                continue;
-            }
-
-            var fileStem = Path.GetFileNameWithoutExtension(path);
-            if (!string.IsNullOrWhiteSpace(fileStem))
-            {
-                evidence.Add(fileStem);
-            }
-
-            var normalizedPath = path.Replace('\\', '/');
-            foreach (var segment in normalizedPath
-                         .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                if (segment.Length > 1)
+                if (string.IsNullOrWhiteSpace(path))
                 {
-                    evidence.Add(segment);
+                    continue;
                 }
-            }
 
-            var condensedToken = new string(normalizedPath
-                .Where(char.IsLetterOrDigit)
-                .Select(char.ToLowerInvariant)
-                .ToArray());
-            if (condensedToken.Length > 4)
-            {
-                evidence.Add(condensedToken);
+                var fileStem = Path.GetFileNameWithoutExtension(path);
+                if (!string.IsNullOrWhiteSpace(fileStem))
+                {
+                    AddEvidenceToken(sourceCategory, fileStem);
+                }
+
+                var normalizedPath = path.Replace('\\', '/');
+                foreach (var segment in normalizedPath
+                             .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (segment.Length > 1)
+                    {
+                        AddEvidenceToken(sourceCategory, segment);
+                    }
+                }
+
+                var condensedToken = new string(normalizedPath
+                    .Where(char.IsLetterOrDigit)
+                    .Select(char.ToLowerInvariant)
+                    .ToArray());
+                if (condensedToken.Length > 4)
+                {
+                    AddEvidenceToken(sourceCategory, condensedToken);
+                }
             }
         }
 
-        return evidence.ToArray();
+        void AddEvidenceToken(string sourceCategory, string token)
+        {
+            var normalizedToken = token.Trim();
+            if (normalizedToken.Length == 0)
+            {
+                return;
+            }
+
+            var key = $"{sourceCategory}:{normalizedToken}";
+            if (!seen.Add(key))
+            {
+                return;
+            }
+
+            evidence.Add(new FallbackEvidenceToken(normalizedToken, sourceCategory));
+        }
     }
 
     private static async Task<BodySlideSourceSupport> ExtractSourceSupportAsync(
@@ -851,7 +877,7 @@ internal static class BodySlideSourceProjectSupport
         return merged;
     }
 
-    private static InferredSourceBodySupport? InferFallbackSourceBody(IReadOnlyList<string> evidence, string targetBody)
+    private static InferredSourceBodySupport? InferFallbackSourceBody(IReadOnlyList<FallbackEvidenceToken> evidence, string targetBody)
     {
         var targetCanonicalBody = BuiltInBodyMetadataCatalog.TryResolveCanonicalName(targetBody, out var canonicalTargetBody)
             ? canonicalTargetBody
@@ -891,14 +917,14 @@ internal static class BodySlideSourceProjectSupport
             var score = 0;
             foreach (var token in tokens.Where(static token => !string.IsNullOrWhiteSpace(token)).Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                foreach (var fileToken in evidence)
+                foreach (var evidenceToken in evidence)
                 {
-                    if (!fileToken.Contains(token, StringComparison.OrdinalIgnoreCase))
+                    if (!evidenceToken.Value.Contains(token, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
 
-                    score += category switch
+                    var categoryWeight = category switch
                     {
                         "reference" => 5,
                         "alias" => 4,
@@ -906,7 +932,8 @@ internal static class BodySlideSourceProjectSupport
                         "texture" => 2,
                         _ => 1
                     };
-                    signals.Add($"{category}:{token}");
+                    score += categoryWeight * GetSourceEvidenceWeight(evidenceToken.SourceCategory);
+                    signals.Add($"{evidenceToken.SourceCategory}:{category}:{token}");
                     break;
                 }
             }
@@ -916,7 +943,7 @@ internal static class BodySlideSourceProjectSupport
     }
 
     private static string? InferDeformationProfile(
-        IReadOnlyList<string> evidence,
+        IReadOnlyList<FallbackEvidenceToken> evidence,
         VanillaArmorEntry? vanillaEntry,
         ISet<string> signals)
     {
@@ -937,7 +964,7 @@ internal static class BodySlideSourceProjectSupport
         {
             foreach (var token in tokens)
             {
-                if (evidence.Any(fileToken => fileToken.Contains(token, StringComparison.OrdinalIgnoreCase)))
+                if (evidence.Any(fileToken => fileToken.Value.Contains(token, StringComparison.OrdinalIgnoreCase)))
                 {
                     signals.Add($"profile:{token}");
                     return profile;
@@ -953,6 +980,20 @@ internal static class BodySlideSourceProjectSupport
 
         return null;
     }
+
+    private static bool IsPathEvidenceSignal(string signal) =>
+        signal.StartsWith("mesh:", StringComparison.OrdinalIgnoreCase) ||
+        signal.StartsWith("body-reference:", StringComparison.OrdinalIgnoreCase);
+
+    private static int GetSourceEvidenceWeight(string sourceCategory) =>
+        sourceCategory.ToLowerInvariant() switch
+        {
+            "body-reference" => 5,
+            "mesh" => 4,
+            "physics" => 2,
+            "texture" => 1,
+            _ => 1
+        };
 
     private static string NormalizeSliderFileName(string? fileName)
     {
@@ -1352,7 +1393,8 @@ internal static class BodySlideSourceProjectSupport
                 fallbackInference?.BodyName,
                 fallbackInference?.Signals,
                 fallbackInference?.DeformationProfile,
-                HasOsdPayloads);
+                HasOsdPayloads,
+                fallbackInference?.InferredFromPathEvidence is true ? 1 : 0);
         }
     }
 
@@ -1390,6 +1432,9 @@ internal static class BodySlideSourceProjectSupport
         bool IsZap = false,
         MorphDeltaStats? PayloadStats = null,
         SourceMorphPayload? ReusablePayload = null);
+    private sealed record FallbackEvidenceToken(
+        string Value,
+        string SourceCategory);
     private sealed record InferredSourceBodySupport(string BodyName, int Score, IReadOnlyList<string> Signals);
     private sealed record SearchLocation(string Root, SearchOption SearchOption);
 
