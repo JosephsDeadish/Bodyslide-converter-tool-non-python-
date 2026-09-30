@@ -11146,104 +11146,105 @@ internal static class ArchiveExtractionHelper
                 File.SetLastWriteTimeUtc(destinationPath, lastModified.ToUniversalTime());
             }
         }
+    }
 
-        private static void ExtractRarArchive(
-            string archivePath,
-            string destinationDirectory,
-            CancellationToken cancellationToken,
-            Action<ArchiveExtractionProgress>? onProgress)
+    private static void ExtractRarArchive(
+        string archivePath,
+        string destinationDirectory,
+        CancellationToken cancellationToken,
+        Action<ArchiveExtractionProgress>? onProgress)
+    {
+        var destinationRoot = Path.GetFullPath(destinationDirectory);
+        if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
         {
-            var destinationRoot = Path.GetFullPath(destinationDirectory);
-            if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
+            destinationRoot += Path.DirectorySeparatorChar;
+        }
+
+        using var archive = RarArchive.OpenArchive(archivePath, new ReaderOptions());
+        int? totalEntries = null;
+        var processedEntries = 0;
+        long totalBytesCopied = 0;
+        var lastProgressUtc = DateTime.MinValue;
+        var extractionStopwatch = Stopwatch.StartNew();
+        foreach (var entry in archive.Entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var entryKey = entry.Key?.ToString();
+            if (entry.IsDirectory || string.IsNullOrWhiteSpace(entryKey))
             {
-                destinationRoot += Path.DirectorySeparatorChar;
+                continue;
             }
 
-            using var archive = RarArchive.Open(archivePath);
-            int? totalEntries = null;
-            var processedEntries = 0;
-            long totalBytesCopied = 0;
-            var lastProgressUtc = DateTime.MinValue;
-            var extractionStopwatch = Stopwatch.StartNew();
-            foreach (var entry in archive.Entries)
+            var normalizedKey = entryKey.Replace('\\', Path.DirectorySeparatorChar);
+            normalizedKey = normalizedKey.Replace('/', Path.DirectorySeparatorChar);
+
+            var destinationPath = Path.GetFullPath(Path.Combine(destinationDirectory, normalizedKey));
+            if (!destinationPath.StartsWith(destinationRoot, StringComparison.Ordinal))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (entry.IsDirectory || string.IsNullOrWhiteSpace(entry.Key))
+                throw new InvalidDataException($"Archive entry escapes extraction root: {entryKey}");
+            }
+
+            var destinationParent = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(destinationParent))
+            {
+                Directory.CreateDirectory(destinationParent);
+            }
+
+            EmitArchiveProgress(
+                onProgress,
+                ref lastProgressUtc,
+                processedEntries,
+                totalEntries,
+                $"copying:{entryKey}",
+                totalBytesCopied: totalBytesCopied,
+                totalBytesEstimated: null,
+                entryBytesCopied: 0,
+                entryBytesTotal: entry.Size,
+                extractionStopwatch: extractionStopwatch,
+                force: true);
+            var entryBaseBytes = totalBytesCopied;
+            var entryBytesCopied = 0L;
+            using var entryStream = entry.OpenEntryStream();
+            using var outputStream = File.Create(destinationPath);
+            CopyStreamWithCancellation(
+                entryStream,
+                outputStream,
+                cancellationToken,
+                copiedBytes =>
                 {
-                    continue;
-                }
-
-                var normalizedKey = entry.Key.Replace('\\', Path.DirectorySeparatorChar);
-                normalizedKey = normalizedKey.Replace('/', Path.DirectorySeparatorChar);
-
-                var destinationPath = Path.GetFullPath(Path.Combine(destinationDirectory, normalizedKey));
-                if (!destinationPath.StartsWith(destinationRoot, StringComparison.Ordinal))
-                {
-                    throw new InvalidDataException($"Archive entry escapes extraction root: {entry.Key}");
-                }
-
-                var destinationParent = Path.GetDirectoryName(destinationPath);
-                if (!string.IsNullOrWhiteSpace(destinationParent))
-                {
-                    Directory.CreateDirectory(destinationParent);
-                }
-
-                EmitArchiveProgress(
-                    onProgress,
-                    ref lastProgressUtc,
-                    processedEntries,
-                    totalEntries,
-                    $"copying:{entry.Key}",
-                    totalBytesCopied: totalBytesCopied,
-                    totalBytesEstimated: null,
-                    entryBytesCopied: 0,
-                    entryBytesTotal: entry.Size,
-                    extractionStopwatch: extractionStopwatch,
-                    force: true);
-                var entryBaseBytes = totalBytesCopied;
-                var entryBytesCopied = 0L;
-                using var entryStream = entry.OpenEntryStream();
-                using var outputStream = File.Create(destinationPath);
-                CopyStreamWithCancellation(
-                    entryStream,
-                    outputStream,
-                    cancellationToken,
-                    copiedBytes =>
+                    if (onProgress is null || copiedBytes <= 0)
                     {
-                        if (onProgress is null || copiedBytes <= 0)
-                        {
-                            return;
-                        }
+                        return;
+                    }
 
-                        entryBytesCopied = copiedBytes;
-                        EmitArchiveProgress(
-                            onProgress,
-                            ref lastProgressUtc,
-                            processedEntries,
-                            totalEntries,
-                            $"copying:{entry.Key} ({FormatByteCount(copiedBytes)})",
-                            totalBytesCopied: entryBaseBytes + copiedBytes,
-                            totalBytesEstimated: null,
-                            entryBytesCopied: copiedBytes,
-                            entryBytesTotal: entry.Size,
-                            extractionStopwatch: extractionStopwatch);
-                    },
-                    EntryProgressReportIntervalBytes);
-                totalBytesCopied = entryBaseBytes + entryBytesCopied;
-                processedEntries++;
-                EmitArchiveProgress(
-                    onProgress,
-                    ref lastProgressUtc,
-                    processedEntries,
-                    totalEntries,
-                    entry.Key,
-                    totalBytesCopied: totalBytesCopied,
-                    totalBytesEstimated: null,
-                    entryBytesCopied: entryBytesCopied,
-                    entryBytesTotal: entry.Size,
-                    extractionStopwatch: extractionStopwatch,
-                    force: true);
-            }
+                    entryBytesCopied = copiedBytes;
+                    EmitArchiveProgress(
+                        onProgress,
+                        ref lastProgressUtc,
+                        processedEntries,
+                        totalEntries,
+                        $"copying:{entryKey} ({FormatByteCount(copiedBytes)})",
+                        totalBytesCopied: entryBaseBytes + copiedBytes,
+                        totalBytesEstimated: null,
+                        entryBytesCopied: copiedBytes,
+                        entryBytesTotal: entry.Size,
+                        extractionStopwatch: extractionStopwatch);
+                },
+                EntryProgressReportIntervalBytes);
+            totalBytesCopied = entryBaseBytes + entryBytesCopied;
+            processedEntries++;
+            EmitArchiveProgress(
+                onProgress,
+                ref lastProgressUtc,
+                processedEntries,
+                totalEntries,
+                entryKey,
+                totalBytesCopied: totalBytesCopied,
+                totalBytesEstimated: null,
+                entryBytesCopied: entryBytesCopied,
+                entryBytesTotal: entry.Size,
+                extractionStopwatch: extractionStopwatch,
+                force: true);
         }
     }
 
