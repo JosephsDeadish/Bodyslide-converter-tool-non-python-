@@ -510,7 +510,7 @@ public sealed class MainForm : Form
 
         _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Quick import", quickImportPanel), 0, 0);
 
-        var inputRow = CreateThreeColumnRow("Input", out _inputTextBox);
+        var inputRow = CreateThreeColumnRow("Input file / folder", out _inputTextBox);
         _inputTextBox.Name = "inputPathTextBox";
         _inputTextBox.PlaceholderText = "Select armor input (.nif/.esp/.esm/.esl/.zip/.7z/.rar/.tar) or an armor folder";
         _inputTextBox.AllowDrop = true;
@@ -1123,6 +1123,24 @@ public sealed class MainForm : Form
             MaximumSize = new Size(920, 0),
         };
         outputSection.Controls.Add(_outputHintLabel, 0, 1);
+        var inputSection = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 1,
+            AutoSize = true,
+            Margin = new Padding(0),
+        };
+        inputSection.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        inputSection.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        inputSection.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        inputSection.Controls.Add(inputRow, 0, 0);
+        inputSection.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Margin = new Padding(0, 4, 0, 0),
+            MaximumSize = new Size(560, 0),
+            Text = "Choose the armor file, plugin, archive, or folder you want to inspect and convert.",
+        }, 0, 1);
         var pathSelectionPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -1135,15 +1153,8 @@ public sealed class MainForm : Form
         pathSelectionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
         pathSelectionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         pathSelectionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        pathSelectionPanel.Controls.Add(inputRow, 0, 0);
+        pathSelectionPanel.Controls.Add(CreateAutoSizeSection("Input source", inputSection), 0, 0);
         pathSelectionPanel.Controls.Add(outputSection, 1, 0);
-        pathSelectionPanel.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Margin = new Padding(0, 4, 0, 0),
-            MaximumSize = new Size(560, 0),
-            Text = "Input selection: choose File... or Folder..., then use “Inspect input now” (next to the Input field) for full analysis.",
-        }, 0, 1);
         _topLayoutPanel.Controls.Add(pathSelectionPanel, 0, 1);
 
         var cacheRow = CreateThreeColumnRow("Learning cache (optional)", out _cachePathTextBox);
@@ -1679,7 +1690,7 @@ public sealed class MainForm : Form
         RefreshCustomProfilesList();
         UpdatePathActionStates();
         UpdateOutputHint();
-        ClearInspectionTab("Select an input, then click “Inspect input now” (next to the Input field) to preview body detection, mesh analysis, and skeleton compatibility.");
+        ClearInspectionTab("Select an input, then click “Inspect input now” (next to the Input source) to preview body detection, mesh analysis, and skeleton compatibility.");
         PopulateReportsTab(Array.Empty<DesktopWorkflowReportMetric>());
         PopulateCacheTab([], null);
         ShowPreviewStatus("Run a conversion to render preview-workbench.html in-app.");
@@ -1759,7 +1770,7 @@ public sealed class MainForm : Form
                 }
                 else
                 {
-                    _statusLabel.Text = "Ready — startup input loaded. Click “Inspect input now” (next to the Input field) to run analysis.";
+                    _statusLabel.Text = "Ready — startup input loaded. Click “Inspect input now” (next to the Input source) to run analysis.";
                     AppendLog("Auto-inspection skipped for startup input to keep startup responsive.");
                 }
             }
@@ -3478,7 +3489,7 @@ public sealed class MainForm : Form
             _autoInspectDebounce = null;
             if (!string.IsNullOrWhiteSpace(input))
             {
-                _statusLabel.Text = "Ready — click “Inspect input now” (next to the Input field) for archive or folder analysis.";
+                _statusLabel.Text = "Ready — click “Inspect input now” (next to the Input source) for archive or folder analysis.";
             }
             return;
         }
@@ -3517,8 +3528,8 @@ public sealed class MainForm : Form
         {
             if (!cancellationToken.IsCancellationRequested)
             {
-                _statusLabel.Text = "Auto-inspection timed out. Click “Inspect input now” (next to the Input field) to run full analysis.";
-                ClearInspectionTab("Auto-inspection timed out. Click “Inspect input now” (next to the Input field) for a full pass.");
+                _statusLabel.Text = "Auto-inspection timed out. Click “Inspect input now” (next to the Input source) to run full analysis.";
+                ClearInspectionTab("Auto-inspection timed out. Click “Inspect input now” (next to the Input source) for a full pass.");
                 AppendLog("Auto-inspection timed out to keep the UI responsive.");
             }
         }

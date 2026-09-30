@@ -28,6 +28,15 @@ internal static class DesktopLaunchPathResolver
             candidateDirectories.Add(Path.Combine(parentDirectory, "publish"));
         }
 
+        var ancestorDirectory = parentDirectory;
+        for (var depth = 0; depth < 5 && !string.IsNullOrWhiteSpace(ancestorDirectory); depth++)
+        {
+            candidateDirectories.Add(Path.Combine(ancestorDirectory, "Bodyslide.Desktop", "bin", "Debug", "net10.0-windows"));
+            candidateDirectories.Add(Path.Combine(ancestorDirectory, "Bodyslide.Desktop", "bin", "Release", "net10.0-windows"));
+            candidateDirectories.Add(Path.Combine(ancestorDirectory, "Bodyslide.Desktop", "publish"));
+            ancestorDirectory = Path.GetDirectoryName(ancestorDirectory);
+        }
+
         return candidateDirectories
             .Where(static directory => !string.IsNullOrWhiteSpace(directory))
             .Distinct(StringComparer.OrdinalIgnoreCase)
