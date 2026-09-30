@@ -125,7 +125,16 @@ public static class SkeletonSupportPathResolver
                 continue;
             }
 
-            preferredCandidates.AddRange(EnumerateSkeletonCandidates(candidateDirectory, SearchOption.TopDirectoryOnly));
+            try
+            {
+                preferredCandidates.AddRange(EnumerateSkeletonCandidates(candidateDirectory, SearchOption.TopDirectoryOnly));
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
         }
 
         var candidate = SelectBestCandidate(preferredCandidates);
@@ -174,7 +183,25 @@ public static class SkeletonSupportPathResolver
 
     private static IEnumerable<string> EnumerateSkeletonCandidates(string directory, SearchOption searchOption)
     {
-        foreach (var heuristic in Directory.EnumerateFiles(directory, "*.nif", searchOption)
+        IEnumerable<string> files;
+        try
+        {
+            files = Directory.EnumerateFiles(directory, "*.nif", searchOption);
+        }
+        catch (IOException)
+        {
+            yield break;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            yield break;
+        }
+        catch (NotSupportedException)
+        {
+            yield break;
+        }
+
+        foreach (var heuristic in files
                      .Where(file => Path.GetFileName(file).StartsWith("skeleton", StringComparison.OrdinalIgnoreCase) ||
                                     IsHeuristicSkeletonCandidate(file)))
         {
