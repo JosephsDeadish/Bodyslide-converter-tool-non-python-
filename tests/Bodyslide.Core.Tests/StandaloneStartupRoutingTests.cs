@@ -129,4 +129,74 @@ public sealed class StandaloneStartupRoutingTests
         Assert.True(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
     }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_RealWorldMo2ProfileGameAndInputSignature_PrefersDesktop()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            [
+                "/profile=Default",
+                "/game=SkyrimSE",
+                "--input",
+                @"D:\Mod Organizer 2\mods\Some Armor Pack\meshes\armor\sample_1.nif"
+            ],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+    }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_RealWorldMo2PortableLauncherSignature_PrefersDesktop()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            [
+                "--instance",
+                "Portable",
+                "--mo2-output",
+                @"C:\Games\MO2\mods\Converted Armor",
+                "--startup-diagnostics",
+                @"C:\Temp\slidesmith-startup.log"
+            ],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+    }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_StrictLauncherModeWithoutLauncherSignal_UsesCli()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--list-bodies"],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false,
+            strictLauncherMode: true);
+
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.StrictLauncherModeEnabled);
+        Assert.Equal("strict-launcher-mode: no launcher signal", decision.RoutingReason);
+    }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_StrictLauncherModeWithLauncherSignal_UsesDesktop()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--mo2-output", @"D:\Mod Organizer 2\mods\Some Armor Pack"],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false,
+            strictLauncherMode: true);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.StrictLauncherModeEnabled);
+        Assert.Equal("strict-launcher-mode: launcher signal detected", decision.RoutingReason);
+    }
 }

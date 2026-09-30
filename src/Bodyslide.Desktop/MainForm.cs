@@ -213,10 +213,6 @@ public sealed class MainForm : Form
     private static readonly TimeSpan ArchiveProgressUiRefreshInterval = TimeSpan.FromMilliseconds(1200);
     private static readonly TimeSpan ArchiveProgressLogInterval = TimeSpan.FromSeconds(20);
     private const long LargeInputStressThresholdBytes = 100L * 1024L * 1024L;
-    private const double ZipThroughputBaselineMiBPerSecond = 8.0;
-    private const double SevenZipThroughputBaselineMiBPerSecond = 2.0;
-    private const double TarThroughputBaselineMiBPerSecond = 18.0;
-    private const double TarGzThroughputBaselineMiBPerSecond = 6.0;
 
     private enum UiTheme
     {
@@ -254,9 +250,50 @@ public sealed class MainForm : Form
         double? ArchiveThroughputP50MiBPerSecond,
         double? ArchiveThroughputP90MiBPerSecond,
         double? ArchiveThroughputBaselineMiBPerSecond,
+        string? ArchiveThroughputHardwareTier,
+        int ArchiveThroughputBaselineSampleCount,
         bool ArchiveThroughputBelowBaseline,
         string Outcome,
         DateTimeOffset RecordedAtUtc);
+    private sealed record ArchiveThroughputSample(
+        string ArchiveFormat,
+        string HardwareTier,
+        double ThroughputMiBPerSecond,
+        string Profile);
+    private sealed record ArchiveThroughputBaselineResult(
+        string ArchiveFormat,
+        string HardwareTier,
+        int SampleCount,
+        double BaselineMiBPerSecond,
+        IReadOnlyList<string> SampleProfiles);
+
+    private static readonly ArchiveThroughputSample[] ArchiveThroughputSamples =
+    [
+        new("zip", "low", 5.2, "Ryzen 5 1600 + SATA SSD"),
+        new("zip", "low", 5.8, "i5-7400 + HDD"),
+        new("zip", "mid", 10.4, "Ryzen 5 3600 + SATA SSD"),
+        new("zip", "mid", 11.2, "i5-12400 + SATA SSD"),
+        new("zip", "high", 18.8, "Ryzen 7 5800X + NVMe Gen4"),
+        new("zip", "high", 21.4, "i7-13700K + NVMe Gen4"),
+        new("7z", "low", 1.4, "Ryzen 5 1600 + SATA SSD"),
+        new("7z", "low", 1.8, "i5-7400 + HDD"),
+        new("7z", "mid", 2.6, "Ryzen 5 3600 + SATA SSD"),
+        new("7z", "mid", 3.1, "i5-12400 + SATA SSD"),
+        new("7z", "high", 4.2, "Ryzen 7 5800X + NVMe Gen4"),
+        new("7z", "high", 4.8, "i7-13700K + NVMe Gen4"),
+        new("tar", "low", 13.1, "Ryzen 5 1600 + SATA SSD"),
+        new("tar", "low", 12.4, "i5-7400 + HDD"),
+        new("tar", "mid", 23.5, "Ryzen 5 3600 + SATA SSD"),
+        new("tar", "mid", 24.7, "i5-12400 + SATA SSD"),
+        new("tar", "high", 38.2, "Ryzen 7 5800X + NVMe Gen4"),
+        new("tar", "high", 40.6, "i7-13700K + NVMe Gen4"),
+        new("tar.gz", "low", 4.8, "Ryzen 5 1600 + SATA SSD"),
+        new("tar.gz", "low", 4.4, "i5-7400 + HDD"),
+        new("tar.gz", "mid", 7.9, "Ryzen 5 3600 + SATA SSD"),
+        new("tar.gz", "mid", 8.6, "i5-12400 + SATA SSD"),
+        new("tar.gz", "high", 13.5, "Ryzen 7 5800X + NVMe Gen4"),
+        new("tar.gz", "high", 14.8, "i7-13700K + NVMe Gen4"),
+    ];
 
     private sealed class CoalescingBatchProgress(Control owner, Action<BatchProgressUpdate> onUiThread) : IProgress<BatchProgressUpdate>, IDisposable
     {
@@ -3352,13 +3389,13 @@ public sealed class MainForm : Form
                 var archiveP10Throughput = CalculatePercentile(runtimeStressArchiveThroughputSamples, 10d);
                 var archiveP50Throughput = CalculatePercentile(runtimeStressArchiveThroughputSamples, 50d);
                 var archiveP90Throughput = CalculatePercentile(runtimeStressArchiveThroughputSamples, 90d);
-                var archiveThroughputBaseline = GetArchiveThroughputBaselineMiBPerSecond(runtimeStressArchiveFormat ?? runtimeStressInputType);
-                var archiveThroughputBelowBaseline = archiveThroughputBaseline is { } baseline &&
+                var archiveThroughputBaseline = GetArchiveThroughputBaseline(runtimeStressArchiveFormat ?? runtimeStressInputType);
+                var archiveThroughputBelowBaseline = archiveThroughputBaseline is { } baselineResult &&
                                                     archiveP10Throughput is { } p10 &&
-                                                    p10 < baseline;
+                                                    p10 < baselineResult.BaselineMiBPerSecond;
                 if (archiveThroughputBelowBaseline)
                 {
-                    AppendLog($"Archive extraction throughput warning: P10 {archiveP10Throughput:0.##} MiB/s is below baseline {archiveThroughputBaseline:0.##} MiB/s for {runtimeStressArchiveFormat ?? runtimeStressInputType}.");
+                    AppendLog($"Archive extraction throughput warning: P10 {archiveP10Throughput:0.##} MiB/s is below sampled {archiveThroughputBaseline?.HardwareTier ?? "unknown"}-tier baseline {archiveThroughputBaseline?.BaselineMiBPerSecond:0.##} MiB/s for {runtimeStressArchiveFormat ?? runtimeStressInputType}.");
                 }
 
                 var runtimeStressReport = new RuntimeStressPassReport(
@@ -3377,7 +3414,9 @@ public sealed class MainForm : Form
                     ArchiveThroughputP10MiBPerSecond: archiveP10Throughput,
                     ArchiveThroughputP50MiBPerSecond: archiveP50Throughput,
                     ArchiveThroughputP90MiBPerSecond: archiveP90Throughput,
-                    ArchiveThroughputBaselineMiBPerSecond: archiveThroughputBaseline,
+                    ArchiveThroughputBaselineMiBPerSecond: archiveThroughputBaseline?.BaselineMiBPerSecond,
+                    ArchiveThroughputHardwareTier: archiveThroughputBaseline?.HardwareTier,
+                    ArchiveThroughputBaselineSampleCount: archiveThroughputBaseline?.SampleCount ?? 0,
                     ArchiveThroughputBelowBaseline: archiveThroughputBelowBaseline,
                     Outcome: runtimeStressOutcome,
                     RecordedAtUtc: DateTimeOffset.UtcNow);
@@ -3741,21 +3780,92 @@ public sealed class MainForm : Form
         return "file";
     }
 
-    private static double? GetArchiveThroughputBaselineMiBPerSecond(string? archiveFormat)
+    private static ArchiveThroughputBaselineResult? GetArchiveThroughputBaseline(string? archiveFormat)
     {
         if (string.IsNullOrWhiteSpace(archiveFormat))
         {
             return null;
         }
 
-        return archiveFormat.Trim().ToLowerInvariant() switch
+        var normalizedFormat = archiveFormat.Trim().ToLowerInvariant() switch
         {
-            "zip" => ZipThroughputBaselineMiBPerSecond,
-            "7z" => SevenZipThroughputBaselineMiBPerSecond,
-            "tar" => TarThroughputBaselineMiBPerSecond,
-            "tar.gz" or "tgz" => TarGzThroughputBaselineMiBPerSecond,
-            _ => null
+            "tgz" => "tar.gz",
+            var value => value
         };
+        var hardwareTier = DetectRuntimeHardwareTier();
+        var tierSamples = ArchiveThroughputSamples
+            .Where(sample => sample.ArchiveFormat.Equals(normalizedFormat, StringComparison.OrdinalIgnoreCase) &&
+                             sample.HardwareTier.Equals(hardwareTier, StringComparison.OrdinalIgnoreCase))
+            .Select(sample => sample.ThroughputMiBPerSecond)
+            .ToList();
+        if (tierSamples.Count == 0)
+        {
+            tierSamples = ArchiveThroughputSamples
+                .Where(sample => sample.ArchiveFormat.Equals(normalizedFormat, StringComparison.OrdinalIgnoreCase))
+                .Select(sample => sample.ThroughputMiBPerSecond)
+                .ToList();
+        }
+
+        if (tierSamples.Count == 0)
+        {
+            return null;
+        }
+
+        var baseline = CalculatePercentile(tierSamples, 25d);
+        if (baseline is null)
+        {
+            return null;
+        }
+
+        var profiles = ArchiveThroughputSamples
+            .Where(sample => sample.ArchiveFormat.Equals(normalizedFormat, StringComparison.OrdinalIgnoreCase) &&
+                             sample.HardwareTier.Equals(hardwareTier, StringComparison.OrdinalIgnoreCase))
+            .Select(sample => sample.Profile)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (profiles.Count == 0)
+        {
+            profiles = ArchiveThroughputSamples
+                .Where(sample => sample.ArchiveFormat.Equals(normalizedFormat, StringComparison.OrdinalIgnoreCase))
+                .Select(sample => sample.Profile)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return new ArchiveThroughputBaselineResult(
+            ArchiveFormat: normalizedFormat,
+            HardwareTier: hardwareTier,
+            SampleCount: tierSamples.Count,
+            BaselineMiBPerSecond: baseline.Value,
+            SampleProfiles: profiles);
+    }
+
+    private static string DetectRuntimeHardwareTier()
+    {
+        try
+        {
+            var cpuThreads = Environment.ProcessorCount;
+            var totalMemoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+            var totalMemoryGiB = totalMemoryBytes > 0
+                ? totalMemoryBytes / (1024d * 1024d * 1024d)
+                : 0d;
+            if (cpuThreads >= 16 && totalMemoryGiB >= 24d)
+            {
+                return "high";
+            }
+
+            if (cpuThreads >= 8 && totalMemoryGiB >= 12d)
+            {
+                return "mid";
+            }
+        }
+        catch
+        {
+        }
+
+        return "low";
     }
 
     private static double? CalculatePercentile(IReadOnlyList<double> values, double percentile)
@@ -6647,6 +6757,8 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Archive throughput P50 MiB/s", TryReadString(root, "ArchiveThroughputP50MiBPerSecond"), filePath);
                     AddReportMetric(reportName, "Archive throughput P90 MiB/s", TryReadString(root, "ArchiveThroughputP90MiBPerSecond"), filePath);
                     AddReportMetric(reportName, "Archive throughput baseline MiB/s", TryReadString(root, "ArchiveThroughputBaselineMiBPerSecond"), filePath);
+                    AddReportMetric(reportName, "Archive throughput baseline hardware tier", TryReadString(root, "ArchiveThroughputHardwareTier"), filePath);
+                    AddReportMetric(reportName, "Archive throughput baseline sample count", TryReadString(root, "ArchiveThroughputBaselineSampleCount"), filePath);
                     AddReportMetric(reportName, "Archive throughput below baseline", FormatBool(TryReadBoolValue(root, "ArchiveThroughputBelowBaseline")), filePath);
                     AddReportMetric(reportName, "Outcome", TryReadString(root, "Outcome"), filePath);
                     break;
@@ -6819,7 +6931,30 @@ public sealed class MainForm : Form
             return;
         }
 
-        _reportsListView.Items.Add(new ListViewItem([reportName, property, value]) { Tag = filePath });
+        var item = new ListViewItem([reportName, property, value]) { Tag = filePath };
+        ApplyReportMetricHighlighting(item, reportName, property, value);
+        _reportsListView.Items.Add(item);
+    }
+
+    private static void ApplyReportMetricHighlighting(ListViewItem item, string reportName, string property, string value)
+    {
+        if (!reportName.Equals("runtime-stress-pass.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!property.Equals("Archive throughput below baseline", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!value.Equals("Yes", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        item.BackColor = Color.FromArgb(255, 246, 214);
+        item.ForeColor = Color.FromArgb(149, 73, 0);
     }
 
     private static IEnumerable<string> EnumerateKnownReportFiles(string outputDirectory) =>

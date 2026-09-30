@@ -4,7 +4,9 @@ public sealed record StandaloneDesktopLaunchDecision(
     bool ShouldAttemptDesktopHandoff,
     bool LauncherSignalDetected,
     bool ModManagerLaunchDetected,
-    bool ExplicitCliLaunchDetected);
+    bool ExplicitCliLaunchDetected,
+    bool StrictLauncherModeEnabled = false,
+    string RoutingReason = "");
 
 public static class StandaloneStartupRouting
 {
@@ -12,7 +14,8 @@ public static class StandaloneStartupRouting
         IReadOnlyList<string> args,
         string? executablePath,
         string? workingDirectory,
-        Func<string, bool>? hasEnvironmentVariable = null)
+        Func<string, bool>? hasEnvironmentVariable = null,
+        bool strictLauncherMode = false)
     {
         hasEnvironmentVariable ??= static name =>
             !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
@@ -20,13 +23,30 @@ public static class StandaloneStartupRouting
         var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
         var launcherSignal = IsExplicitLauncherSignal(args, hasEnvironmentVariable);
         var modManagerLaunch = IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
-        var shouldAttemptDesktopHandoff = args.Count == 0 || launcherSignal || !explicitCliLaunch;
+        var shouldAttemptDesktopHandoff = strictLauncherMode
+            ? args.Count == 0 || launcherSignal
+            : args.Count == 0 || launcherSignal || !explicitCliLaunch;
+        var routingReason = strictLauncherMode
+            ? shouldAttemptDesktopHandoff
+                ? launcherSignal
+                    ? "strict-launcher-mode: launcher signal detected"
+                    : "strict-launcher-mode: no args"
+                : "strict-launcher-mode: no launcher signal"
+            : shouldAttemptDesktopHandoff
+                ? launcherSignal
+                    ? "launcher signal detected"
+                    : explicitCliLaunch
+                        ? "launcher signal overrides explicit cli"
+                        : "default desktop handoff"
+                : "explicit cli without launcher signal";
 
         return new StandaloneDesktopLaunchDecision(
             shouldAttemptDesktopHandoff,
             launcherSignal,
             modManagerLaunch,
-            explicitCliLaunch);
+            explicitCliLaunch,
+            strictLauncherMode,
+            routingReason);
     }
 
     public static bool IsModManagerLauncherArgument(string? arg)
