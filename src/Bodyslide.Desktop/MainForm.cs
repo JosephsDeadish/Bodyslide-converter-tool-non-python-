@@ -3190,6 +3190,8 @@ public sealed class MainForm : Form
             string? activeStageKey = null;
             string? activeStageName = null;
             DateTime? activeStageStartedUtc = null;
+            double lastProgressUnits = 0d;
+            int lastStageIndex = 0;
             var completedStageDurationSamples = new Dictionary<string, (double TotalSeconds, int Count)>(StringComparer.OrdinalIgnoreCase);
             ResetPipelineTimeline();
             var progress = new CoalescingBatchProgress(this, update =>
@@ -3212,6 +3214,15 @@ public sealed class MainForm : Form
                 {
                     var stageFraction = Math.Clamp((double)update.StageIndex / update.StageCount, 0d, 1d);
                     progressUnits = Math.Min(total, completed + stageFraction);
+                }
+
+                if (progressUnits < lastProgressUnits)
+                {
+                    progressUnits = lastProgressUnits;
+                }
+                else
+                {
+                    lastProgressUnits = progressUnits;
                 }
 
                 var percent = (int)Math.Round(progressUnits / total * 100d, MidpointRounding.AwayFromZero);
@@ -3281,11 +3292,24 @@ public sealed class MainForm : Form
                 }
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
-                var stageDisplay = BuildProgressStageDisplay(update);
+                var stageIndex = update.IsItemCompleted
+                    ? Math.Max(1, Math.Min(Math.Max(update.StageCount, 1), update.StageCount))
+                    : Math.Clamp(update.StageIndex, 1, Math.Max(update.StageCount, 1));
+                if (stageIndex < lastStageIndex)
+                {
+                    stageIndex = lastStageIndex;
+                }
+                else
+                {
+                    lastStageIndex = stageIndex;
+                }
+
+                var displayUpdate = update with { StageIndex = stageIndex };
+                var stageDisplay = BuildProgressStageDisplay(displayUpdate);
                 var archiveProgressDisplay = BuildArchiveExtractionTelemetrySuffix(update);
                 var normalizedStageForTracking = isArchiveExtractionStage
                     ? "Extracting archive"
-                    : update.Stage;
+                    : displayUpdate.Stage;
                 var stageKey = $"{activeItem}|{update.CurrentFile}|{normalizedStageForTracking}";
                 if (!string.Equals(stageKey, activeStageKey, StringComparison.Ordinal))
                 {
@@ -3310,7 +3334,7 @@ public sealed class MainForm : Form
 
                     activeStageKey = stageKey;
                     activeStageStartedUtc = now;
-                    activeStageName = NormalizeProgressStageName(update.Stage);
+                    activeStageName = NormalizeProgressStageName(displayUpdate.Stage);
                 }
 
                 var logStage = stageLogLabel;
@@ -3334,7 +3358,7 @@ public sealed class MainForm : Form
                     ? $"Converting {activeItem}/{total} ({percent}%): {stageDisplay}"
                     : $"Converting {activeItem}/{total} ({percent}%): {stageDisplay}{archiveProgressDisplay}";
                 _progressDetailsLabel.Text = $"Overall {percent}% • Item {activeItem}/{total} • Stage elapsed {FormatDuration(stageElapsed)} • Stage remaining {FormatDuration(stageEta)} • Overall elapsed {FormatDuration(overallElapsed)} • Overall remaining {FormatDuration(overallEta)} • {statusSuffix}";
-                UpdatePipelineTimeline(update, stageElapsed, stageEta, overallElapsed, overallEta);
+                UpdatePipelineTimeline(displayUpdate, stageElapsed, stageEta, overallElapsed, overallEta);
 
                 if (update.IsItemCompleted)
                 {
