@@ -623,10 +623,13 @@ internal static class DesktopWorkflowSupport
         }
 
         return key.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("mo2", StringComparison.OrdinalIgnoreCase) ||
                key.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("modorganizer", StringComparison.OrdinalIgnoreCase) ||
                key.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("vortex", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("from-modorganizer", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("from-vortex", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("from-mo2", StringComparison.OrdinalIgnoreCase);
     }
@@ -644,6 +647,9 @@ internal static class DesktopWorkflowSupport
                key.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("mo2", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("modorganizer", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("from-modorganizer", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("from-vortex", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("from-mo2", StringComparison.OrdinalIgnoreCase);
     }
@@ -751,6 +757,9 @@ internal static class DesktopWorkflowSupport
                     potentialKey.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
                     potentialKey.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase) ||
                     potentialKey.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
+                    potentialKey.Equals("mo2", StringComparison.OrdinalIgnoreCase) ||
+                    potentialKey.Equals("modorganizer", StringComparison.OrdinalIgnoreCase) ||
+                    potentialKey.Equals("from-modorganizer", StringComparison.OrdinalIgnoreCase) ||
                     potentialKey.Equals("from-vortex", StringComparison.OrdinalIgnoreCase) ||
                     potentialKey.Equals("from-mo2", StringComparison.OrdinalIgnoreCase);
                 if (recognizesColonSeparatedValue)

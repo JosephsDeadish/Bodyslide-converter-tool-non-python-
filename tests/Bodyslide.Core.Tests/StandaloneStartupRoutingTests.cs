@@ -42,12 +42,16 @@ public sealed class StandaloneStartupRoutingTests
     [InlineData("--mo2-output", @"C:\MO2\mods\SomePack")]
     [InlineData("--vortex-staging", @"C:\Users\Test\AppData\Roaming\Vortex\skyrimse\mods")]
     [InlineData("--modorganizer-path", @"D:\Mod Organizer 2\mods\SomePack")]
+    [InlineData("--modorganizer", null)]
+    [InlineData("--mo2", null)]
+    [InlineData("--from-modorganizer", null)]
     public void EvaluateDesktopLaunchDecision_ModManagerArgs_AttemptsDesktopHandoff(
         string option,
-        string path)
+        string? path)
     {
+        var args = path is null ? new[] { option } : new[] { option, path };
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
-            [option, path],
+            args,
             executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
             workingDirectory: @"C:\Tools\SlideSmith",
             hasEnvironmentVariable: _ => false);

@@ -57,10 +57,13 @@ public static class StandaloneStartupRouting
         }
 
         return option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("mo2", StringComparison.OrdinalIgnoreCase) ||
                option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("modorganizer", StringComparison.OrdinalIgnoreCase) ||
                option.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("vortex", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("from-modorganizer", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("from-vortex", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("from-mo2", StringComparison.OrdinalIgnoreCase);
     }
@@ -285,9 +288,12 @@ public static class StandaloneStartupRouting
             }
 
             if (option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("mo2", StringComparison.OrdinalIgnoreCase) ||
                 option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("modorganizer", StringComparison.OrdinalIgnoreCase) ||
                 option.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
-                option.Equals("vortex", StringComparison.OrdinalIgnoreCase))
+                option.Equals("vortex", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("from-modorganizer", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }

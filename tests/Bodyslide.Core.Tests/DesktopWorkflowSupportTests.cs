@@ -125,6 +125,36 @@ public sealed class DesktopWorkflowSupportTests
         }
     }
 
+    [Theory]
+    [InlineData("--mo2")]
+    [InlineData("--modorganizer")]
+    [InlineData("--from-modorganizer")]
+    public void ParseLaunchOptions_RecognizesBareModOrganizerLauncherFlags(string launcherFlag)
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    launcherFlag,
+                    "--output",
+                    outputDirectory
+                ]);
+
+            Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     [Fact]
     public void ParseLaunchOptions_TreatsMo2OutputArgumentAsMo2Launch()
     {
