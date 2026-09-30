@@ -21290,7 +21290,16 @@ internal sealed class LocalExportService(
 
         // Carry source support assets (textures, material configs, physics configs, plugins, body refs)
         // into the output package so converted outputs stay mod-ready.
-        var copiedSupportAssets = await CopySupportAssetsAsync(armor, outputDirectory, request.SharedPluginOutputDirectory, cancellationToken);
+        var supportAssets = DiscoverSupportAssets(
+            armor.SourcePath,
+            outputDirectory,
+            request.SharedPluginOutputDirectory);
+        var copiedSupportAssets = await CopySupportAssetsAsync(
+            armor,
+            outputDirectory,
+            request.SharedPluginOutputDirectory,
+            supportAssets,
+            cancellationToken);
         outputFiles.AddRange(copiedSupportAssets);
 
         // Generate flat-normal DDS stubs for any diffuse textures that have no matching _n.dds.
@@ -21536,7 +21545,7 @@ internal sealed class LocalExportService(
 
             if (pluginRewriteMap.Count > 0)
             {
-                var sourcePluginPaths = EnumeratePluginFiles(armor.SourcePath);
+                var sourcePluginPaths = supportAssets.PluginFiles;
 
                 // Do not assume the format of AMBIGUOUS plugins (ESL flag present but no
                 // FE-range FormID evidence).  Rewriting them could corrupt form-ID
@@ -22854,10 +22863,15 @@ internal sealed class LocalExportService(
     }
 
 
+    internal sealed record SupportAssetDiscoveryResult(
+        IReadOnlyList<string> PluginFiles,
+        IReadOnlyList<string> MaterialFiles);
+
     private static async Task<IReadOnlyList<string>> CopySupportAssetsAsync(
         ImportedArmor armor,
         string outputDirectory,
         string? sharedPluginOutputDirectory,
+        SupportAssetDiscoveryResult supportAssets,
         CancellationToken cancellationToken)
     {
         var supportFiles = new List<string>();
@@ -22868,8 +22882,8 @@ internal sealed class LocalExportService(
             Path.GetExtension(path).Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(path).Equals(".bsd", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase)));
-        supportFiles.AddRange(EnumerateMaterialFiles(armor.SourcePath, outputDirectory));
-        supportFiles.AddRange(EnumeratePluginFiles(armor.SourcePath, outputDirectory));
+        supportFiles.AddRange(supportAssets.MaterialFiles);
+        supportFiles.AddRange(supportAssets.PluginFiles);
 
         var copied = new List<string>();
         var seenSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -22941,50 +22955,55 @@ internal sealed class LocalExportService(
         return copied;
     }
 
-    private static IReadOnlyList<string> EnumeratePluginFiles(string sourcePath, string? excludedDirectory = null)
+    internal static SupportAssetDiscoveryResult DiscoverSupportAssets(
+        string sourcePath,
+        string? excludedDirectory = null,
+        string? sharedPluginOutputDirectory = null)
     {
+        var scanRoot = ResolveSupportAssetRoot(sourcePath);
+        var excludedDirectories = new List<string>(capacity: 2);
+        if (!string.IsNullOrWhiteSpace(excludedDirectory))
+        {
+            excludedDirectories.Add(excludedDirectory);
+        }
+
+        if (!string.IsNullOrWhiteSpace(sharedPluginOutputDirectory))
+        {
+            excludedDirectories.Add(sharedPluginOutputDirectory);
+        }
+
         static bool IsPlugin(string path) =>
             Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
 
-        var scanRoot = ResolveSupportAssetRoot(sourcePath);
-        if (File.Exists(scanRoot))
-        {
-            return IsPlugin(scanRoot) ? [Path.GetFullPath(scanRoot)] : [];
-        }
-
-        if (!Directory.Exists(scanRoot))
-        {
-            return [];
-        }
-
-        return BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(scanRoot, [".esp", ".esm", ".esl"])
-            .Where(IsPlugin)
-            .Where(path => !IsPathInsideDirectory(path, excludedDirectory))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
-    private static IReadOnlyList<string> EnumerateMaterialFiles(string sourcePath, string? excludedDirectory = null)
-    {
         static bool IsMaterial(string path) =>
             Path.GetExtension(path) is ".bgsm" or ".bgem";
 
-        var scanRoot = ResolveSupportAssetRoot(sourcePath);
         if (File.Exists(scanRoot))
         {
-            return IsMaterial(scanRoot) ? [Path.GetFullPath(scanRoot)] : [];
+            var fullPath = Path.GetFullPath(scanRoot);
+            return new SupportAssetDiscoveryResult(
+                IsPlugin(fullPath) ? [fullPath] : [],
+                IsMaterial(fullPath) ? [fullPath] : []);
         }
 
         if (!Directory.Exists(scanRoot))
         {
-            return [];
+            return new SupportAssetDiscoveryResult([], []);
         }
 
-        return BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(scanRoot, [".bgsm", ".bgem"])
-            .Where(IsMaterial)
-            .Where(path => !IsPathInsideDirectory(path, excludedDirectory))
+        var files = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
+            scanRoot,
+            excludedDirectories,
+            CancellationToken.None);
+        var pluginFiles = files
+            .Where(IsPlugin)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var materialFiles = files
+            .Where(IsMaterial)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return new SupportAssetDiscoveryResult(pluginFiles, materialFiles);
     }
 
     private static string GetSafeRelativeAssetPath(string sourceRoot, string fullSourcePath)
