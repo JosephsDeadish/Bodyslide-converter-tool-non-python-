@@ -22020,19 +22020,6 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(qualityPath);
 
-        string? zipPath = null;
-        if (request.OutputZip)
-        {
-            zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
-            if (File.Exists(zipPath))
-            {
-                File.Delete(zipPath);
-            }
-
-            ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
-            outputFiles.Add(zipPath);
-        }
-
         var validationSummary = BuildValidationSummary(
             armor,
             detectedBody,
@@ -22355,10 +22342,16 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(conversionPipelineProfilePath);
 
-        if (!string.IsNullOrWhiteSpace(zipPath))
+        if (request.OutputZip)
         {
-            File.Delete(zipPath);
+            var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+
             ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
+            outputFiles.Add(zipPath);
         }
 
         return (outputDirectory, outputFiles);
