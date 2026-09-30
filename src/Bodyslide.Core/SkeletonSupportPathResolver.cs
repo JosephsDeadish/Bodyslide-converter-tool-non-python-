@@ -2,6 +2,8 @@ namespace Bodyslide.Core;
 
 public static class SkeletonSupportPathResolver
 {
+    private const int MaxAncestorSearchDepth = 4;
+
     private static readonly string[] PositiveSkeletonNameTokens =
     [
         "skeleton",
@@ -91,7 +93,8 @@ public static class SkeletonSupportPathResolver
         var originalRoot = Path.GetFullPath(directoryPath);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var current = originalRoot;
-        while (!string.IsNullOrWhiteSpace(current))
+        var depth = 0;
+        while (!string.IsNullOrWhiteSpace(current) && depth <= MaxAncestorSearchDepth)
         {
             if (!visited.Add(current))
             {
@@ -104,6 +107,7 @@ public static class SkeletonSupportPathResolver
             }
 
             current = Path.GetDirectoryName(current);
+            depth++;
         }
 
         return TryResolveFallbackWithinRoot(originalRoot, out skeletonNifPath);
@@ -289,7 +293,7 @@ public static class SkeletonSupportPathResolver
                 ? 0
                 : 1);
 
-        var negativeTokenPenalty = NegativeSkeletonNameTokens.Any(token => fileStem.Contains(token, StringComparison.OrdinalIgnoreCase))
+        var negativeTokenPenalty = NegativeSkeletonNameTokens.Any(token => ContainsPathToken(fileStem, token))
             ? 1
             : 0;
 
@@ -329,7 +333,7 @@ public static class SkeletonSupportPathResolver
             return false;
         }
 
-        if (NegativeSkeletonNameTokens.Any(token => fileStem.Contains(token, StringComparison.OrdinalIgnoreCase)))
+        if (NegativeSkeletonNameTokens.Any(token => ContainsPathToken(fileStem, token)))
         {
             return false;
         }
@@ -363,9 +367,9 @@ public static class SkeletonSupportPathResolver
                 return false;
             }
 
-            var startsAtBoundary = index == 0 || !char.IsLetter(value[index - 1]);
+            var startsAtBoundary = index == 0 || !char.IsLetterOrDigit(value[index - 1]);
             var endIndex = index + token.Length;
-            var endsAtBoundary = endIndex >= value.Length || !char.IsLetter(value[endIndex]);
+            var endsAtBoundary = endIndex >= value.Length || !char.IsLetterOrDigit(value[endIndex]);
             if (startsAtBoundary && endsAtBoundary)
             {
                 return true;

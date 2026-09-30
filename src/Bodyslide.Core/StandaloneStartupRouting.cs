@@ -21,8 +21,8 @@ public static class StandaloneStartupRouting
             !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
 
         var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
-        var launcherSignal = IsExplicitLauncherSignal(args, hasEnvironmentVariable);
-        var modManagerLaunch = IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
+        var launcherSignal = !explicitCliLaunch && IsExplicitLauncherSignal(args, hasEnvironmentVariable);
+        var modManagerLaunch = !explicitCliLaunch && IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
         var shouldAttemptDesktopHandoff = strictLauncherMode
             ? args.Count == 0 || launcherSignal
             : args.Count == 0 || launcherSignal || !explicitCliLaunch;
@@ -35,9 +35,7 @@ public static class StandaloneStartupRouting
             : shouldAttemptDesktopHandoff
                 ? launcherSignal
                     ? "launcher signal detected"
-                    : explicitCliLaunch
-                        ? "launcher signal overrides explicit cli"
-                        : "default desktop handoff"
+                    : "default desktop handoff"
                 : "explicit cli without launcher signal";
 
         return new StandaloneDesktopLaunchDecision(
@@ -147,7 +145,7 @@ public static class StandaloneStartupRouting
     }
 
     public static bool HasExplicitStandaloneCliSwitch(IReadOnlyList<string> args) =>
-        HasStandaloneCommandSwitch(args) || HasStandaloneConversionSwitches(args);
+        HasStandaloneCommandSwitch(args) || HasStandaloneConversionSwitches(args) || HasStandalonePositionalConversionUsage(args);
 
     public static bool IsExplicitLauncherSignal(IReadOnlyList<string> args, Func<string, bool> hasEnvironmentVariable) =>
         IsLikelyModManagerEnvironment(hasEnvironmentVariable) ||
@@ -332,16 +330,16 @@ public static class StandaloneStartupRouting
 
             if (option.Equals("preset", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("presets", StringComparison.OrdinalIgnoreCase) ||
-                option.Equals("deformation-profile", StringComparison.OrdinalIgnoreCase) ||
-                option.Equals("source-body", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("profile", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("source", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("physics", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("cache-path", StringComparison.OrdinalIgnoreCase) ||
-                option.Equals("zip", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("output-zip", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("skeleton-nif", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("skeleton-nif-path", StringComparison.OrdinalIgnoreCase) ||
-                option.Equals("generate-bodyslide-files", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("build-sliders", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("custom-profiles", StringComparison.OrdinalIgnoreCase) ||
-                option.Equals("world-drop-mode", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("world-mode", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("shared-plugin-output", StringComparison.OrdinalIgnoreCase))
             {
                 hasConversionModifier = true;
@@ -349,5 +347,16 @@ public static class StandaloneStartupRouting
         }
 
         return hasTarget || hasConversionModifier;
+    }
+
+    private static bool HasStandalonePositionalConversionUsage(IReadOnlyList<string> args)
+    {
+        if (args.Count < 2)
+        {
+            return false;
+        }
+
+        return !TryReadOptionName(args[0], out _) &&
+               !TryReadOptionName(args[1], out _);
     }
 }

@@ -395,10 +395,7 @@ public sealed class ConversionValidationGuidanceTests
                     StringComparison.OrdinalIgnoreCase);
             });
 
-            if (!hasMatchingOutputPath)
-            {
-                continue;
-            }
+            Assert.True(hasMatchingOutputPath, $"No BodySlide OSP OutputPath matched {bodyOutputPath} for {profilePath}.");
         }
     }
 

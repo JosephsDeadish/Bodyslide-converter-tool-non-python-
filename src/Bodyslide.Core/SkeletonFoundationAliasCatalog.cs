@@ -30,7 +30,7 @@ internal static class SkeletonFoundationAliasCatalog
             return true;
         }
 
-        return AliasMap.Value.TryGetValue(Slugify(normalized), out canonicalLabel!);
+        return AliasMap.Value.TryGetValue(SkeletonTextNormalization.Slugify(normalized), out canonicalLabel!);
     }
 
     private static IReadOnlyDictionary<string, string> Load()
@@ -52,11 +52,11 @@ internal static class SkeletonFoundationAliasCatalog
 
             var canonical = entry.Canonical.Trim();
             AddAlias(map, canonical, canonical);
-            AddAlias(map, Slugify(canonical), canonical);
+            AddAlias(map, SkeletonTextNormalization.Slugify(canonical), canonical);
             foreach (var alias in entry.Aliases ?? [])
             {
                 AddAlias(map, alias, canonical);
-                AddAlias(map, Slugify(alias), canonical);
+                AddAlias(map, SkeletonTextNormalization.Slugify(alias), canonical);
             }
         }
 
@@ -71,34 +71,6 @@ internal static class SkeletonFoundationAliasCatalog
         }
 
         map[alias.Trim()] = canonical;
-    }
-
-    private static string Slugify(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        var builder = new System.Text.StringBuilder(value.Length);
-        var lastWasSeparator = false;
-        foreach (var character in value.Trim())
-        {
-            if (char.IsLetterOrDigit(character))
-            {
-                builder.Append(char.ToLowerInvariant(character));
-                lastWasSeparator = false;
-                continue;
-            }
-
-            if (!lastWasSeparator)
-            {
-                builder.Append('-');
-                lastWasSeparator = true;
-            }
-        }
-
-        return builder.ToString().Trim('-');
     }
 
     private sealed class SkeletonFoundationAliasDto

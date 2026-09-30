@@ -368,6 +368,8 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
         return false;
     }
 
+    const int ModManagerLaunchEarlyExitWaitMs = 1500;
+
     try
     {
         var currentExePath = Environment.ProcessPath;
@@ -392,6 +394,29 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
         var launcherSignal = launchDecision.LauncherSignalDetected;
         var launchedFromModOrganizer = launchDecision.ModManagerLaunchDetected;
         var decisionDiagnosticsPath = ResolveLauncherDecisionDiagnosticsPath(args, startupDiagnosticsPath, strictLauncherMode);
+
+        bool TryContinueAfterEarlyExit(Process? launchedProcess, string candidateKind, string candidatePath)
+        {
+            if (!launchedFromModOrganizer || launchedProcess is null)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (launchedProcess.WaitForExit(ModManagerLaunchEarlyExitWaitMs) && launchedProcess.ExitCode != 0)
+                {
+                    WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: {candidateKind} exited early with code {launchedProcess.ExitCode}: {candidatePath}");
+                    return true;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
+            return false;
+        }
+
         WriteStartupDiagnostics(
             startupDiagnosticsPath,
             $"desktop-launch: launcherSignal={launcherSignal}, mo2={launchedFromModOrganizer}, cli={explicitCliLaunch}, exe={currentExeFullPath}");
@@ -426,19 +451,9 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
             if (TryStartDesktopProcess(desktopExePath, executableDirectory, launchedFromModOrganizer, args, startupDiagnosticsPath, out var launched))
             {
-                if (launchedFromModOrganizer && launched is not null)
+                if (TryContinueAfterEarlyExit(launched, "candidate", desktopExePath))
                 {
-                    try
-                    {
-                        if (launched.WaitForExit(1500) && launched.ExitCode != 0)
-                        {
-                            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: candidate exited early with code {launched.ExitCode}: {desktopExePath}");
-                            continue;
-                        }
-                    }
-                    catch (InvalidOperationException)
-                    {
-                    }
+                    continue;
                 }
 
                 WriteLauncherDecisionDiagnostics(
@@ -461,19 +476,9 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
             if (TryStartDesktopDllProcess(desktopDllPath, executableDirectory, launchedFromModOrganizer, args, startupDiagnosticsPath, out var launched))
             {
-                if (launchedFromModOrganizer && launched is not null)
+                if (TryContinueAfterEarlyExit(launched, "dll candidate", desktopDllPath))
                 {
-                    try
-                    {
-                        if (launched.WaitForExit(1500) && launched.ExitCode != 0)
-                        {
-                            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: dll candidate exited early with code {launched.ExitCode}: {desktopDllPath}");
-                            continue;
-                        }
-                    }
-                    catch (InvalidOperationException)
-                    {
-                    }
+                    continue;
                 }
 
                 WriteLauncherDecisionDiagnostics(
@@ -644,26 +649,8 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
                 return false;
             }
         }
-
-        var minimalFallback = new ProcessStartInfo
-        {
-            FileName = desktopExePath,
-            WorkingDirectory = workingDirectory,
-            UseShellExecute = false
-        };
-        minimalFallback.ArgumentList.Add("--mo2-launcher");
-        try
-        {
-            launchedProcess = Process.Start(minimalFallback);
-            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: started exe candidate (minimal mo2 fallback) {desktopExePath}");
-            return launchedProcess is not null;
-        }
-        catch (Exception minimalEx)
-        {
-            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: minimal mo2 fallback failed for {desktopExePath} ({minimalEx.GetType().Name}: {minimalEx.Message})");
-            launchedProcess = null;
-            return false;
-        }
+        launchedProcess = null;
+        return false;
     }
 }
 

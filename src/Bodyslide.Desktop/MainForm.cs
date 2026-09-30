@@ -3282,6 +3282,7 @@ public sealed class MainForm : Form
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
                 var stageDisplay = BuildProgressStageDisplay(update);
+                var archiveProgressDisplay = BuildArchiveExtractionTelemetrySuffix(update);
                 var normalizedStageForTracking = isArchiveExtractionStage
                     ? "Extracting archive"
                     : update.Stage;
@@ -3329,8 +3330,10 @@ public sealed class MainForm : Form
                 var overallEta = EstimateRemainingDuration(conversionStartedUtc, now, progressUnits, total);
                 var stageElapsed = activeStageStartedUtc is { } startedUtc ? now - startedUtc : (TimeSpan?)null;
                 var stageEta = EstimateStageRemainingDuration(activeStageName, stageElapsed, completedStageDurationSamples, update.IsItemCompleted);
-                _statusLabel.Text = $"Converting {activeItem}/{total} ({percent}%): {stageDisplay}";
-                _progressDetailsLabel.Text = $"Overall {percent}% • Item {activeItem}/{total} • Elapsed {FormatDuration(overallElapsed)} • Remaining {FormatDuration(overallEta)} • {statusSuffix}";
+                _statusLabel.Text = string.IsNullOrWhiteSpace(archiveProgressDisplay)
+                    ? $"Converting {activeItem}/{total} ({percent}%): {stageDisplay}"
+                    : $"Converting {activeItem}/{total} ({percent}%): {stageDisplay}{archiveProgressDisplay}";
+                _progressDetailsLabel.Text = $"Overall {percent}% • Item {activeItem}/{total} • Stage elapsed {FormatDuration(stageElapsed)} • Stage remaining {FormatDuration(stageEta)} • Overall elapsed {FormatDuration(overallElapsed)} • Overall remaining {FormatDuration(overallEta)} • {statusSuffix}";
                 UpdatePipelineTimeline(update, stageElapsed, stageEta, overallElapsed, overallEta);
 
                 if (update.IsItemCompleted)
@@ -4015,6 +4018,26 @@ public sealed class MainForm : Form
         return $"{stageName} (stage {stageIndex}/{update.StageCount})";
     }
 
+    private static int TryGetStageProgressPercent(BatchProgressUpdate update, int stageCount, int stageIndex)
+    {
+        if (stageCount <= 0)
+        {
+            return 0;
+        }
+
+        if (IsArchiveExtractionStage(update.Stage))
+        {
+            var copiedBytes = update.ExtractionTotalBytesCopied ?? update.ExtractionEntryBytesCopied;
+            var totalBytes = update.ExtractionTotalBytesEstimated ?? update.ExtractionEntryBytesTotal;
+            if (copiedBytes is > 0 && totalBytes is > 0)
+            {
+                return (int)Math.Round(Math.Clamp((double)copiedBytes.Value / totalBytes.Value, 0d, 1d) * 100d, MidpointRounding.AwayFromZero);
+            }
+        }
+
+        return (int)Math.Round(Math.Clamp((double)stageIndex / stageCount, 0d, 1d) * 100d, MidpointRounding.AwayFromZero);
+    }
+
     private void ResetPipelineTimeline()
     {
         _pipelineListView.BeginUpdate();
@@ -4074,9 +4097,7 @@ public sealed class MainForm : Form
             }
             else if (index == stageIndex - 1)
             {
-                var stagePercent = stageCount > 0
-                    ? (int)Math.Round(Math.Clamp((double)stageIndex / stageCount, 0d, 1d) * 100d, MidpointRounding.AwayFromZero)
-                    : 0;
+                var stagePercent = TryGetStageProgressPercent(update, stageCount, stageIndex);
                 item.SubItems[2].Text = update.IsItemCompleted ? "Completed" : "In progress";
                 item.SubItems[3].Text = $"{Math.Clamp(stagePercent, 0, 100)}%";
                 var note = update.IsItemCompleted
@@ -4803,9 +4824,9 @@ public sealed class MainForm : Form
         {
             var firstOutput = outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory));
             Add(
-                "How to use this tab",
+                "What to do first",
                 "Info",
-                "Purpose: this tab is your prioritized checklist. Work from High/Warning rows first, then Action rows, and double-click a row to open the linked report/artifact.",
+                "This tab is your prioritized checklist. Start with High/Warning rows, then work through the Action rows. Double-click any row to open the linked report or artifact.",
                 firstOutput);
         }
 
@@ -4830,9 +4851,9 @@ public sealed class MainForm : Form
             File.Exists(previewPath))
         {
             Add(
-                "Review flow",
+                "Next steps",
                 "Action",
-                "Start with the Preview tab for visual review, then work through the targeted report actions below before installing or sharing the output.",
+                "Start with the Preview tab for a visual check, then work through the targeted report actions below before installing or sharing the output.",
                 previewPath);
         }
 
@@ -4843,7 +4864,7 @@ public sealed class MainForm : Form
                 ? previewPath
                 : outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory));
             Add(
-                "Overall status",
+                "Final readiness",
                 gateRank >= ConversionValidationPresentation.GetGateRank("needs-review") || requiresReview ? "Warning" : "Info",
                 BuildGuidanceOverview(actionableEntries, requiresReview, gateStatus),
                 guidanceTarget);
@@ -7330,7 +7351,7 @@ public sealed class MainForm : Form
             }
 
             add(
-                "Batch results",
+                "Conversion summary",
                 failedCount > 0 || highRiskCount > 0 ? "Warning" : "Info",
                 $"Batch summary: {successCount}/{totalCount} succeeded, {failedCount} failed, {needsReviewCount} need review, {highRiskCount} are high risk. Pack status: {packStatus}.",
                 reportPath);
@@ -7338,7 +7359,7 @@ public sealed class MainForm : Form
             if (failedCount > 0)
             {
                 add(
-                    "Action card",
+                    "Next step",
                     "Warning",
                     $"Failed conversions detected ({failedCount}). Recommended flow: 1) open batch-report.json, 2) re-run failed items only, 3) validate conversion-quality.json before packaging.",
                     reportPath);
@@ -7346,7 +7367,7 @@ public sealed class MainForm : Form
             else if (needsReviewCount > 0 || highRiskCount > 0)
             {
                 add(
-                    "Action card",
+                    "Next step",
                     "Action",
                     $"Partial conversion state: {needsReviewCount} need review and {highRiskCount} are high risk. Review preview-workbench + conversion-quality before treating this pack as release-ready.",
                     reportPath);
@@ -7355,7 +7376,7 @@ public sealed class MainForm : Form
             if (failedCount > 0)
             {
                 add(
-                    "Batch follow-up",
+                    "Publish check",
                     "Action",
                     $"Open batch-report.json and re-run or isolate the {failedCount} failed item(s) before publishing the pack.",
                     reportPath);
@@ -7364,7 +7385,7 @@ public sealed class MainForm : Form
             if (missingQualityCount > 0)
             {
                 add(
-                    "Batch follow-up",
+                    "Publish check",
                     "Action",
                     $"Some outputs are missing conversion-quality.json ({missingQualityCount} item(s)). Re-run those conversions before installing or sharing the results.",
                     ResolveGuidanceTargetPath(outputDirectory, previewPath, "missing-conversion-quality-report", reportPath));
@@ -7373,7 +7394,7 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             requiresReview = true;
-            add("Batch results", "Warning", $"Could not read batch-report.json: {ex.Message}", reportPath);
+            add("Conversion summary", "Warning", $"Could not read batch-report.json: {ex.Message}", reportPath);
         }
     }
 
@@ -7418,7 +7439,7 @@ public sealed class MainForm : Form
             if (!validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase))
             {
                 add(
-                    "Action card",
+                    "Next step",
                     ConversionValidationPresentation.GetGateRank(validationSummary.Status) >= ConversionValidationPresentation.GetGateRank("high-risk")
                         ? "Warning"
                         : "Action",
@@ -7455,7 +7476,7 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             requiresReview = true;
-            add("Validation", "Warning", $"Could not read conversion-quality.json: {ex.Message}", qualityPath);
+            add("Validation status", "Warning", $"Could not read conversion-quality.json: {ex.Message}", qualityPath);
         }
     }
 
@@ -7664,7 +7685,7 @@ public sealed class MainForm : Form
             {
                 requiresReview = true;
                 add(
-                    "Ecosystem mix",
+                    "Source mix",
                     "Action",
                     $"The output references multiple detected source body ecosystems ({BuildListPreview(sourceBodies)}). Smoke-test the converted pack in your mod manager before release.",
                     reportPath);
@@ -7674,7 +7695,7 @@ public sealed class MainForm : Form
             {
                 requiresReview = true;
                 add(
-                    "Ecosystem mix",
+                    "Source mix",
                     "Warning",
                     $"Multiple source skeleton families were detected ({BuildListPreview(sourceSkeletons)}). Recheck race/follower coverage and plugin load order before publishing.",
                     reportPath);
@@ -7732,9 +7753,9 @@ public sealed class MainForm : Form
             }
 
             add(
-                "Packaging",
+                "Install readiness",
                 string.Equals(normalizedStatus, "ready", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
-                $"Pack readiness: {status}. Needs review: {needsReviewCount}. High risk: {highRiskCount}. Open armor-pack-validation.json before publishing or sharing.",
+                $"Pack readiness: {status}. Needs review: {needsReviewCount}. High risk: {highRiskCount}. Open armor-pack-validation.json before installing or sharing.",
                 reportPath);
 
             if (TryGetProperty(root, "TopIssueCodes", out var topIssueCodes) && topIssueCodes.ValueKind == JsonValueKind.Array)
@@ -7750,7 +7771,7 @@ public sealed class MainForm : Form
                     }
 
                     add(
-                        "Packaging review",
+                        "Packaging checks",
                         count > 0 ? "Action" : "Info",
                         guidance,
                         ResolveGuidanceTargetPath(outputDirectory, previewPath, code, reportPath));
@@ -7772,7 +7793,7 @@ public sealed class MainForm : Form
         if (metaIniPath is not null)
         {
             add(
-                "Packaging assets",
+                "Install files",
                 "Info",
                 "Open meta.ini from Files to verify the generated Mod Organizer 2 package metadata before sharing the conversion output.",
                 metaIniPath);
@@ -7782,7 +7803,7 @@ public sealed class MainForm : Form
         if (moduleConfigPath is not null)
         {
             add(
-                "Packaging assets",
+                "Install files",
                 "Info",
                 "Open fomod/ModuleConfig.xml from Files to verify the MO2/Vortex install mapping for meshes, plugins, CalienteTools, and staged support files.",
                 moduleConfigPath);
@@ -7792,7 +7813,7 @@ public sealed class MainForm : Form
         if (infoPath is not null)
         {
             add(
-                "Packaging assets",
+                "Install files",
                 "Info",
                 "Open fomod/info.xml from Files to verify the generated package metadata and install notes before sharing the conversion output.",
                 infoPath);
@@ -7807,7 +7828,7 @@ public sealed class MainForm : Form
             if (!string.IsNullOrWhiteSpace(sliderGroupsPath))
             {
                 add(
-                    "BodySlide assets",
+                    "BodySlide files",
                     "Info",
                     "Open the generated BodySlide SliderGroups XML from Files to verify the converted sets will appear under the expected BodySlide batch-build groups.",
                     sliderGroupsPath);
@@ -7839,7 +7860,7 @@ public sealed class MainForm : Form
             }
 
             add(
-                "Plugin patching",
+                "Plugin support",
                 "Info",
                 $"Open plugin-patches.json if the mod ships ESP/ESM/ESL files. Review {rewriteMappings} rewrite mapping(s) and {patchSteps} proposed patch step(s) in xEdit context before release.",
                 ResolveGuidanceTargetPath(outputDirectory, previewPath, "plugin-rewrite-verification-warning", patchPath));
@@ -8008,7 +8029,7 @@ public sealed class MainForm : Form
                 $"Conversion output is still generated and usable now for {targetBody}; this warning means universal/strict proof coverage is incomplete, not that conversion is blocked.",
                 guidanceTarget);
             add(
-                "Action card",
+                "Next step",
                 "Action",
                 $"Release-level universal proof is still incomplete for {targetBody}. This does not invalidate a single successful conversion; it means broader matrix evidence is still missing. Open {Path.GetFileName(reportPath)} and close missing proof axes/dimensions first.",
                 guidanceTarget);
@@ -8433,7 +8454,7 @@ public sealed class MainForm : Form
 
         if (IsPackagingReviewGuidanceCode(normalized))
         {
-            return "Packaging review";
+            return "Packaging checks";
         }
 
         return "Next action";
