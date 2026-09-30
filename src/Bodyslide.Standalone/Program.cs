@@ -371,6 +371,9 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
     }
 
     const int ModManagerLaunchEarlyExitWaitMs = 1500;
+    StandaloneDesktopLaunchDecision? launchDecision = null;
+    string? currentExeFullPath = null;
+    string? decisionDiagnosticsPath = null;
 
     try
     {
@@ -386,8 +389,8 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
             return false;
         }
 
-        var currentExeFullPath = Path.GetFullPath(currentExePath);
-        var launchDecision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+        currentExeFullPath = Path.GetFullPath(currentExePath);
+        launchDecision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
             args,
             currentExeFullPath,
             Environment.CurrentDirectory,
@@ -395,7 +398,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
         var explicitCliLaunch = launchDecision.ExplicitCliLaunchDetected;
         var launcherSignal = launchDecision.LauncherSignalDetected;
         var launchedFromModOrganizer = launchDecision.ModManagerLaunchDetected;
-        var decisionDiagnosticsPath = ResolveLauncherDecisionDiagnosticsPath(args, startupDiagnosticsPath, strictLauncherMode);
+        decisionDiagnosticsPath = ResolveLauncherDecisionDiagnosticsPath(args, startupDiagnosticsPath, strictLauncherMode);
 
         bool TryContinueAfterEarlyExit(Process? launchedProcess, string candidateKind, string candidatePath)
         {
@@ -501,17 +504,19 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
     }
 
     WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: no candidate succeeded");
-    WriteLauncherDecisionDiagnostics(
-        ResolveLauncherDecisionDiagnosticsPath(args, startupDiagnosticsPath, strictLauncherMode),
-        StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
-            args,
-            Environment.ProcessPath,
+    if (launchDecision is not null &&
+        decisionDiagnosticsPath is not null &&
+        currentExeFullPath is not null)
+    {
+        WriteLauncherDecisionDiagnostics(
+            decisionDiagnosticsPath,
+            launchDecision,
+            selectedMode: "cli",
+            currentExeFullPath,
             Environment.CurrentDirectory,
-            strictLauncherMode: strictLauncherMode),
-        selectedMode: "cli",
-        Environment.ProcessPath,
-        Environment.CurrentDirectory,
-        args);
+            args);
+    }
+
     return false;
 }
 
@@ -1133,7 +1138,7 @@ static string SummarizeLaunchArguments(IReadOnlyList<string> args)
     return $"count={args.Count}, mod-manager-switches={modManagerSwitches}, launcher-path-tokens={launcherPathTokens}, startup-diagnostics-switches={startupDiagnosticsSwitches}, quoted={quotedTokens}";
 }
 
-static string FormatArgumentList(System.Collections.Generic.IReadOnlyList<string> args)
+static string FormatArgumentList(IReadOnlyList<string> args)
 {
     if (args.Count == 0)
     {

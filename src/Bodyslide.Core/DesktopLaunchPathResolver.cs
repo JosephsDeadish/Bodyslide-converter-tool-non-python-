@@ -2,6 +2,9 @@ namespace Bodyslide.Core;
 
 internal static class DesktopLaunchPathResolver
 {
+    private const string DesktopTargetFramework = "net10.0-windows";
+    private static readonly string[] DesktopConfigurations = ["Debug", "Release"];
+
     internal static IReadOnlyList<string> GetLikelyDesktopCandidateDirectories(string executableDirectory)
     {
         if (string.IsNullOrWhiteSpace(executableDirectory))
@@ -31,8 +34,10 @@ internal static class DesktopLaunchPathResolver
         var ancestorDirectory = parentDirectory;
         for (var depth = 0; depth < 5 && !string.IsNullOrWhiteSpace(ancestorDirectory); depth++)
         {
-            candidateDirectories.Add(Path.Combine(ancestorDirectory, "Bodyslide.Desktop", "bin", "Debug", "net10.0-windows"));
-            candidateDirectories.Add(Path.Combine(ancestorDirectory, "Bodyslide.Desktop", "bin", "Release", "net10.0-windows"));
+            foreach (var configuration in DesktopConfigurations)
+            {
+                candidateDirectories.Add(Path.Combine(ancestorDirectory, "Bodyslide.Desktop", "bin", configuration, DesktopTargetFramework));
+            }
             candidateDirectories.Add(Path.Combine(ancestorDirectory, "Bodyslide.Desktop", "publish"));
             ancestorDirectory = Path.GetDirectoryName(ancestorDirectory);
         }

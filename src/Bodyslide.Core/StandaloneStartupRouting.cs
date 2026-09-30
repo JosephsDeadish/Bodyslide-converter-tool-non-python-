@@ -134,6 +134,16 @@ public static class StandaloneStartupRouting
             return false;
         }
 
+        if (trimmed.StartsWith("/", StringComparison.Ordinal))
+        {
+            var nextSeparator = trimmed.IndexOfAny(['/', '\\'], 1);
+            var optionSeparator = trimmed.IndexOfAny(['=', ':'], 1);
+            if (nextSeparator >= 0 && (optionSeparator < 0 || nextSeparator < optionSeparator))
+            {
+                return false;
+            }
+        }
+
         if (!trimmed.Contains('\\') &&
             !trimmed.Contains('/') &&
             !trimmed.Contains(':'))
