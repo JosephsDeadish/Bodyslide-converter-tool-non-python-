@@ -3173,7 +3173,18 @@ public sealed class MainForm : Form
                 var total = Math.Max(1, update.Total);
                 var completed = Math.Clamp(update.Completed, 0, total);
                 double progressUnits = completed;
-                if (!update.IsItemCompleted && update.StageCount > 0)
+                var isArchiveExtractionStage = IsArchiveExtractionStage(update.Stage);
+                if (!update.IsItemCompleted && isArchiveExtractionStage &&
+                    update.ExtractionTotalBytesEstimated is > 0 &&
+                    update.ExtractionTotalBytesCopied is >= 0)
+                {
+                    var byteStageFraction = Math.Clamp(
+                        update.ExtractionTotalBytesCopied.Value / (double)update.ExtractionTotalBytesEstimated.Value,
+                        0d,
+                        1d);
+                    progressUnits = Math.Min(total, completed + byteStageFraction);
+                }
+                else if (!update.IsItemCompleted && update.StageCount > 0)
                 {
                     var stageFraction = Math.Clamp((double)update.StageIndex / update.StageCount, 0d, 1d);
                     progressUnits = Math.Min(total, completed + stageFraction);
@@ -3188,7 +3199,6 @@ public sealed class MainForm : Form
                     ? update.CurrentFile
                     : $"{update.CurrentFile} — {stageLogLabel}";
                 var now = DateTime.UtcNow;
-                var isArchiveExtractionStage = IsArchiveExtractionStage(update.Stage);
                 if (isArchiveExtractionStage)
                 {
                     runtimeStressArchiveFormat ??= string.IsNullOrWhiteSpace(update.ExtractionArchiveFormat)
