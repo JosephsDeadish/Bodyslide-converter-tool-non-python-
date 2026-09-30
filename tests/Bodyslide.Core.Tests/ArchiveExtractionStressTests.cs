@@ -215,35 +215,35 @@ public sealed class ArchiveExtractionStressTests
                 File.Delete(payloadPath);
             }
         }
+    }
 
-        private static void CreateSevenZipWithMultiplePayloads(string archivePath)
+    private static void CreateSevenZipWithMultiplePayloads(string archivePath)
+    {
+        var payloadRoot = Path.Combine(Path.GetDirectoryName(archivePath)!, $"{Guid.NewGuid():N}");
+        Directory.CreateDirectory(payloadRoot);
+        var payloadFiles = new[]
         {
-            var payloadRoot = Path.Combine(Path.GetDirectoryName(archivePath)!, $"{Guid.NewGuid():N}");
-            Directory.CreateDirectory(payloadRoot);
-            var payloadFiles = new[]
-            {
-                Path.Combine(payloadRoot, "a.bin"),
-                Path.Combine(payloadRoot, "b.bin")
-            };
+            Path.Combine(payloadRoot, "a.bin"),
+            Path.Combine(payloadRoot, "b.bin")
+        };
 
-            try
+        try
+        {
+            File.WriteAllBytes(payloadFiles[0], new byte[8]);
+            File.WriteAllBytes(payloadFiles[1], new byte[12]);
+            using var archiveStream = File.Create(archivePath);
+            using var writer = SevenZipWriter.OpenWriter(archiveStream, CompressionType.LZMA2);
+            foreach (var payloadFile in payloadFiles)
             {
-                File.WriteAllBytes(payloadFiles[0], new byte[8]);
-                File.WriteAllBytes(payloadFiles[1], new byte[12]);
-                using var archiveStream = File.Create(archivePath);
-                using var writer = SevenZipWriter.OpenWriter(archiveStream, CompressionType.LZMA2);
-                foreach (var payloadFile in payloadFiles)
-                {
-                    using var payloadStream = File.OpenRead(payloadFile);
-                    writer.Write(Path.GetFileName(payloadFile), payloadStream, DateTime.UtcNow);
-                }
+                using var payloadStream = File.OpenRead(payloadFile);
+                writer.Write(Path.GetFileName(payloadFile), payloadStream, DateTime.UtcNow);
             }
-            finally
+        }
+        finally
+        {
+            if (Directory.Exists(payloadRoot))
             {
-                if (Directory.Exists(payloadRoot))
-                {
-                    Directory.Delete(payloadRoot, recursive: true);
-                }
+                Directory.Delete(payloadRoot, recursive: true);
             }
         }
     }
