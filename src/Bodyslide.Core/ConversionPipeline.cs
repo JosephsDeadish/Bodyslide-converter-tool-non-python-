@@ -7347,6 +7347,56 @@ public sealed class ConversionOrchestrator(
                     steps.Add($"stage-top:{string.Join(',', topCostStages)}");
                 }
 
+                long GetStageDuration(params string[] stageKeys) =>
+                    stageKeys.Sum(stageKey => stageDurationsMs.TryGetValue(stageKey, out var duration) ? duration : 0L);
+
+                var phaseDurationsMs = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["import"] = GetStageDuration("import", "learning-cache-load"),
+                    ["inspect"] = GetStageDuration(
+                        "texture-analysis",
+                        "plugin-analysis",
+                        "race-compatibility",
+                        "body-detection",
+                        "mesh-analysis",
+                        "region-binding",
+                        "deformation-cage"),
+                    ["convert"] = GetStageDuration(
+                        "mesh-conversion",
+                        "rigid-island-detection",
+                        "weight-transfer",
+                        "weight-solver",
+                        "normal-recalculation",
+                        "skeleton-mapping",
+                        "morph-generation",
+                        "partition-rebuild",
+                        "clipping-detection",
+                        "mesh-correction",
+                        "voxel-collision",
+                        "pose-simulation",
+                        "physics-build",
+                        "bodyslide-project")
+                };
+
+                foreach (var phase in phaseDurationsMs
+                             .Where(static pair => pair.Value >= 0)
+                             .OrderByDescending(static pair => pair.Value)
+                             .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    steps.Add($"phase-ms:{phase.Key}={phase.Value}");
+                }
+
+                var topCostPhases = phaseDurationsMs
+                    .OrderByDescending(static pair => pair.Value)
+                    .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                    .Take(3)
+                    .Select(pair => $"{pair.Key}:{pair.Value}ms")
+                    .ToList();
+                if (topCostPhases.Count > 0)
+                {
+                    steps.Add($"phase-top:{string.Join(',', topCostPhases)}");
+                }
+
                 steps.Add($"pipeline-total-ms:{Math.Max(0, totalDurationMs)}");
             }
 
@@ -8633,6 +8683,28 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 return [];
             }
 
+            return EnumerateAllFiles(path, excludedDirectories, cancellationToken)
+                .Where(file => extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+                .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        public static IReadOnlyList<string> EnumerateAllFiles(
+            string path,
+            IReadOnlyList<string>? excludedDirectories = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (File.Exists(path))
+            {
+                return [Path.GetFullPath(path)];
+            }
+
+            if (!Directory.Exists(path))
+            {
+                return [];
+            }
+
             var files = new List<string>();
             var pending = new Stack<string>();
             pending.Push(Path.GetFullPath(path));
@@ -8655,10 +8727,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 foreach (var file in Directory.EnumerateFiles(directory))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
-                    {
-                        files.Add(Path.GetFullPath(file));
-                    }
+                    files.Add(Path.GetFullPath(file));
                 }
             }
 
@@ -10647,6 +10716,14 @@ internal sealed class LocalArmorImportService : IArmorImportService
         var meshFiles = EnumerateFiles(sourcePath, [".nif"], excludedDirectories, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
+        var supportScanRoot = ResolveSupportScanRoot(sourcePath);
+        var supportFiles = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(supportScanRoot, excludedDirectories, cancellationToken);
+        IReadOnlyList<string> SelectSupportFiles(params string[] extensions) =>
+            supportFiles
+                .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
         // When a single weight-variant NIF (_0 or _1) is provided directly, also import the
         // sibling half so the full pair is processed together and weight interpolation works.
         if (File.Exists(fullInputPath) && meshFiles.Count == 1)
@@ -10663,17 +10740,16 @@ internal sealed class LocalArmorImportService : IArmorImportService
             throw new InvalidDataException("No .nif mesh files were found in the input.");
         }
 
-        var supportScanRoot = ResolveSupportScanRoot(sourcePath);
-        var textureFiles = EnumerateFiles(supportScanRoot, [".dds", ".png", ".tga"], excludedDirectories, cancellationToken);
+        var textureFiles = SelectSupportFiles(".dds", ".png", ".tga");
         cancellationToken.ThrowIfCancellationRequested();
-        var xmlFiles = EnumerateFiles(supportScanRoot, [".xml"], excludedDirectories, cancellationToken);
+        var xmlFiles = SelectSupportFiles(".xml");
         var physicsFiles = xmlFiles
             .Where(path => !BodySlideSourceProjectSupport.IsLikelyBodySlideSupportXml(path))
-            .Concat(EnumerateFiles(supportScanRoot, [".hkx"], excludedDirectories, cancellationToken))
+            .Concat(SelectSupportFiles(".hkx"))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         cancellationToken.ThrowIfCancellationRequested();
-        var inferredReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".nif"], excludedDirectories, cancellationToken)
+        var inferredReferenceFiles = SelectSupportFiles(".tri", ".nif")
             .Where(path =>
             {
                 var fileName = Path.GetFileNameWithoutExtension(path);
@@ -10682,7 +10758,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
                     fileName.Contains("reference", StringComparison.OrdinalIgnoreCase) ||
                     fileName.Contains("skeleton", StringComparison.OrdinalIgnoreCase));
             });
-        var bodySlideSupportFiles = EnumerateEmbeddedBodySlideSupportFiles(supportScanRoot)
+        var bodySlideSupportFiles = EnumerateEmbeddedBodySlideSupportFiles(supportScanRoot, supportFiles)
             .Where(static path => !string.IsNullOrWhiteSpace(path));
         var bodyReferenceFiles = inferredReferenceFiles
             .Concat(bodySlideSupportFiles)
@@ -10690,7 +10766,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
             .ToList();
         cancellationToken.ThrowIfCancellationRequested();
         var customBodyProfiles = CustomBodyProfileSupport.LoadProfiles(
-            EnumerateFiles(supportScanRoot, [".json"], excludedDirectories, cancellationToken)
+            SelectSupportFiles(".json")
                 .Where(CustomBodyProfileSupport.IsProfileFile)
                 .ToArray());
         cancellationToken.ThrowIfCancellationRequested();
@@ -10706,7 +10782,9 @@ internal sealed class LocalArmorImportService : IArmorImportService
             customBodyProfiles));
     }
 
-    private static IReadOnlyList<string> EnumerateEmbeddedBodySlideSupportFiles(string supportScanRoot)
+    private static IReadOnlyList<string> EnumerateEmbeddedBodySlideSupportFiles(
+        string supportScanRoot,
+        IReadOnlyList<string> discoveredFiles)
     {
         if (!Directory.Exists(supportScanRoot))
         {
@@ -32663,6 +32741,7 @@ internal sealed class LocalExportService(
     private static object BuildConversionPipelineProfileReport(IReadOnlyList<string> steps, long exportDurationMs)
     {
         var stageDurations = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var phaseDurations = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         long? reportedPipelineTotalMs = null;
 
         foreach (var step in steps)
@@ -32705,10 +32784,37 @@ internal sealed class LocalExportService(
                 {
                     reportedPipelineTotalMs = Math.Max(0, totalMs);
                 }
+                continue;
+            }
+
+            if (step.StartsWith("phase-ms:", StringComparison.OrdinalIgnoreCase))
+            {
+                var payload = step["phase-ms:".Length..];
+                var separatorIndex = payload.IndexOf('=');
+                if (separatorIndex <= 0 || separatorIndex >= payload.Length - 1)
+                {
+                    continue;
+                }
+
+                var phase = payload[..separatorIndex].Trim();
+                if (phase.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!long.TryParse(payload[(separatorIndex + 1)..].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var durationMs))
+                {
+                    continue;
+                }
+
+                phaseDurations[phase] = phaseDurations.TryGetValue(phase, out var existing)
+                    ? Math.Max(0, existing + durationMs)
+                    : Math.Max(0, durationMs);
             }
         }
 
         stageDurations["export"] = Math.Max(0, exportDurationMs);
+        phaseDurations["export"] = Math.Max(0, exportDurationMs);
 
         var totalDurationMs = Math.Max(
             reportedPipelineTotalMs.GetValueOrDefault(0) + Math.Max(0, exportDurationMs),
@@ -32718,6 +32824,14 @@ internal sealed class LocalExportService(
             .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var highestCostStages = orderedStages
+            .Take(5)
+            .Select(static pair => pair.Key)
+            .ToList();
+        var orderedPhases = phaseDurations
+            .OrderByDescending(static pair => pair.Value)
+            .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var highestCostPhases = orderedPhases
             .Take(5)
             .Select(static pair => pair.Key)
             .ToList();
@@ -32739,9 +32853,30 @@ internal sealed class LocalExportService(
                 };
             })
             .ToList();
+        var phaseEntries = orderedPhases
+            .Select(pair =>
+            {
+                var share = totalDurationMs > 0 ? (pair.Value / (double)totalDurationMs) * 100d : 0d;
+                var costTier = pair.Value >= 2_000 || share >= 30d
+                    ? "high"
+                    : pair.Value >= 800 || share >= 12d
+                        ? "medium"
+                        : "low";
+                return new
+                {
+                    Phase = pair.Key,
+                    DurationMs = pair.Value,
+                    SharePercent = Math.Round(share, 2),
+                    CostTier = costTier
+                };
+            })
+            .ToList();
         var recommendations = highestCostStages
             .Select(static stage => stage switch
             {
+                "import" => "Reduce repeated directory walks and archive extraction work by caching file discovery and narrowing scans to relevant extensions.",
+                "inspect" => "Reuse imported scan snapshots across detection, mesh analysis, and plugin inspection so the same files are not parsed repeatedly.",
+                "convert" => "Profile mesh conversion internals and cache reusable cage/island data between sibling armor pieces.",
                 "mesh-conversion" => "Profile mesh conversion internals and cache reusable cage/island data between sibling armor pieces.",
                 "morph-generation" => "Reuse payload-backed morph deltas when topology permits and avoid rebuilding unchanged slider payloads.",
                 "weight-transfer" => "Reduce weight-transfer passes for rigid islands and skip optional repair passes when inputs already satisfy constraints.",
@@ -32758,8 +32893,11 @@ internal sealed class LocalExportService(
             TotalDurationMs = totalDurationMs,
             ExportDurationMs = Math.Max(0, exportDurationMs),
             StageCount = stageEntries.Count,
+            PhaseCount = phaseEntries.Count,
             HighestCostStages = highestCostStages,
+            HighestCostPhases = highestCostPhases,
             Stages = stageEntries,
+            Phases = phaseEntries,
             Recommendations = recommendations,
             GeneratedAt = DateTimeOffset.UtcNow
         };

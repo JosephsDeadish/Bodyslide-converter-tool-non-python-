@@ -57,6 +57,30 @@ public sealed class StandaloneStartupRoutingTests
         Assert.True(decision.ModManagerLaunchDetected);
     }
 
+    [Theory]
+    [InlineData("--load-result", @"C:\Mod Organizer 2\mods\Some Armor Pack")]
+    [InlineData(@"--mo2-result:""C:\Mod Organizer 2\mods\Pack With Spaces""", null)]
+    [InlineData(@"/modorganizer-mod:D:\Mod Organizer 2\mods\Legacy Pack", null)]
+    [InlineData("--from-mo2", null)]
+    public void EvaluateDesktopLaunchDecision_RealWorldMo2LaunchPatterns_AttemptDesktopHandoff(
+        string firstArg,
+        string? secondArg)
+    {
+        var args = secondArg is null
+            ? new[] { firstArg }
+            : new[] { firstArg, secondArg };
+
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            args,
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+    }
+
     [Fact]
     public void EvaluateDesktopLaunchDecision_EnvOnly_ModManagerLaunchDetected()
     {

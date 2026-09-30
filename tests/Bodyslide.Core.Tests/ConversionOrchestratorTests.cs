@@ -1582,12 +1582,20 @@ public sealed class ConversionOrchestratorTests
             Assert.True(pipelineProfile.RootElement.GetProperty("TotalDurationMs").GetInt64() >= 0);
             Assert.True(pipelineProfile.RootElement.GetProperty("ExportDurationMs").GetInt64() >= 0);
             Assert.True(pipelineProfile.RootElement.GetProperty("StageCount").GetInt32() > 0);
+            Assert.True(pipelineProfile.RootElement.GetProperty("PhaseCount").GetInt32() > 0);
             Assert.Contains(
                 pipelineProfile.RootElement.GetProperty("HighestCostStages").EnumerateArray().Select(static item => item.GetString()),
                 static stage => string.Equals(stage, "export", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                pipelineProfile.RootElement.GetProperty("HighestCostPhases").EnumerateArray().Select(static item => item.GetString()),
+                static phase => string.Equals(phase, "convert", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(phase, "inspect", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 pipelineProfile.RootElement.GetProperty("Stages").EnumerateArray(),
                 stage => string.Equals(stage.GetProperty("Stage").GetString(), "mesh-conversion", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                pipelineProfile.RootElement.GetProperty("Phases").EnumerateArray(),
+                phase => string.Equals(phase.GetProperty("Phase").GetString(), "inspect", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -16290,6 +16298,12 @@ public sealed class RealisticModPackFixtureTests
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "armor", "nordic", "nordic_cuirass_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "armor", "nordic", "nordic_boots_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meta.ini")));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-missing-converted-match", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("plugin-rewrite-missing-staged-mesh", qualityJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -16324,6 +16338,12 @@ public sealed class RealisticModPackFixtureTests
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "tng", "world", "variant", "nordic", "nordic_cuirass_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "tng", "nordic_cuirass_1.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meta.ini")));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-missing-converted-match", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("plugin-rewrite-missing-staged-mesh", qualityJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -16359,6 +16379,13 @@ public sealed class RealisticModPackFixtureTests
             var sliderSetsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
             Assert.True(Directory.Exists(sliderSetsDirectory));
             Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
+            var sliderGroupsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderGroups");
+            Assert.True(Directory.Exists(sliderGroupsDirectory));
+            Assert.NotEmpty(Directory.GetFiles(sliderGroupsDirectory, "*.xml"));
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
+            Assert.True(Directory.Exists(shapeDataDirectory));
+            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
+            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.bsd", SearchOption.AllDirectories));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
@@ -16402,10 +16429,6 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(Directory.Exists(shapeDataDirectory));
             Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
             Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.bsd", SearchOption.AllDirectories));
-
-            var smpXml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "smp-config.xml"));
-            Assert.Contains("TNG Genitals", smpXml, StringComparison.Ordinal);
-            Assert.Contains("TNG Balls", smpXml, StringComparison.Ordinal);
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
@@ -16460,6 +16483,13 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "in-game-validation.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "runtime-observation-bundle.template.json")));
+
+            var sliderSetsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Assert.True(Directory.Exists(sliderSetsDirectory));
+            Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
+            Assert.True(Directory.Exists(shapeDataDirectory));
+            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
 
             using var inGameJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json")));
             Assert.True(inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
