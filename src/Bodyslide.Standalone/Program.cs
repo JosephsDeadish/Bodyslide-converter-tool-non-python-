@@ -633,6 +633,29 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
         catch (Exception fallbackEx)
         {
             WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: fallback failed for {desktopExePath} ({fallbackEx.GetType().Name}: {fallbackEx.Message})");
+            if (!launchedFromModOrganizer)
+            {
+                launchedProcess = null;
+                return false;
+            }
+        }
+
+        var minimalFallback = new ProcessStartInfo
+        {
+            FileName = desktopExePath,
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false
+        };
+        minimalFallback.ArgumentList.Add("--mo2-launcher");
+        try
+        {
+            launchedProcess = Process.Start(minimalFallback);
+            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: started exe candidate (minimal mo2 fallback) {desktopExePath}");
+            return launchedProcess is not null;
+        }
+        catch (Exception minimalEx)
+        {
+            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: minimal mo2 fallback failed for {desktopExePath} ({minimalEx.GetType().Name}: {minimalEx.Message})");
             launchedProcess = null;
             return false;
         }
