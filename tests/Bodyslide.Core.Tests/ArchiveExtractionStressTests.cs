@@ -57,6 +57,8 @@ public sealed class ArchiveExtractionStressTests
             }
         }
 
+    }
+
         [Fact]
         public void ExtractToTemporaryWorkspace_SevenZip_ReportsTotalEntriesAndBytes()
         {
@@ -93,7 +95,6 @@ public sealed class ArchiveExtractionStressTests
                 }
             }
         }
-    }
 
     [Theory]
     [InlineData("zip")]

@@ -1,3 +1,5 @@
+using Bodyslide.Core;
+
 namespace Bodyslide.Core.Tests;
 
 public sealed class SupportAssetDiscoveryTests
@@ -26,7 +28,9 @@ public sealed class SupportAssetDiscoveryTests
             File.WriteAllText(pluginPath, "plugin");
             File.WriteAllText(excludedPluginPath, "ignored");
 
-            var discovery = ConversionPipeline.DiscoverSupportAssets(sourceRoot, outputRoot);
+            var discovery = (LocalExportService.SupportAssetDiscoveryResult)typeof(LocalExportService)
+                .GetMethod("DiscoverSupportAssets", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .Invoke(null, [sourceRoot, outputRoot, null])!;
 
             Assert.Contains(pluginPath, discovery.PluginFiles);
             Assert.DoesNotContain(excludedPluginPath, discovery.PluginFiles);

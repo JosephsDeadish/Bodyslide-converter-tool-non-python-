@@ -22259,16 +22259,6 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(supportCoverageSignalsPath);
 
-        if (!string.IsNullOrWhiteSpace(zipPath))
-        {
-            if (File.Exists(zipPath))
-            {
-                File.Delete(zipPath);
-            }
-
-            ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
-        }
-
         var qualityReport = new ConversionQualityReport(
             DetectedSourceBody:        detectedBody.Body,
             BodyDetectionConfidence:   detectedBody.Confidence,

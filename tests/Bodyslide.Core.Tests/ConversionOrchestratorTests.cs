@@ -10607,6 +10607,31 @@ public sealed class PhysicsXmlTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task ConvertAsync_WithoutOutputZip_WritesFolderOnly()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(inputDirectory);
+        await File.WriteAllTextAsync(Path.Combine(inputDirectory, "armor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.True(Directory.Exists(outputDirectory));
+            Assert.False(File.Exists(outputDirectory + ".zip"));
+            Assert.DoesNotContain(result.OutputFiles, path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 }
 
 public sealed class VanillaArmorPipelineTests
