@@ -10753,7 +10753,15 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
 internal static class ArchiveExtractionHelper
 {
-    public sealed record ArchiveExtractionProgress(int ProcessedEntries, int? TotalEntries, string CurrentEntry);
+    public sealed record ArchiveExtractionProgress(int ProcessedEntries, int? TotalEntries, string CurrentEntry)
+    {
+        public long TotalBytesCopied { get; init; }
+        public long? TotalBytesEstimated { get; init; }
+        public long? EntryBytesCopied { get; init; }
+        public long? EntryBytesTotal { get; init; }
+        public long ElapsedMilliseconds { get; init; }
+        public double? ThroughputMiBPerSecond { get; init; }
+    }
 
     private static readonly string[] SupportedArchiveSuffixes = [".zip", ".7z", ".tar", ".tgz", ".tar.gz"];
     private const long EntryProgressReportIntervalBytes = 32L * 1024 * 1024;
@@ -10837,7 +10845,16 @@ internal static class ArchiveExtractionHelper
         using var archive = ZipFile.OpenRead(archivePath);
         var totalEntries = archive.Entries.Count();
         var processedEntries = 0;
+        long totalBytesCopied = 0;
+        var totalBytesEstimated = archive.Entries
+            .Where(static candidate =>
+                !string.IsNullOrWhiteSpace(candidate.FullName) &&
+                !(string.IsNullOrEmpty(candidate.Name) ||
+                  candidate.FullName.EndsWith('/') ||
+                  candidate.FullName.EndsWith('\\')))
+            .Sum(static candidate => Math.Max(0, candidate.Length));
         var lastProgressUtc = DateTime.MinValue;
+        var extractionStopwatch = Stopwatch.StartNew();
         foreach (var entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -10878,7 +10895,14 @@ internal static class ArchiveExtractionHelper
                 processedEntries,
                 totalEntries,
                 $"copying:{entry.FullName} (0/{FormatByteCount(entry.Length)})",
+                totalBytesCopied: totalBytesCopied,
+                totalBytesEstimated: totalBytesEstimated,
+                entryBytesCopied: 0,
+                entryBytesTotal: Math.Max(0, entry.Length),
+                extractionStopwatch: extractionStopwatch,
                 force: true);
+            var entryBaseBytes = totalBytesCopied;
+            var entryBytesCopied = 0L;
             using var entryStream = entry.Open();
             using var outputStream = File.Create(destinationPath);
             CopyStreamWithCancellation(
@@ -10892,16 +10916,34 @@ internal static class ArchiveExtractionHelper
                         return;
                     }
 
+                    entryBytesCopied = copiedBytes;
                     EmitArchiveProgress(
                         onProgress,
                         ref lastProgressUtc,
                         processedEntries,
                         totalEntries,
-                        $"copying:{entry.FullName} ({FormatByteCount(copiedBytes)}/{FormatByteCount(entry.Length)})");
+                        $"copying:{entry.FullName} ({FormatByteCount(copiedBytes)}/{FormatByteCount(entry.Length)})",
+                        totalBytesCopied: entryBaseBytes + copiedBytes,
+                        totalBytesEstimated: totalBytesEstimated,
+                        entryBytesCopied: copiedBytes,
+                        entryBytesTotal: Math.Max(0, entry.Length),
+                        extractionStopwatch: extractionStopwatch);
                 },
                 EntryProgressReportIntervalBytes);
+            totalBytesCopied = entryBaseBytes + entryBytesCopied;
             processedEntries++;
-            EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, totalEntries, entry.FullName, force: true);
+            EmitArchiveProgress(
+                onProgress,
+                ref lastProgressUtc,
+                processedEntries,
+                totalEntries,
+                entry.FullName,
+                totalBytesCopied: totalBytesCopied,
+                totalBytesEstimated: totalBytesEstimated,
+                entryBytesCopied: entryBytesCopied,
+                entryBytesTotal: Math.Max(0, entry.Length),
+                extractionStopwatch: extractionStopwatch,
+                force: true);
         }
     }
 
@@ -10920,7 +10962,9 @@ internal static class ArchiveExtractionHelper
         using var archive = SevenZipArchive.OpenArchive(archivePath, new ReaderOptions());
         int? totalEntries = null;
         var processedEntries = 0;
+        long totalBytesCopied = 0;
         var lastProgressUtc = DateTime.MinValue;
+        var extractionStopwatch = Stopwatch.StartNew();
         foreach (var entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -10944,7 +10988,20 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
-            EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, totalEntries, $"copying:{entry.Key}", force: true);
+            EmitArchiveProgress(
+                onProgress,
+                ref lastProgressUtc,
+                processedEntries,
+                totalEntries,
+                $"copying:{entry.Key}",
+                totalBytesCopied: totalBytesCopied,
+                totalBytesEstimated: null,
+                entryBytesCopied: 0,
+                entryBytesTotal: entry.Size,
+                extractionStopwatch: extractionStopwatch,
+                force: true);
+            var entryBaseBytes = totalBytesCopied;
+            var entryBytesCopied = 0L;
             using var entryStream = entry.OpenEntryStream();
             using var outputStream = File.Create(destinationPath);
             CopyStreamWithCancellation(
@@ -10958,16 +11015,34 @@ internal static class ArchiveExtractionHelper
                         return;
                     }
 
+                    entryBytesCopied = copiedBytes;
                     EmitArchiveProgress(
                         onProgress,
                         ref lastProgressUtc,
                         processedEntries,
                         totalEntries,
-                        $"copying:{entry.Key} ({FormatByteCount(copiedBytes)})");
+                        $"copying:{entry.Key} ({FormatByteCount(copiedBytes)})",
+                        totalBytesCopied: entryBaseBytes + copiedBytes,
+                        totalBytesEstimated: null,
+                        entryBytesCopied: copiedBytes,
+                        entryBytesTotal: entry.Size,
+                        extractionStopwatch: extractionStopwatch);
                 },
                 EntryProgressReportIntervalBytes);
+            totalBytesCopied = entryBaseBytes + entryBytesCopied;
             processedEntries++;
-            EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, totalEntries, entry.Key, force: true);
+            EmitArchiveProgress(
+                onProgress,
+                ref lastProgressUtc,
+                processedEntries,
+                totalEntries,
+                entry.Key,
+                totalBytesCopied: totalBytesCopied,
+                totalBytesEstimated: null,
+                entryBytesCopied: entryBytesCopied,
+                entryBytesTotal: entry.Size,
+                extractionStopwatch: extractionStopwatch,
+                force: true);
 
             if (entry.LastModifiedTime is { } lastModified)
             {
@@ -10991,7 +11066,9 @@ internal static class ArchiveExtractionHelper
         using var reader = new TarReader(tarStream, leaveOpen: true);
         TarEntry? entry;
         var processedEntries = 0;
+        long totalBytesCopied = 0;
         var lastProgressUtc = DateTime.MinValue;
+        var extractionStopwatch = Stopwatch.StartNew();
         while ((entry = reader.GetNextEntry()) is not null)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -11028,7 +11105,20 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
-            EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, null, $"copying:{entry.Name}", force: true);
+            EmitArchiveProgress(
+                onProgress,
+                ref lastProgressUtc,
+                processedEntries,
+                null,
+                $"copying:{entry.Name}",
+                totalBytesCopied: totalBytesCopied,
+                totalBytesEstimated: null,
+                entryBytesCopied: 0,
+                entryBytesTotal: null,
+                extractionStopwatch: extractionStopwatch,
+                force: true);
+            var entryBaseBytes = totalBytesCopied;
+            var entryBytesCopied = 0L;
             using var outputStream = File.Create(destinationPath);
             if (entry.DataStream is { } entryStream)
             {
@@ -11043,17 +11133,35 @@ internal static class ArchiveExtractionHelper
                             return;
                         }
 
+                        entryBytesCopied = copiedBytes;
                         EmitArchiveProgress(
                             onProgress,
                             ref lastProgressUtc,
                             processedEntries,
                             null,
-                            $"copying:{entry.Name} ({FormatByteCount(copiedBytes)})");
+                            $"copying:{entry.Name} ({FormatByteCount(copiedBytes)})",
+                            totalBytesCopied: entryBaseBytes + copiedBytes,
+                            totalBytesEstimated: null,
+                            entryBytesCopied: copiedBytes,
+                            entryBytesTotal: null,
+                            extractionStopwatch: extractionStopwatch);
                     },
                     EntryProgressReportIntervalBytes);
             }
+            totalBytesCopied = entryBaseBytes + entryBytesCopied;
             processedEntries++;
-            EmitArchiveProgress(onProgress, ref lastProgressUtc, processedEntries, null, entry.Name, force: true);
+            EmitArchiveProgress(
+                onProgress,
+                ref lastProgressUtc,
+                processedEntries,
+                null,
+                entry.Name,
+                totalBytesCopied: totalBytesCopied,
+                totalBytesEstimated: null,
+                entryBytesCopied: entryBytesCopied,
+                entryBytesTotal: null,
+                extractionStopwatch: extractionStopwatch,
+                force: true);
 
             File.SetLastWriteTimeUtc(destinationPath, entry.ModificationTime.UtcDateTime);
         }
@@ -11125,6 +11233,11 @@ internal static class ArchiveExtractionHelper
         int processedEntries,
         int? totalEntries,
         string currentEntry,
+        long totalBytesCopied = 0,
+        long? totalBytesEstimated = null,
+        long? entryBytesCopied = null,
+        long? entryBytesTotal = null,
+        Stopwatch? extractionStopwatch = null,
         bool force = false)
     {
         if (onProgress is null)
@@ -11139,7 +11252,19 @@ internal static class ArchiveExtractionHelper
         }
 
         lastProgressUtc = nowUtc;
-        onProgress(new ArchiveExtractionProgress(processedEntries, totalEntries, currentEntry));
+        var elapsedMilliseconds = extractionStopwatch?.ElapsedMilliseconds ?? 0;
+        double? throughputMiBPerSecond = elapsedMilliseconds > 0 && totalBytesCopied > 0
+            ? (totalBytesCopied / 1024d / 1024d) / (elapsedMilliseconds / 1000d)
+            : null;
+        onProgress(new ArchiveExtractionProgress(processedEntries, totalEntries, currentEntry)
+        {
+            TotalBytesCopied = totalBytesCopied,
+            TotalBytesEstimated = totalBytesEstimated,
+            EntryBytesCopied = entryBytesCopied,
+            EntryBytesTotal = entryBytesTotal,
+            ElapsedMilliseconds = elapsedMilliseconds,
+            ThroughputMiBPerSecond = throughputMiBPerSecond
+        });
     }
 }
 
