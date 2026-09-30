@@ -522,7 +522,7 @@ public sealed class MainForm : Form
             var inputPath = _inputTextBox.Text.Trim();
             ClearInspectionTab(ShouldAutoInspectInputPath(inputPath)
                 ? "Input changed. Auto-inspecting detection and compatibility details..."
-                : "Input changed. Auto-inspection is limited to local .nif/.esp/.esm/.esl files; use “Inspect input now” on the right side of Input for folders or archives.");
+                : "Input changed. Auto-inspection is limited to local .nif/.esp/.esm/.esl files; use “Inspect input now” for folders or archives.");
             UpdateOutputHint();
             ScheduleAutoInspectInput();
         };
@@ -1636,16 +1636,16 @@ public sealed class MainForm : Form
             _cacheInspectionInitialized = true;
             await InspectLearningCacheAsync(showDialogs: false, switchToTab: false);
         };
-        AttachCopyHotkeys(_inspectListView);
-        AttachCopyHotkeys(_summaryListView);
-        AttachCopyHotkeys(_pipelineListView);
-        AttachCopyHotkeys(_guidanceListView);
-        AttachCopyHotkeys(_reportsListView);
-        AttachCopyHotkeys(_catalogListView);
-        AttachCopyHotkeys(_readinessListView);
-        AttachCopyHotkeys(_artifactsListView);
-        AttachCopyHotkeys(_cacheListView);
-        _logTextBox.KeyDown += OnCopyKeyDown;
+        AttachListViewCopySupport(_inspectListView);
+        AttachListViewCopySupport(_summaryListView);
+        AttachListViewCopySupport(_pipelineListView);
+        AttachListViewCopySupport(_guidanceListView);
+        AttachListViewCopySupport(_reportsListView);
+        AttachListViewCopySupport(_catalogListView);
+        AttachListViewCopySupport(_readinessListView);
+        AttachListViewCopySupport(_artifactsListView);
+        AttachListViewCopySupport(_cacheListView);
+        AttachTextCopySupport(_logTextBox);
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
         bottomPanel.Controls.Add(_progressDetailsLabel, 0, 2);
@@ -3330,7 +3330,7 @@ public sealed class MainForm : Form
             _lastBatchReportPath = GetFirstExistingOutputFile(results, "batch-report.json");
             UpdatePathActionStates();
             _ = await LoadPreviewInAppWithTimeoutAsync(_lastPreviewPath);
-            ShowProgressValue(Math.Max(_progressBar.Value, 92), "Preview ready. Building summary and report views...");
+            ShowProgressValue(Math.Max(_progressBar.Value, 92), "Preview ready. Building overview and report views...");
             await Task.Yield();
             var workflowSnapshot = await BuildWorkflowSnapshotAsync(results, _lastPreviewPath, cancellationToken);
             PopulateSummaryTab(workflowSnapshot.SummaryRows);
@@ -4262,7 +4262,7 @@ public sealed class MainForm : Form
     private void SetBusyState(bool isBusy)
     {
         _convertButton.Enabled = !isBusy;
-        _convertButton.Text = isBusy ? "Converting..." : "Start conversion";
+        _convertButton.Text = isBusy ? "CONVERTING..." : "START CONVERSION";
         _cancelButton.Enabled = isBusy && _activeConversion is not null;
         _clearLogButton.Enabled = !isBusy;
         _copyCurrentViewButton.Enabled = !isBusy;
@@ -4432,7 +4432,7 @@ public sealed class MainForm : Form
             AppendLog($"Loaded previous result from {sourceLabel}: {selectedFolder}");
             if (previewPath is null)
             {
-                AppendLog("Loaded reports/artifacts without an embedded preview; review Summary recommendations, Reports, and Files for packaging/runtime details.");
+                AppendLog("Loaded reports/artifacts without an embedded preview; review Overview recommendations, Reports, and Files for packaging/runtime details.");
             }
 
             AppendLog(BuildValidationOutcomeLogMessage([selectedFolder], previewPath, guidanceNeedsReview));
@@ -5061,9 +5061,86 @@ public sealed class MainForm : Form
         _logTextBox.Clear();
     }
 
-    private static void AttachCopyHotkeys(ListView listView)
+    private static void AttachListViewCopySupport(ListView listView)
     {
         listView.KeyDown += OnCopyKeyDown;
+
+        var contextMenu = new ContextMenuStrip();
+        var copySelectedItem = new ToolStripMenuItem("Copy selected row(s)");
+        var copyAllItem = new ToolStripMenuItem("Copy all rows");
+
+        copySelectedItem.Click += (_, _) =>
+        {
+            if (listView.SelectedItems.Count == 0)
+            {
+                return;
+            }
+
+            Clipboard.SetText(BuildListViewClipboardText(listView));
+        };
+        copyAllItem.Click += (_, _) => Clipboard.SetText(BuildAllListViewClipboardText(listView));
+        contextMenu.Opening += (_, _) =>
+        {
+            copySelectedItem.Enabled = listView.SelectedItems.Count > 0;
+            copyAllItem.Enabled = listView.Items.Count > 0;
+        };
+        contextMenu.Items.Add(copySelectedItem);
+        contextMenu.Items.Add(copyAllItem);
+        listView.ContextMenuStrip = contextMenu;
+
+        listView.MouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Right)
+            {
+                return;
+            }
+
+            var hit = listView.HitTest(e.Location);
+            if (hit.Item is null)
+            {
+                return;
+            }
+
+            if (!hit.Item.Selected)
+            {
+                listView.SelectedItems.Clear();
+                hit.Item.Selected = true;
+            }
+        };
+    }
+
+    private static void AttachTextCopySupport(TextBox textBox)
+    {
+        textBox.KeyDown += OnCopyKeyDown;
+
+        var contextMenu = new ContextMenuStrip();
+        var copySelectionItem = new ToolStripMenuItem("Copy");
+        var copyAllItem = new ToolStripMenuItem("Copy all");
+
+        copySelectionItem.Click += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(textBox.SelectedText))
+            {
+                return;
+            }
+
+            Clipboard.SetText(textBox.SelectedText);
+        };
+        copyAllItem.Click += (_, _) =>
+        {
+            if (!string.IsNullOrWhiteSpace(textBox.Text))
+            {
+                Clipboard.SetText(textBox.Text);
+            }
+        };
+        contextMenu.Opening += (_, _) =>
+        {
+            copySelectionItem.Enabled = !string.IsNullOrWhiteSpace(textBox.SelectedText);
+            copyAllItem.Enabled = !string.IsNullOrWhiteSpace(textBox.Text);
+        };
+        contextMenu.Items.Add(copySelectionItem);
+        contextMenu.Items.Add(copyAllItem);
+        textBox.ContextMenuStrip = contextMenu;
     }
 
     private static void OnCopyKeyDown(object? sender, KeyEventArgs e)
@@ -5117,6 +5194,24 @@ public sealed class MainForm : Form
         }
 
         foreach (var item in selectedRows)
+        {
+            var values = item.SubItems.Cast<ListViewItem.ListViewSubItem>().Select(static subItem => subItem.Text).ToArray();
+            lines.Add(string.Join('\t', values));
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string BuildAllListViewClipboardText(ListView listView)
+    {
+        var headers = listView.Columns.Cast<ColumnHeader>().Select(static header => header.Text).ToArray();
+        var lines = new List<string>();
+        if (headers.Length > 0)
+        {
+            lines.Add(string.Join('\t', headers));
+        }
+
+        foreach (var item in listView.Items.Cast<ListViewItem>())
         {
             var values = item.SubItems.Cast<ListViewItem.ListViewSubItem>().Select(static subItem => subItem.Text).ToArray();
             lines.Add(string.Join('\t', values));
