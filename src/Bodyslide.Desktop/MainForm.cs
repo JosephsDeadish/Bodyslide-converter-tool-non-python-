@@ -3216,14 +3216,8 @@ public sealed class MainForm : Form
                     progressUnits = Math.Min(total, completed + stageFraction);
                 }
 
-                if (progressUnits < lastProgressUnits)
-                {
-                    progressUnits = lastProgressUnits;
-                }
-                else
-                {
-                    lastProgressUnits = progressUnits;
-                }
+                progressUnits = ProgressDisplayMath.MonotonicProgressUnits(progressUnits, lastProgressUnits);
+                lastProgressUnits = progressUnits;
 
                 var percent = (int)Math.Round(progressUnits / total * 100d, MidpointRounding.AwayFromZero);
                 var activeItem = update.IsItemCompleted
@@ -3293,16 +3287,10 @@ public sealed class MainForm : Form
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
                 var stageIndex = update.IsItemCompleted
-                    ? Math.Max(1, Math.Min(Math.Max(update.StageCount, 1), update.StageCount))
+                    ? Math.Max(1, update.StageCount)
                     : Math.Clamp(update.StageIndex, 1, Math.Max(update.StageCount, 1));
-                if (stageIndex < lastStageIndex)
-                {
-                    stageIndex = lastStageIndex;
-                }
-                else
-                {
-                    lastStageIndex = stageIndex;
-                }
+                stageIndex = ProgressDisplayMath.MonotonicStageIndex(stageIndex, lastStageIndex);
+                lastStageIndex = stageIndex;
 
                 var displayUpdate = update with { StageIndex = stageIndex };
                 var stageDisplay = BuildProgressStageDisplay(displayUpdate);
