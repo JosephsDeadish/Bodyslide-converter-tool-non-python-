@@ -21296,7 +21296,7 @@ internal sealed class LocalExportService(
             armor.SourcePath,
             outputDirectory,
             request.SharedPluginOutputDirectory);
-        var assetOutputDirectory = request.SharedPluginOutputDirectory ?? outputDirectory;
+        var assetOutputDirectory = outputDirectory;
         var copiedSupportAssets = await CopySupportAssetsAsync(
             armor,
             assetOutputDirectory,
