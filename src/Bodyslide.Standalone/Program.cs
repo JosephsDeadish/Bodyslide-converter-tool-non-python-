@@ -301,6 +301,12 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     if (!string.IsNullOrWhiteSpace(skeletonNif))
     {
         skeletonNif = skeletonNif.Trim().Trim('"');
+        if (!File.Exists(skeletonNif) && !Directory.Exists(skeletonNif))
+        {
+            error = $"Could not find a skeleton .nif, folder, or related support file at '{skeletonNif}'.";
+            return false;
+        }
+
         if (!SkeletonSupportPathResolver.TryResolveSkeletonNifPath(skeletonNif, out var resolvedSkeletonNif))
         {
             error = $"Could not resolve a usable skeleton .nif from '{skeletonNif}'. Provide a skeleton .nif directly, an XP32/XPMSSE mod folder, or a related .pex file from the same mod.";
@@ -363,6 +369,20 @@ static bool ShouldPauseOnExit(string[] args)
     return args.Length == 1 && !args[0].StartsWith("--", StringComparison.Ordinal);
 }
 
+static int ResolveModManagerLaunchEarlyExitWaitMs()
+{
+    const int defaultWaitMs = 1500;
+    const string environmentVariable = "BODYSLIDE_MOD_MANAGER_EARLY_EXIT_WAIT_MS";
+
+    var raw = Environment.GetEnvironmentVariable(environmentVariable);
+    if (!int.TryParse(raw, out var parsed) || parsed <= 0)
+    {
+        return defaultWaitMs;
+    }
+
+    return Math.Clamp(parsed, 250, 10000);
+}
+
 static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosticsPath, bool strictLauncherMode)
 {
     if (!OperatingSystem.IsWindows())
@@ -370,7 +390,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
         return false;
     }
 
-    const int ModManagerLaunchEarlyExitWaitMs = 1500;
+    var modManagerLaunchEarlyExitWaitMs = ResolveModManagerLaunchEarlyExitWaitMs();
     StandaloneDesktopLaunchDecision? launchDecision = null;
     string? currentExeFullPath = null;
     string? decisionDiagnosticsPath = null;
@@ -409,7 +429,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
             try
             {
-                if (launchedProcess.WaitForExit(ModManagerLaunchEarlyExitWaitMs) && launchedProcess.ExitCode != 0)
+                if (launchedProcess.WaitForExit(modManagerLaunchEarlyExitWaitMs) && launchedProcess.ExitCode != 0)
                 {
                     WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: {candidateKind} exited early with code {launchedProcess.ExitCode}: {candidatePath}");
                     return true;

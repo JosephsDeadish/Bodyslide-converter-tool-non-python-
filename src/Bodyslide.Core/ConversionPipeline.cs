@@ -22043,7 +22043,8 @@ internal sealed class LocalExportService(
             outputFiles,
             bodySlideProject,
             pluginAnalysis,
-            raceCompatibility);
+            raceCompatibility,
+            skipOutputZipValidation: true);
 
         await File.WriteAllTextAsync(
             previewPath,
@@ -22407,6 +22408,8 @@ internal sealed class LocalExportService(
                     var lowDest  = Path.Combine(nifDirectory, Path.GetFileName(pair.LowWeightMesh)!);
                     var highDest = Path.Combine(nifDirectory, Path.GetFileName(pair.HighWeightMesh)!);
 
+                    Directory.CreateDirectory(Path.GetDirectoryName(lowDest)!);
+                    Directory.CreateDirectory(Path.GetDirectoryName(highDest)!);
                     await CopyNifAsync(pair.LowWeightMesh, lowDest, mesh, cancellationToken);
                     await CopyNifAsync(pair.HighWeightMesh, highDest, mesh, cancellationToken);
                     written.Add(lowDest);
@@ -22421,12 +22424,13 @@ internal sealed class LocalExportService(
                     var sourceMesh  = pair.LowWeightMesh ?? pair.HighWeightMesh!;
                     var isSourceLow = pair.LowWeightMesh is not null; // true → have _0, missing _1
                     var ext         = Path.GetExtension(sourceMesh);
-
                     var destSource = Path.Combine(nifDirectory, Path.GetFileName(sourceMesh)!);
                     var synthName  = pair.BaseName + (isSourceLow ? "_1" : "_0") + ext;
                     var destSynth  = Path.Combine(nifDirectory, synthName);
 
                     // Write the existing half with regular morphs.
+                    Directory.CreateDirectory(Path.GetDirectoryName(destSource)!);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destSynth)!);
                     await CopyNifAsync(sourceMesh, destSource, mesh, cancellationToken);
 
                     // Write the synthesised half with weight-scaled morphs.
@@ -22452,6 +22456,7 @@ internal sealed class LocalExportService(
             if (pairedFiles.Contains(meshFile)) continue;
 
             var dest = Path.Combine(nifDirectory, Path.GetFileName(meshFile)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             await CopyNifAsync(meshFile, dest, mesh, cancellationToken);
             written.Add(dest);
             writtenBySourceMesh[meshFile] = dest;
@@ -26249,7 +26254,8 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> outputFiles,
         BodySlideProject bodySlideProject,
         PluginAnalysisResult pluginAnalysis,
-        RaceCompatibilityReport? raceCompatibility)
+        RaceCompatibilityReport? raceCompatibility,
+        bool skipOutputZipValidation = false)
     {
         var issues = new List<ConversionValidationIssue>();
         var physicsCompatibility = BuildPhysicsCompatibilityReport(
@@ -26730,7 +26736,8 @@ internal sealed class LocalExportService(
             outputDirectory,
             outputFiles,
             bodySlideProject,
-            pluginAnalysis));
+            pluginAnalysis,
+            skipOutputZipValidation));
 
         var highSeverityCount = issues.Count(issue => issue.Severity.Equals("high", StringComparison.OrdinalIgnoreCase));
         var mediumSeverityCount = issues.Count(issue => issue.Severity.Equals("medium", StringComparison.OrdinalIgnoreCase));
@@ -26757,7 +26764,8 @@ internal sealed class LocalExportService(
         string outputDirectory,
         IReadOnlyList<string> outputFiles,
         BodySlideProject bodySlideProject,
-        PluginAnalysisResult pluginAnalysis)
+        PluginAnalysisResult pluginAnalysis,
+        bool skipOutputZipValidation = false)
     {
         var issues = new List<ConversionValidationIssue>();
         var safeBodyToken = BuildSafeBodyToken(request.TargetBody);
@@ -27707,7 +27715,7 @@ internal sealed class LocalExportService(
         AddMissingFileIssue("meta.ini", "missing-meta-ini", "low",
             "meta.ini was not generated, so Mod Organizer 2 package metadata is missing from the packaged output.");
 
-        if (request.OutputZip)
+        if (request.OutputZip && !skipOutputZipValidation)
         {
             var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
             if (!HasFile(zipPath))

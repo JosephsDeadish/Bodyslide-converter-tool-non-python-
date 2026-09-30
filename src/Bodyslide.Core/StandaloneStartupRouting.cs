@@ -21,11 +21,11 @@ public static class StandaloneStartupRouting
             !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
 
         var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
-        var launcherSignal = !explicitCliLaunch && IsExplicitLauncherSignal(args, hasEnvironmentVariable);
-        var modManagerLaunch = !explicitCliLaunch && IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
+        var launcherSignal = IsExplicitLauncherSignal(args, hasEnvironmentVariable);
+        var modManagerLaunch = IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
         var shouldAttemptDesktopHandoff = strictLauncherMode
-            ? args.Count == 0 || launcherSignal
-            : !explicitCliLaunch;
+            ? args.Count == 0 || launcherSignal || modManagerLaunch
+            : launcherSignal || !explicitCliLaunch;
         var routingReason = strictLauncherMode
             ? shouldAttemptDesktopHandoff
                 ? launcherSignal
@@ -160,6 +160,7 @@ public static class StandaloneStartupRouting
     public static bool IsExplicitLauncherSignal(IReadOnlyList<string> args, Func<string, bool> hasEnvironmentVariable) =>
         IsLikelyModManagerEnvironment(hasEnvironmentVariable) ||
         args.Any(IsModManagerLauncherArgument) ||
+        args.Any(IsLikelyLauncherPathArgument) ||
         HasLauncherPathOptionArgument(args);
 
     public static bool IsLikelyModManagerLaunch(
@@ -295,13 +296,7 @@ public static class StandaloneStartupRouting
                 return false;
             }
 
-            if (option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
-                option.Equals("mo2", StringComparison.OrdinalIgnoreCase) ||
-                option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
-                option.Equals("modorganizer", StringComparison.OrdinalIgnoreCase) ||
-                option.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
-                option.Equals("vortex", StringComparison.OrdinalIgnoreCase) ||
-                option.Equals("from-modorganizer", StringComparison.OrdinalIgnoreCase))
+            if (IsModManagerLauncherArgument(arg))
             {
                 return false;
             }
@@ -321,6 +316,7 @@ public static class StandaloneStartupRouting
 
     private static bool HasStandaloneConversionSwitches(IReadOnlyList<string> args)
     {
+        var hasModManagerLauncherArgument = args.Any(IsModManagerLauncherArgument);
         var hasTarget = false;
         var hasConversionModifier = false;
 
@@ -340,7 +336,7 @@ public static class StandaloneStartupRouting
 
             if (option.Equals("preset", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("presets", StringComparison.OrdinalIgnoreCase) ||
-                option.Equals("profile", StringComparison.OrdinalIgnoreCase) ||
+                (option.Equals("profile", StringComparison.OrdinalIgnoreCase) && !hasModManagerLauncherArgument) ||
                 option.Equals("source", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("physics", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("cache-path", StringComparison.OrdinalIgnoreCase) ||

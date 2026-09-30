@@ -174,13 +174,9 @@ public static class SkeletonSupportPathResolver
 
     private static IEnumerable<string> EnumerateSkeletonCandidates(string directory, SearchOption searchOption)
     {
-        foreach (var exact in Directory.EnumerateFiles(directory, "skeleton*.nif", searchOption))
-        {
-            yield return exact;
-        }
-
         foreach (var heuristic in Directory.EnumerateFiles(directory, "*.nif", searchOption)
-                     .Where(IsHeuristicSkeletonCandidate))
+                     .Where(file => Path.GetFileName(file).StartsWith("skeleton", StringComparison.OrdinalIgnoreCase) ||
+                                    IsHeuristicSkeletonCandidate(file)))
         {
             yield return heuristic;
         }
