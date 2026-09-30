@@ -564,29 +564,29 @@ static IReadOnlyList<string> EnumerateDirectoryCandidates(string directory, stri
         return [];
     }
 
-    static IReadOnlyList<string> EnumerateDirectoryCandidatesRecursive(string directory, string pattern)
+    try
     {
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-        {
-            return [];
-        }
+        return Directory
+            .EnumerateFiles(directory, pattern, SearchOption.TopDirectoryOnly)
+            .ToArray();
+    }
+    catch
+    {
+        return [];
+    }
+}
 
-        try
-        {
-            return Directory
-                .EnumerateFiles(directory, pattern, SearchOption.AllDirectories)
-                .ToArray();
-        }
-        catch
-        {
-            return [];
-        }
+static IReadOnlyList<string> EnumerateDirectoryCandidatesRecursive(string directory, string pattern)
+{
+    if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+    {
+        return [];
     }
 
     try
     {
         return Directory
-            .EnumerateFiles(directory, pattern, SearchOption.TopDirectoryOnly)
+            .EnumerateFiles(directory, pattern, SearchOption.AllDirectories)
             .ToArray();
     }
     catch
@@ -846,113 +846,6 @@ static string? ResolveStartupDiagnosticsPath(IReadOnlyList<string> args)
             continue;
         }
 
-        static bool IsStrictLauncherModeEnabled(IReadOnlyList<string> args)
-        {
-            if (TryReadStandaloneBooleanOption(args, "strict-launcher-mode", out var parsed))
-            {
-                return parsed;
-            }
-
-            return IsStandaloneDiagnosticsFlagEnabled("SLIDESMITH_STRICT_LAUNCHER_MODE");
-        }
-
-        static bool TryReadStandaloneBooleanOption(IReadOnlyList<string> args, string optionName, out bool parsed)
-        {
-            parsed = false;
-            for (var index = 0; index < args.Count; index++)
-            {
-                var arg = args[index];
-                if (string.IsNullOrWhiteSpace(arg))
-                {
-                    continue;
-                }
-
-                if (arg.StartsWith($"--{optionName}=", StringComparison.OrdinalIgnoreCase) ||
-                    arg.StartsWith($"--{optionName}:", StringComparison.OrdinalIgnoreCase))
-                {
-                    var separatorIndex = arg.IndexOfAny(['=', ':']);
-                    if (separatorIndex >= 0 && separatorIndex < arg.Length - 1)
-                    {
-                        return TryParseBooleanOption(arg[(separatorIndex + 1)..], out parsed);
-                    }
-
-                    parsed = true;
-                    return true;
-                }
-
-                if (!IsStandaloneOptionMatch(arg, optionName))
-                {
-                    continue;
-                }
-
-                if (index + 1 < args.Count &&
-                    !TryReadLongOptionName(args[index + 1], out _) &&
-                    TryParseBooleanOption(args[index + 1], out parsed))
-                {
-                    return true;
-                }
-
-                parsed = true;
-                return true;
-            }
-
-            return false;
-        }
-
-        static string? ResolveLauncherDecisionDiagnosticsPath(
-            IReadOnlyList<string> args,
-            string? startupDiagnosticsPath,
-            bool strictLauncherMode)
-        {
-            for (var index = 0; index < args.Count; index++)
-            {
-                var arg = args[index];
-                if (string.IsNullOrWhiteSpace(arg))
-                {
-                    continue;
-                }
-
-                if (arg.StartsWith("--launcher-decision-diagnostics=", StringComparison.OrdinalIgnoreCase))
-                {
-                    return NormalizeDiagnosticsPath(arg["--launcher-decision-diagnostics=".Length..]);
-                }
-
-                if (!IsStandaloneOptionMatch(arg, "launcher-decision-diagnostics"))
-                {
-                    continue;
-                }
-
-                if (index + 1 < args.Count && !TryReadLongOptionName(args[index + 1], out _))
-                {
-                    return NormalizeDiagnosticsPath(args[index + 1]);
-                }
-            }
-
-            var fromEnvironment = NormalizeDiagnosticsPath(Environment.GetEnvironmentVariable("SLIDESMITH_LAUNCHER_DECISION_DIAGNOSTICS"));
-            if (!string.IsNullOrWhiteSpace(fromEnvironment))
-            {
-                return fromEnvironment;
-            }
-
-            if (!strictLauncherMode)
-            {
-                return null;
-            }
-
-            if (!string.IsNullOrWhiteSpace(startupDiagnosticsPath))
-            {
-                return Path.ChangeExtension(startupDiagnosticsPath, ".decision.json");
-            }
-
-            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (!string.IsNullOrWhiteSpace(localAppData))
-            {
-                return Path.Combine(localAppData, "SlideSmith", "startup-launch-decision.json");
-            }
-
-            return Path.Combine(Path.GetTempPath(), "SlideSmith", "startup-launch-decision.json");
-        }
-
         if (arg.StartsWith("--startup-diagnostics=", StringComparison.OrdinalIgnoreCase))
         {
             return NormalizeDiagnosticsPath(arg["--startup-diagnostics=".Length..]);
@@ -991,6 +884,113 @@ static string? ResolveStartupDiagnosticsPath(IReadOnlyList<string> args)
     }
 
     return Path.Combine(Path.GetTempPath(), "SlideSmith", "startup-launch-diagnostics.log");
+}
+
+static bool IsStrictLauncherModeEnabled(IReadOnlyList<string> args)
+{
+    if (TryReadStandaloneBooleanOption(args, "strict-launcher-mode", out var parsed))
+    {
+        return parsed;
+    }
+
+    return IsStandaloneDiagnosticsFlagEnabled("SLIDESMITH_STRICT_LAUNCHER_MODE");
+}
+
+static bool TryReadStandaloneBooleanOption(IReadOnlyList<string> args, string optionName, out bool parsed)
+{
+    parsed = false;
+    for (var index = 0; index < args.Count; index++)
+    {
+        var arg = args[index];
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            continue;
+        }
+
+        if (arg.StartsWith($"--{optionName}=", StringComparison.OrdinalIgnoreCase) ||
+            arg.StartsWith($"--{optionName}:", StringComparison.OrdinalIgnoreCase))
+        {
+            var separatorIndex = arg.IndexOfAny(['=', ':']);
+            if (separatorIndex >= 0 && separatorIndex < arg.Length - 1)
+            {
+                return TryParseBooleanOption(arg[(separatorIndex + 1)..], out parsed);
+            }
+
+            parsed = true;
+            return true;
+        }
+
+        if (!IsStandaloneOptionMatch(arg, optionName))
+        {
+            continue;
+        }
+
+        if (index + 1 < args.Count &&
+            !TryReadLongOptionName(args[index + 1], out _) &&
+            TryParseBooleanOption(args[index + 1], out parsed))
+        {
+            return true;
+        }
+
+        parsed = true;
+        return true;
+    }
+
+    return false;
+}
+
+static string? ResolveLauncherDecisionDiagnosticsPath(
+    IReadOnlyList<string> args,
+    string? startupDiagnosticsPath,
+    bool strictLauncherMode)
+{
+    for (var index = 0; index < args.Count; index++)
+    {
+        var arg = args[index];
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            continue;
+        }
+
+        if (arg.StartsWith("--launcher-decision-diagnostics=", StringComparison.OrdinalIgnoreCase))
+        {
+            return NormalizeDiagnosticsPath(arg["--launcher-decision-diagnostics=".Length..]);
+        }
+
+        if (!IsStandaloneOptionMatch(arg, "launcher-decision-diagnostics"))
+        {
+            continue;
+        }
+
+        if (index + 1 < args.Count && !TryReadLongOptionName(args[index + 1], out _))
+        {
+            return NormalizeDiagnosticsPath(args[index + 1]);
+        }
+    }
+
+    var fromEnvironment = NormalizeDiagnosticsPath(Environment.GetEnvironmentVariable("SLIDESMITH_LAUNCHER_DECISION_DIAGNOSTICS"));
+    if (!string.IsNullOrWhiteSpace(fromEnvironment))
+    {
+        return fromEnvironment;
+    }
+
+    if (!strictLauncherMode)
+    {
+        return null;
+    }
+
+    if (!string.IsNullOrWhiteSpace(startupDiagnosticsPath))
+    {
+        return Path.ChangeExtension(startupDiagnosticsPath, ".decision.json");
+    }
+
+    var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    if (!string.IsNullOrWhiteSpace(localAppData))
+    {
+        return Path.Combine(localAppData, "SlideSmith", "startup-launch-decision.json");
+    }
+
+    return Path.Combine(Path.GetTempPath(), "SlideSmith", "startup-launch-decision.json");
 }
 
 static string? NormalizeDiagnosticsPath(string? value)

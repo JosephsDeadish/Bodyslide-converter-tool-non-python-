@@ -1698,13 +1698,18 @@ public sealed class MainForm : Form
             if (!_startupResultLoadHandled && startupPlan.ShouldLoadStartupResult)
             {
                 _startupResultLoadHandled = true;
+                var startupOutputDirectory = _launchOptions.StartupOutputDirectory;
+                if (string.IsNullOrWhiteSpace(startupOutputDirectory))
+                {
+                    return;
+                }
                 UpdateStartupHandoffTelemetry(
                     _launchOptions.FromModOrganizerLauncher ? "Mod manager handoff" : "Launcher handoff",
-                    $"Startup result directory: {_launchOptions.StartupOutputDirectory}");
+                    $"Startup result directory: {startupOutputDirectory}");
                 await RunStartupOperationWithTimeoutAsync(
                     "loading startup result",
                     cancellationToken => LoadResultDirectoryAsync(
-                        _launchOptions.StartupOutputDirectory,
+                        startupOutputDirectory,
                         _launchOptions.FromModOrganizerLauncher ? "mod manager launcher argument" : "launcher argument",
                         cancellationToken));
                 return;
@@ -3193,7 +3198,7 @@ public sealed class MainForm : Form
                             : estimatedBytes;
                     }
 
-                    if (update.ExtractionThroughputMiBPerSecond is > 0d throughput)
+                    if (update.ExtractionThroughputMiBPerSecond is > 0d and var throughput)
                     {
                         runtimeStressArchiveThroughputSamples.Add(throughput);
                     }
@@ -4168,7 +4173,7 @@ public sealed class MainForm : Form
             }
         }
 
-        if (update.ExtractionThroughputMiBPerSecond is > 0d throughput)
+        if (update.ExtractionThroughputMiBPerSecond is > 0d and var throughput)
         {
             parts.Add($"{throughput:0.##} MiB/s");
         }
