@@ -15,6 +15,7 @@ internal static class DesktopLaunchPathResolver
         var candidateDirectories = new List<string>
         {
             normalizedExecutableDirectory,
+            parentDirectory ?? string.Empty,
             Path.Combine(normalizedExecutableDirectory, "desktop"),
             Path.Combine(normalizedExecutableDirectory, "bin"),
             Path.Combine(normalizedExecutableDirectory, "publish")

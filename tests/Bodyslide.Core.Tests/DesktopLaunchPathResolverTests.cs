@@ -9,6 +9,7 @@ public sealed class DesktopLaunchPathResolverTests
 
         var directories = DesktopLaunchPathResolver.GetLikelyDesktopCandidateDirectories(executableDirectory);
 
+        Assert.Contains(Path.GetDirectoryName(executableDirectory)!, directories);
         Assert.Contains(Path.Combine(executableDirectory, "desktop"), directories);
         Assert.Contains(Path.Combine(Path.GetDirectoryName(executableDirectory)!, "desktop"), directories);
     }
