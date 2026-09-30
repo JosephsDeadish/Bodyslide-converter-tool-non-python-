@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text.Json;
 
 namespace Bodyslide.Core;
 
@@ -6,6 +7,15 @@ public sealed record RuntimeReadinessCheck(string Area, string Status, string De
 
 public static class RuntimeReadinessReporter
 {
+    private sealed record ProofCoverageSnapshot(
+        string? ReportPath,
+        bool HasPackProofReport,
+        bool StrictProofReady,
+        int RemainingGapCount,
+        int MissingMatrixDimensionsCount,
+        int MissingMatrixCombinationsCount,
+        IReadOnlySet<string> MissingProofAxes);
+
     private static readonly string[] DesktopCompanionExeNames =
     [
         "SlideSmith.exe",
@@ -32,11 +42,16 @@ public static class RuntimeReadinessReporter
     public static IReadOnlyList<RuntimeReadinessCheck> CreateDesktopReport(string? currentExePath) =>
         CreateReport(currentExePath, includeDesktopProbe: false, includeCliProbe: true);
 
+    internal static IReadOnlyList<RuntimeReadinessCheck> CreateDesktopReport(string? currentExePath, string? proofOutputRootOverride) =>
+        CreateReport(currentExePath, includeDesktopProbe: false, includeCliProbe: true, proofOutputRootOverride: proofOutputRootOverride);
+
     private static IReadOnlyList<RuntimeReadinessCheck> CreateReport(
         string? currentExePath,
         bool includeDesktopProbe,
-        bool includeCliProbe)
+        bool includeCliProbe,
+        string? proofOutputRootOverride = null)
     {
+        var proofCoverage = BuildProofCoverageSnapshot(proofOutputRootOverride);
         var checks = new List<RuntimeReadinessCheck>
         {
             new(
@@ -60,10 +75,10 @@ public static class RuntimeReadinessReporter
         checks.Add(CreateCacheCheck());
         checks.Add(CreateScratchWriteCheck());
         checks.Add(CreateStartupCrashLogWriteCheck());
-        checks.Add(CreateUniversalCoverageCheck());
-        checks.Add(CreateDesktopAutomationCoverageCheck());
-        checks.Add(CreateLiveGameAutomationCoverageCheck());
-        checks.Add(CreateStrictMatrixCoverageCheck());
+        checks.Add(CreateUniversalCoverageCheck(proofCoverage));
+        checks.Add(CreateDesktopAutomationCoverageCheck(proofCoverage));
+        checks.Add(CreateLiveGameAutomationCoverageCheck(proofCoverage));
+        checks.Add(CreateStrictMatrixCoverageCheck(proofCoverage));
 
         if (includeDesktopProbe)
         {
@@ -407,29 +422,201 @@ public static class RuntimeReadinessReporter
         }
     }
 
-    private static RuntimeReadinessCheck CreateUniversalCoverageCheck() =>
-        new(
+    private static RuntimeReadinessCheck CreateUniversalCoverageCheck(ProofCoverageSnapshot proofCoverage)
+    {
+        if (proofCoverage.HasPackProofReport && proofCoverage.RemainingGapCount == 0)
+        {
+            return new(
+                "Universal coverage",
+                "OK",
+                $"Latest proof checkpoint reports no remaining strict/universal blockers ({Path.GetFileName(proofCoverage.ReportPath)}).");
+        }
+
+        if (proofCoverage.HasPackProofReport)
+        {
+            return new(
+                "Universal coverage",
+                "Info",
+                $"Progress checkpoint: strict universal release proof still has {proofCoverage.RemainingGapCount} checklist blocker(s). Use remaining-gaps checklist reports to track concrete blockers ({Path.GetFileName(proofCoverage.ReportPath)}).");
+        }
+
+        return new(
             "Universal coverage",
             "Info",
             "Progress checkpoint: SlideSmith can already convert many real-world armors, but a strict 'any armor to any body' release claim still needs broader proof on the hardest topology-correspondence cases. Use remaining-gaps checklist reports to track concrete blockers.");
+    }
 
-    private static RuntimeReadinessCheck CreateDesktopAutomationCoverageCheck() =>
-        new(
+    private static RuntimeReadinessCheck CreateDesktopAutomationCoverageCheck(ProofCoverageSnapshot proofCoverage)
+    {
+        if (proofCoverage.HasPackProofReport && !proofCoverage.MissingProofAxes.Contains("desktop-e2e"))
+        {
+            return new(
+                "Desktop automation proof",
+                "OK",
+                $"Latest matrix pack proof includes desktop-e2e evidence ({Path.GetFileName(proofCoverage.ReportPath)}).");
+        }
+
+        return new(
             "Desktop automation proof",
             "Info",
             "Progress checkpoint: real Windows click-path proof is still an external validation step. Complete it on a Windows host with WebView2 and an external UI automation harness.");
+    }
 
-    private static RuntimeReadinessCheck CreateLiveGameAutomationCoverageCheck() =>
-        new(
+    private static RuntimeReadinessCheck CreateLiveGameAutomationCoverageCheck(ProofCoverageSnapshot proofCoverage)
+    {
+        if (proofCoverage.HasPackProofReport && !proofCoverage.MissingProofAxes.Contains("runtime-automation"))
+        {
+            return new(
+                "Live-game automation proof",
+                "OK",
+                $"Latest matrix pack proof includes runtime-automation evidence ({Path.GetFileName(proofCoverage.ReportPath)}).");
+        }
+
+        return new(
             "Live-game automation proof",
             "Info",
             "Progress checkpoint: in-game/runtime verification is exported as an external harness contract and should be finished against the target Windows mod stack outside this desktop app.");
+    }
 
-    private static RuntimeReadinessCheck CreateStrictMatrixCoverageCheck() =>
-        new(
+    private static RuntimeReadinessCheck CreateStrictMatrixCoverageCheck(ProofCoverageSnapshot proofCoverage)
+    {
+        if (proofCoverage.HasPackProofReport && proofCoverage.StrictProofReady)
+        {
+            return new(
+                "Strict matrix proof",
+                "OK",
+                $"Latest conversion matrix pack proof is strict-ready with no missing matrix dimensions/combinations ({Path.GetFileName(proofCoverage.ReportPath)}).");
+        }
+
+        if (proofCoverage.HasPackProofReport)
+        {
+            return new(
+                "Strict matrix proof",
+                "Info",
+                $"Progress checkpoint: universal-ready claims still need broader proof across body × skeleton × plugin-family × runtime combinations. Missing matrix dimensions: {proofCoverage.MissingMatrixDimensionsCount}; missing matrix combinations: {proofCoverage.MissingMatrixCombinationsCount} ({Path.GetFileName(proofCoverage.ReportPath)}).");
+        }
+
+        return new(
             "Strict matrix proof",
             "Info",
             "Progress checkpoint: universal-ready claims still need broader proof across body × skeleton × plugin-family × runtime combinations, even when one conversion looks healthy. Use conversion-matrix-proof + remaining-gaps checklist reports for exact next blockers.");
+    }
+
+    private static ProofCoverageSnapshot BuildProofCoverageSnapshot(string? proofOutputRootOverride)
+    {
+        var outputRoot = string.IsNullOrWhiteSpace(proofOutputRootOverride)
+            ? ExecutionEnvironment.GetDefaultOutputRoot()
+            : proofOutputRootOverride;
+        if (string.IsNullOrWhiteSpace(outputRoot) || !Directory.Exists(outputRoot))
+        {
+            return new ProofCoverageSnapshot(
+                ReportPath: null,
+                HasPackProofReport: false,
+                StrictProofReady: false,
+                RemainingGapCount: 0,
+                MissingMatrixDimensionsCount: 0,
+                MissingMatrixCombinationsCount: 0,
+                MissingProofAxes: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
+
+        var reportPath = TryFindLatestReportFile(outputRoot, "conversion-matrix-pack-proof.json");
+        if (string.IsNullOrWhiteSpace(reportPath) || !File.Exists(reportPath))
+        {
+            return new ProofCoverageSnapshot(
+                ReportPath: null,
+                HasPackProofReport: false,
+                StrictProofReady: false,
+                RemainingGapCount: CountUncheckedChecklistItems(outputRoot),
+                MissingMatrixDimensionsCount: 0,
+                MissingMatrixCombinationsCount: 0,
+                MissingProofAxes: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
+
+        try
+        {
+            using var report = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = report.RootElement;
+            var strictProofReady = root.TryGetProperty("StrictProofReady", out var strictValue) &&
+                                   strictValue.ValueKind == JsonValueKind.True;
+            var missingProofAxes = TryReadArrayValues(root, "MissingProofAxes");
+            var missingMatrixDimensions = TryReadArrayValues(root, "MissingMatrixDimensions");
+            var missingMatrixCombinations = TryReadArrayValues(root, "MissingMatrixCombinations");
+            var remainingGapCount = CountUncheckedChecklistItems(Path.GetDirectoryName(reportPath) ?? outputRoot);
+            if (remainingGapCount == 0 && !strictProofReady)
+            {
+                remainingGapCount = TryReadArrayValues(root, "BlockingGaps").Count;
+            }
+
+            return new ProofCoverageSnapshot(
+                ReportPath: reportPath,
+                HasPackProofReport: true,
+                StrictProofReady: strictProofReady,
+                RemainingGapCount: remainingGapCount,
+                MissingMatrixDimensionsCount: missingMatrixDimensions.Count,
+                MissingMatrixCombinationsCount: missingMatrixCombinations.Count,
+                MissingProofAxes: missingProofAxes);
+        }
+        catch
+        {
+            return new ProofCoverageSnapshot(
+                ReportPath: reportPath,
+                HasPackProofReport: true,
+                StrictProofReady: false,
+                RemainingGapCount: CountUncheckedChecklistItems(Path.GetDirectoryName(reportPath) ?? outputRoot),
+                MissingMatrixDimensionsCount: 0,
+                MissingMatrixCombinationsCount: 0,
+                MissingProofAxes: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
+    }
+
+    private static HashSet<string> TryReadArrayValues(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.Array)
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return element.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetString())
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static int CountUncheckedChecklistItems(string outputRoot)
+    {
+        var checklistPath = TryFindLatestReportFile(outputRoot, "remaining-gaps-pack-checklist.md")
+            ?? TryFindLatestReportFile(outputRoot, "remaining-gaps-checklist.md");
+        if (string.IsNullOrWhiteSpace(checklistPath) || !File.Exists(checklistPath))
+        {
+            return 0;
+        }
+
+        try
+        {
+            return File.ReadLines(checklistPath)
+                .Count(line => line.TrimStart().StartsWith("- [ ]", StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static string? TryFindLatestReportFile(string rootDirectory, string fileName)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(rootDirectory, fileName, SearchOption.AllDirectories)
+                .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
+                .FirstOrDefault();
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private static RuntimeReadinessCheck CreateDesktopProbeCheck(string? currentExePath)
     {

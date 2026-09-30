@@ -15408,28 +15408,83 @@ public sealed class RuntimeReadinessReporterTests
     [Fact]
     public void CreateDesktopReport_IncludesUniversalProofGapChecks()
     {
-        var checks = RuntimeReadinessReporter.CreateDesktopReport(Environment.ProcessPath);
+        var outputRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputRoot);
+        try
+        {
+            var checks = RuntimeReadinessReporter.CreateDesktopReport(Environment.ProcessPath, outputRoot);
 
-        var universalCoverage = Assert.Single(checks, check => check.Area == "Universal coverage");
-        Assert.Equal("Info", universalCoverage.Status);
-        Assert.Contains("any armor to any body", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("topology-correspondence", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("remaining-gaps checklist", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
+            var universalCoverage = Assert.Single(checks, check => check.Area == "Universal coverage");
+            Assert.Equal("Info", universalCoverage.Status);
+            Assert.Contains("any armor to any body", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("topology-correspondence", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("remaining-gaps checklist", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
 
-        var desktopAutomation = Assert.Single(checks, check => check.Area == "Desktop automation proof");
-        Assert.Equal("Info", desktopAutomation.Status);
-        Assert.Contains("external UI automation harness", desktopAutomation.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("WebView2", desktopAutomation.Details, StringComparison.OrdinalIgnoreCase);
+            var desktopAutomation = Assert.Single(checks, check => check.Area == "Desktop automation proof");
+            Assert.Equal("Info", desktopAutomation.Status);
+            Assert.Contains("external UI automation harness", desktopAutomation.Details, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("WebView2", desktopAutomation.Details, StringComparison.OrdinalIgnoreCase);
 
-        var liveGameAutomation = Assert.Single(checks, check => check.Area == "Live-game automation proof");
-        Assert.Equal("Info", liveGameAutomation.Status);
-        Assert.Contains("external harness contract", liveGameAutomation.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Windows mod stack", liveGameAutomation.Details, StringComparison.OrdinalIgnoreCase);
+            var liveGameAutomation = Assert.Single(checks, check => check.Area == "Live-game automation proof");
+            Assert.Equal("Info", liveGameAutomation.Status);
+            Assert.Contains("external harness contract", liveGameAutomation.Details, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Windows mod stack", liveGameAutomation.Details, StringComparison.OrdinalIgnoreCase);
 
-        var matrixProof = Assert.Single(checks, check => check.Area == "Strict matrix proof");
-        Assert.Equal("Info", matrixProof.Status);
-        Assert.Contains("body × skeleton × plugin-family × runtime combinations", matrixProof.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("remaining-gaps checklist", matrixProof.Details, StringComparison.OrdinalIgnoreCase);
+            var matrixProof = Assert.Single(checks, check => check.Area == "Strict matrix proof");
+            Assert.Equal("Info", matrixProof.Status);
+            Assert.Contains("body × skeleton × plugin-family × runtime combinations", matrixProof.Details, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("remaining-gaps checklist", matrixProof.Details, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outputRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CreateDesktopReport_WithResolvedPackProof_UpgradesCoverageChecksToOk()
+    {
+        var outputRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputRoot);
+        var packProofPath = Path.Combine(outputRoot, "conversion-matrix-pack-proof.json");
+        var checklistPath = Path.Combine(outputRoot, "remaining-gaps-pack-checklist.md");
+
+        try
+        {
+            File.WriteAllText(
+                packProofPath,
+                """
+                {
+                  "StrictProofReady": true,
+                  "MissingProofAxes": [],
+                  "MissingMatrixDimensions": [],
+                  "MissingMatrixCombinations": [],
+                  "BlockingGaps": []
+                }
+                """);
+            File.WriteAllText(
+                checklistPath,
+                "# Remaining strict/universal proof gaps checklist (pack)\n\n## Remaining gaps\n- [x] No remaining strict/universal proof blockers were reported.\n");
+
+            var checks = RuntimeReadinessReporter.CreateDesktopReport(Environment.ProcessPath, outputRoot);
+
+            var universalCoverage = Assert.Single(checks, check => check.Area == "Universal coverage");
+            Assert.Equal("OK", universalCoverage.Status);
+            Assert.Contains("no remaining strict/universal blockers", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
+
+            var desktopAutomation = Assert.Single(checks, check => check.Area == "Desktop automation proof");
+            Assert.Equal("OK", desktopAutomation.Status);
+
+            var liveGameAutomation = Assert.Single(checks, check => check.Area == "Live-game automation proof");
+            Assert.Equal("OK", liveGameAutomation.Status);
+
+            var matrixProof = Assert.Single(checks, check => check.Area == "Strict matrix proof");
+            Assert.Equal("OK", matrixProof.Status);
+        }
+        finally
+        {
+            Directory.Delete(outputRoot, recursive: true);
+        }
     }
 
     [Fact]
