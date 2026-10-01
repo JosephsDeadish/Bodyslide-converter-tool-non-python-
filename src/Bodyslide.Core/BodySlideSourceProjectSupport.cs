@@ -689,6 +689,15 @@ internal static class BodySlideSourceProjectSupport
             }
         }
 
+        foreach (var reference in probe.ReferencedPaths)
+        {
+            foreach (var candidate in ResolveLinkedPathCandidates(probe, reference))
+            {
+                stamps.Add(GetFileStamp(candidate));
+                stamps.Add(GetDirectoryStamp(Path.GetDirectoryName(candidate) ?? string.Empty));
+            }
+        }
+
         var filtered = stamps.Where(static value => !string.IsNullOrWhiteSpace(value)).Distinct().ToArray();
         return filtered.Length == 0 ? null : string.Join("|", filtered);
     }
