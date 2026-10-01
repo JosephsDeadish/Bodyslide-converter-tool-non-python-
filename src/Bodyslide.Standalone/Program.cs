@@ -303,7 +303,7 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
         skeletonNif = skeletonNif.Trim().Trim('"');
         if (!File.Exists(skeletonNif) && !Directory.Exists(skeletonNif))
         {
-            error = $"Could not find a skeleton .nif, folder, or related support file at '{skeletonNif}'.";
+            error = $"The --skeleton-nif path '{skeletonNif}' does not exist.";
             return false;
         }
 
@@ -395,6 +395,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
         }
 
         currentExeFullPath = Path.GetFullPath(currentExePath);
+        var currentAssemblyPath = GetCurrentAssemblyPath();
         launchDecision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
             args,
             currentExeFullPath,
@@ -414,7 +415,12 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
             try
             {
-                if (launchedProcess.HasExited && launchedProcess.ExitCode != 0)
+                if (!launchedProcess.WaitForExit(500))
+                {
+                    return false;
+                }
+
+                if (launchedProcess.ExitCode != 0)
                 {
                     WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: {candidateKind} exited early with code {launchedProcess.ExitCode}: {candidatePath}");
                     return true;
@@ -454,7 +460,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
                 continue;
             }
 
-            if (string.Equals(Path.GetFullPath(desktopExePath), currentExeFullPath, StringComparison.OrdinalIgnoreCase))
+            if (IsCurrentProcessCandidate(desktopExePath, currentExeFullPath, currentAssemblyPath))
             {
                 continue;
             }
@@ -484,6 +490,11 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
                 continue;
             }
 
+            if (IsCurrentProcessCandidate(desktopDllPath, currentExeFullPath, currentAssemblyPath))
+            {
+                continue;
+            }
+
             if (TryStartDesktopDllProcess(desktopDllPath, executableDirectory, launchedFromModOrganizer, args, startupDiagnosticsPath, out var launched))
             {
                 if (TryContinueAfterEarlyExit(launched, "dll candidate", desktopDllPath))
@@ -500,6 +511,21 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
                     args);
                 return true;
             }
+        }
+
+        static string? GetCurrentAssemblyPath()
+        {
+            var assemblyLocation = Assembly.GetExecutingAssembly().Location;
+            return string.IsNullOrWhiteSpace(assemblyLocation) ? null : Path.GetFullPath(assemblyLocation);
+        }
+
+        static bool IsCurrentProcessCandidate(string candidatePath, string? currentExeFullPath, string? currentAssemblyPath)
+        {
+            var fullCandidatePath = Path.GetFullPath(candidatePath);
+            return (!string.IsNullOrWhiteSpace(currentExeFullPath) &&
+                    string.Equals(fullCandidatePath, currentExeFullPath, StringComparison.OrdinalIgnoreCase)) ||
+                   (!string.IsNullOrWhiteSpace(currentAssemblyPath) &&
+                    string.Equals(fullCandidatePath, currentAssemblyPath, StringComparison.OrdinalIgnoreCase));
         }
     }
     catch (Exception ex)

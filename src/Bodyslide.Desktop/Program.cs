@@ -21,7 +21,9 @@ internal static class Program
             $"desktop-startup: exe={Environment.ProcessPath ?? "(unknown)"}, cwd={Environment.CurrentDirectory}, args=[{string.Join(", ", args)}]");
         RegisterGlobalExceptionHandlers();
 
-        if (args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase))
+        if (args.Any(static arg =>
+            StandaloneStartupRouting.TryReadOptionName(arg, out var option) &&
+            option.Equals("smoke-test", StringComparison.OrdinalIgnoreCase)))
         {
             return RunSmokeTest();
         }

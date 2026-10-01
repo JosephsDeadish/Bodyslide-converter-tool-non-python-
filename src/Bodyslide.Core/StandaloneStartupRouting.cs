@@ -23,22 +23,10 @@ public static class StandaloneStartupRouting
         var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
         var launcherSignal = IsExplicitLauncherSignal(args, hasEnvironmentVariable);
         var modManagerLaunch = IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
+        // Strict launcher mode is currently diagnostics-only; it preserves the same
+        // handoff decision but records a stricter routing reason for launcher logs.
         var shouldAttemptDesktopHandoff = args.Count == 0 || launcherSignal || modManagerLaunch;
-        var routingReason = strictLauncherMode
-            ? shouldAttemptDesktopHandoff
-                ? launcherSignal
-                    ? "strict-launcher-mode: launcher signal detected"
-                    : modManagerLaunch
-                        ? "strict-launcher-mode: mod-manager launch detected"
-                    : "strict-launcher-mode: no args"
-                : "strict-launcher-mode: no launcher signal"
-            : shouldAttemptDesktopHandoff
-                ? launcherSignal
-                    ? "launcher signal detected"
-                    : modManagerLaunch
-                        ? "mod-manager launch detected"
-                    : "default desktop handoff"
-                : "explicit cli without launcher signal";
+        var routingReason = BuildRoutingReason(strictLauncherMode, shouldAttemptDesktopHandoff, launcherSignal, modManagerLaunch);
 
         return new StandaloneDesktopLaunchDecision(
             shouldAttemptDesktopHandoff,
@@ -284,6 +272,50 @@ public static class StandaloneStartupRouting
         args.Any(IsModManagerLauncherArgument) ||
         args.Any(IsLikelyLauncherPathArgument) ||
         HasLauncherPathOptionArgument(args);
+
+    private static string BuildRoutingReason(
+        bool strictLauncherMode,
+        bool shouldAttemptDesktopHandoff,
+        bool launcherSignal,
+        bool modManagerLaunch)
+    {
+        if (strictLauncherMode)
+        {
+            if (!shouldAttemptDesktopHandoff)
+            {
+                return "strict-launcher-mode: no launcher signal";
+            }
+
+            if (launcherSignal)
+            {
+                return "strict-launcher-mode: launcher signal detected";
+            }
+
+            if (modManagerLaunch)
+            {
+                return "strict-launcher-mode: mod-manager launch detected";
+            }
+
+            return "strict-launcher-mode: no args";
+        }
+
+        if (!shouldAttemptDesktopHandoff)
+        {
+            return "explicit cli without launcher signal";
+        }
+
+        if (launcherSignal)
+        {
+            return "launcher signal detected";
+        }
+
+        if (modManagerLaunch)
+        {
+            return "mod-manager launch detected";
+        }
+
+        return "default desktop handoff";
+    }
 
     private static bool HasStandaloneCommandSwitch(IReadOnlyList<string> args) =>
         args.Any(static arg =>
