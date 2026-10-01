@@ -16397,6 +16397,7 @@ public sealed class RealisticModPackFixtureTests
 
             var zipPath = outputDirectory + ".zip";
             Assert.True(File.Exists(zipPath), $"Expected packaged ZIP at {zipPath}.");
+            Assert.Empty(Directory.EnumerateFiles(outputDirectory, "*.zip", SearchOption.AllDirectories));
 
             using var archive = ZipFile.OpenRead(zipPath);
             AssertZipMatchesDirectory(archive, outputDirectory);

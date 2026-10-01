@@ -8523,6 +8523,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 Path.Combine(ExecutionEnvironment.GetDefaultOutputRoot(), request.TargetBody, "batch");
             var resultsWithPaths = await ConvertMeshSetAsync(processableMeshFiles, variant.Request, rootOutput, processableMeshFiles.Count, progress, cancellationToken);
             await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, rootOutput, cancellationToken);
+            if (request.OutputZip)
+            {
+                CreateCombinedBatchZip(rootOutput);
+            }
             return resultsWithPaths.Select(x => x.Result).ToList();
         }
 
@@ -8556,6 +8560,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 variant.DisplayName);
 
             await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, variantRootOutput, cancellationToken);
+            if (request.OutputZip)
+            {
+                CreateCombinedBatchZip(variantRootOutput);
+            }
             allResults.AddRange(resultsWithPaths.Select(x => x.Result));
         }
 
@@ -8672,7 +8680,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 {
                     InputPath = meshFile,
                     OutputDirectory = perArmorOutput,
-                    SharedPluginOutputDirectory = rootOutput
+                    SharedPluginOutputDirectory = rootOutput,
+                    OutputZip = false
                 };
                 var result = await orchestrator.ConvertAsync(perArmorRequest, ct, stageProgress);
                 ct.ThrowIfCancellationRequested();
@@ -8685,6 +8694,17 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         return meshFiles
             .Select(path => resultBag.First(r => string.Equals(r.MeshFile, path, StringComparison.OrdinalIgnoreCase)))
             .ToList();
+    }
+
+    private static void CreateCombinedBatchZip(string rootOutput)
+    {
+        var zipPath = rootOutput.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
+        if (File.Exists(zipPath))
+        {
+            File.Delete(zipPath);
+        }
+
+        ZipFile.CreateFromDirectory(rootOutput, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
     }
 
     private static string BuildVariantRootOutput(ConversionRequest originalRequest, NormalizedConversionRequest variant, bool batchMode)
