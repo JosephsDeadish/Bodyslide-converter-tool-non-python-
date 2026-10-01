@@ -49,13 +49,6 @@ internal static class ModManagerLaunchArgumentCatalog
         "staging-path"
     ];
 
-    internal static readonly string[] InputFallbackPathOptionNames =
-    [
-        "result",
-        "load-result",
-        ..LauncherPathOptionNames
-    ];
-
     internal static readonly string[] LauncherPathOptionNames =
     [
         "mo2-output",
@@ -82,6 +75,32 @@ internal static class ModManagerLaunchArgumentCatalog
         "output-dir",
         "output-path",
         "staging-path"
+    ];
+
+    internal static readonly string[] InputFallbackPathOptionNames =
+    [
+        "result",
+        "load-result",
+        "mo2-output",
+        "mo2-result",
+        "modorganizer-output",
+        "modorganizer-result",
+        "mo2-mod",
+        "mo2-path",
+        "modorganizer-mod",
+        "modorganizer-path",
+        "vortex-mod",
+        "vortex-path",
+        "mods-path",
+        "mod-path",
+        "staging-path",
+        "vortex-stage",
+        "vortex-staging",
+        "vortex-deployment",
+        "vortex-deploy-path",
+        "vortex-deployment-path",
+        "vortex-staging-path",
+        "vortex-mod-path"
     ];
 
     internal static readonly string[] StartupDiagnosticsArgumentNames =

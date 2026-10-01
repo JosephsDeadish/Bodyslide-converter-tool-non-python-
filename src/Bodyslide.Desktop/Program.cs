@@ -293,52 +293,7 @@ internal static class Program
     }
 
     private static bool TryReadOptionToken(string? arg, out string optionName, out string? inlineValue)
-    {
-        optionName = string.Empty;
-        inlineValue = null;
-        if (string.IsNullOrWhiteSpace(arg))
-        {
-            return false;
-        }
-
-        string trimmed;
-        if (arg.StartsWith("--", StringComparison.Ordinal))
-        {
-            trimmed = arg[2..];
-        }
-        else if (arg.StartsWith("-", StringComparison.Ordinal) || arg.StartsWith("/", StringComparison.Ordinal))
-        {
-            trimmed = arg[1..];
-        }
-        else
-        {
-            return false;
-        }
-
-        if (trimmed.Length == 0)
-        {
-            return false;
-        }
-
-        var separatorIndex = trimmed.IndexOf('=');
-        if (separatorIndex >= 0)
-        {
-            optionName = trimmed[..separatorIndex].Trim();
-            inlineValue = separatorIndex + 1 < trimmed.Length ? trimmed[(separatorIndex + 1)..] : string.Empty;
-            return optionName.Length > 0;
-        }
-
-        var colonIndex = trimmed.IndexOf(':');
-        if (colonIndex > 1)
-        {
-            optionName = trimmed[..colonIndex].Trim();
-            inlineValue = colonIndex + 1 < trimmed.Length ? trimmed[(colonIndex + 1)..] : string.Empty;
-            return optionName.Length > 0;
-        }
-
-        optionName = trimmed.Trim();
-        return optionName.Length > 0;
-    }
+        => StandaloneStartupRouting.TryReadOptionToken(arg, out optionName, out inlineValue);
 
     private static void WriteStartupDiagnostics(string? diagnosticsPath, string message)
     {

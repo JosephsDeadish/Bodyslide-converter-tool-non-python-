@@ -27167,7 +27167,7 @@ internal sealed class LocalExportService(
                     var missingOutputFileMatches = outputFileEntries
                         .Where(entry =>
                         {
-                            return !HasMatchingStagedMesh(entry.OutputPath, entry.FileName!);
+                            return !HasMatchingStagedMesh(entry.OutputPath ?? string.Empty, entry.FileName!);
                         })
                         .Select(static entry => entry.FileName!)
                         .ToArray();

@@ -648,26 +648,9 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
     }
     catch (Exception ex)
     {
-        WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: shell start failed for {desktopExePath} ({ex.GetType().Name}: {ex.Message})");
-        var fallback = new ProcessStartInfo
-        {
-            FileName = desktopExePath,
-            WorkingDirectory = workingDirectory,
-            UseShellExecute = false
-        };
-        ForwardDesktopLaunchArgs(fallback, forwardedArgs, launchedFromModOrganizer, startupDiagnosticsPath);
-        try
-        {
-            launchedProcess = Process.Start(fallback);
-            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: started exe candidate (fallback) {desktopExePath}");
-            return launchedProcess is not null;
-        }
-        catch (Exception fallbackEx)
-        {
-            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: fallback failed for {desktopExePath} ({fallbackEx.GetType().Name}: {fallbackEx.Message})");
-            launchedProcess = null;
-            return false;
-        }
+        WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: exe start failed for {desktopExePath} ({ex.GetType().Name}: {ex.Message})");
+        launchedProcess = null;
+        return false;
     }
 }
 

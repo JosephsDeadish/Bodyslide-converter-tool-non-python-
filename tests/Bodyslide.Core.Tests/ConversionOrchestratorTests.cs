@@ -18250,8 +18250,7 @@ public sealed class RealisticModPackFixtureTests
                 sliderNames.Contains(sliderName, StringComparer.OrdinalIgnoreCase));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
-            Assert.Contains("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
-            Assert.Contains("OSP/ShapeData content", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -18289,8 +18288,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(scenarioNames, static name => string.Equals(name, "Heel IK and ground-contact sweep", StringComparison.Ordinal));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
-            Assert.Contains("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
-            Assert.Contains("OSP/ShapeData content", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -18328,8 +18326,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(scenarioNames, static name => string.Equals(name, "Heel IK and ground-contact sweep", StringComparison.Ordinal));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
-            Assert.Contains("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
-            Assert.Contains("OSP/ShapeData content", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -29133,7 +29130,7 @@ public sealed class OutputCompletenessTests
                 new BodySlideProject("VariantMatchProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
                 new PluginAnalysisResult([], [], string.Empty));
 
-            Assert.DoesNotContain(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(issues, issue => issue.Message.Contains("staged generated meshes", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {

@@ -23,9 +23,7 @@ public static class StandaloneStartupRouting
         var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
         var launcherSignal = IsExplicitLauncherSignal(args, hasEnvironmentVariable);
         var modManagerLaunch = IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
-        var shouldAttemptDesktopHandoff = strictLauncherMode
-            ? args.Count == 0 || launcherSignal || modManagerLaunch
-            : launcherSignal || modManagerLaunch || !explicitCliLaunch;
+        var shouldAttemptDesktopHandoff = args.Count == 0 || launcherSignal || modManagerLaunch;
         var routingReason = strictLauncherMode
             ? shouldAttemptDesktopHandoff
                 ? launcherSignal
@@ -148,26 +146,32 @@ public static class StandaloneStartupRouting
         HasStandaloneCommandSwitch(args) || HasStandaloneConversionSwitches(args) || HasStandalonePositionalConversionUsage(args);
 
     public static bool IsExplicitLauncherSignal(IReadOnlyList<string> args, Func<string, bool> hasEnvironmentVariable) =>
-        IsLikelyModManagerEnvironment(hasEnvironmentVariable) ||
-        args.Any(IsModManagerLauncherArgument) ||
-        args.Any(IsLikelyLauncherPathArgument) ||
-        HasLauncherPathOptionArgument(args);
+        HasLauncherSignal(args, hasEnvironmentVariable);
 
     public static bool IsLikelyModManagerLaunch(
         IReadOnlyList<string> args,
         string? executablePath,
         string? workingDirectory,
         Func<string, bool> hasEnvironmentVariable) =>
-        IsLikelyModManagerEnvironment(hasEnvironmentVariable) ||
-        args.Any(IsModManagerLauncherArgument) ||
-        HasLauncherPathOptionArgument(args) ||
-        args.Any(IsLikelyLauncherPathArgument) ||
+        HasLauncherSignal(args, hasEnvironmentVariable) ||
         (PathLooksLikeModManagerManagedLocation(executablePath) &&
          PathLooksLikeModManagerManagedLocation(workingDirectory));
 
     public static bool TryReadOptionName(string? arg, out string option)
     {
+        if (TryReadOptionToken(arg, out option, out _))
+        {
+            return true;
+        }
+
         option = string.Empty;
+        return false;
+    }
+
+    public static bool TryReadOptionToken(string? arg, out string option, out string? inlineValue)
+    {
+        option = string.Empty;
+        inlineValue = null;
         if (string.IsNullOrWhiteSpace(arg))
         {
             return false;
@@ -195,14 +199,16 @@ public static class StandaloneStartupRouting
         var separatorIndex = option.IndexOf('=');
         if (separatorIndex >= 0)
         {
-            option = option[..separatorIndex];
+            inlineValue = separatorIndex + 1 < option.Length ? option[(separatorIndex + 1)..] : string.Empty;
+            option = option[..separatorIndex].Trim();
         }
         else
         {
             var colonIndex = option.IndexOf(':');
             if (colonIndex > 1)
             {
-                option = option[..colonIndex];
+                inlineValue = colonIndex + 1 < option.Length ? option[(colonIndex + 1)..] : string.Empty;
+                option = option[..colonIndex].Trim();
             }
         }
 
@@ -272,6 +278,12 @@ public static class StandaloneStartupRouting
         option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
         option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
         option.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasLauncherSignal(IReadOnlyList<string> args, Func<string, bool> hasEnvironmentVariable) =>
+        IsLikelyModManagerEnvironment(hasEnvironmentVariable) ||
+        args.Any(IsModManagerLauncherArgument) ||
+        args.Any(IsLikelyLauncherPathArgument) ||
+        HasLauncherPathOptionArgument(args);
 
     private static bool HasStandaloneCommandSwitch(IReadOnlyList<string> args) =>
         args.Any(static arg =>
