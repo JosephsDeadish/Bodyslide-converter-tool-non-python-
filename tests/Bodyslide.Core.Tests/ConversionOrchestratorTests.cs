@@ -32,6 +32,11 @@ public sealed class ConversionOrchestratorTests
             Assert.Equal(outputDirectory, exporter.ExportPath);
             Assert.Contains(result.Steps, s => s.StartsWith("cage:", StringComparison.Ordinal));
             Assert.Contains(result.Steps, s => s.StartsWith("clipping:", StringComparison.Ordinal));
+            Assert.Contains(result.Steps, s => s.StartsWith("phase-ms:import=", StringComparison.Ordinal));
+            Assert.Contains(result.Steps, s => s.StartsWith("phase-ms:inspect=", StringComparison.Ordinal));
+            Assert.Contains(result.Steps, s => s.StartsWith("phase-ms:convert=", StringComparison.Ordinal));
+            Assert.Contains(result.Steps, s => s.StartsWith("pipeline-total-ms:", StringComparison.Ordinal));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-timings.json")));
         }
 
         finally

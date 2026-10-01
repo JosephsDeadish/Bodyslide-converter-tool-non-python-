@@ -525,6 +525,12 @@ internal static class SkeletonRemapSafetyClassifier
 }
 public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<string> Partitions, IReadOnlyList<string> RemovedPartitions);
 public sealed record ConversionResult(bool Success, string OutputDirectory, IReadOnlyList<string> Steps, IReadOnlyList<string> OutputFiles);
+internal sealed record PipelineTimingReport(
+    long TotalMilliseconds,
+    IReadOnlyDictionary<string, long> StageMilliseconds,
+    IReadOnlyDictionary<string, long> PhaseMilliseconds,
+    IReadOnlyList<string> TopStages,
+    IReadOnlyList<string> TopPhases);
 public sealed record ConversionInspectionResult(
     string InputPath,
     string? RequestedTargetBody,
@@ -7400,6 +7406,60 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"pipeline-total-ms:{Math.Max(0, totalDurationMs)}");
             }
 
+            PipelineTimingReport BuildTimingReport(long totalDurationMs)
+            {
+                long GetStageDuration(params string[] stageKeys) =>
+                    stageKeys.Sum(stageKey => stageDurationsMs.TryGetValue(stageKey, out var duration) ? duration : 0L);
+
+                var phaseDurationsMs = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["import"] = GetStageDuration("import", "learning-cache-load"),
+                    ["inspect"] = GetStageDuration(
+                        "texture-analysis",
+                        "plugin-analysis",
+                        "race-compatibility",
+                        "body-detection",
+                        "mesh-analysis",
+                        "region-binding",
+                        "deformation-cage"),
+                    ["convert"] = GetStageDuration(
+                        "mesh-conversion",
+                        "rigid-island-detection",
+                        "weight-transfer",
+                        "weight-solver",
+                        "normal-recalculation",
+                        "skeleton-mapping",
+                        "morph-generation",
+                        "partition-rebuild",
+                        "clipping-detection",
+                        "mesh-correction",
+                        "voxel-collision",
+                        "pose-simulation",
+                        "physics-build",
+                        "bodyslide-project")
+                };
+
+                var topStages = stageDurationsMs
+                    .OrderByDescending(static pair => pair.Value)
+                    .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                    .Take(3)
+                    .Select(pair => $"{pair.Key}:{pair.Value}ms")
+                    .ToArray();
+                var topPhases = phaseDurationsMs
+                    .OrderByDescending(static pair => pair.Value)
+                    .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                    .Take(3)
+                    .Select(pair => $"{pair.Key}:{pair.Value}ms")
+                    .ToArray();
+
+                return new PipelineTimingReport(
+                    Math.Max(0, totalDurationMs),
+                    new Dictionary<string, long>(stageDurationsMs, StringComparer.OrdinalIgnoreCase),
+                    phaseDurationsMs,
+                    topStages,
+                    topPhases);
+            }
+
             var deformationProfile = normalized.Preset?.DeformationProfile ?? normalized.Request.DeformationProfile;
             if (!string.IsNullOrWhiteSpace(deformationProfile))
             {
@@ -7894,10 +7954,18 @@ public sealed class ConversionOrchestrator(
 
             ReportStage("Exporting outputs", 18);
             AppendPipelineTimingSteps(totalStopwatch.ElapsedMilliseconds);
+            var timingPath = Path.Combine(normalized.Request.OutputDirectory, "conversion-timings.json");
+            await File.WriteAllTextAsync(
+                timingPath,
+                JsonSerializer.Serialize(BuildTimingReport(totalStopwatch.ElapsedMilliseconds), new JsonSerializerOptions { WriteIndented = true }),
+                cancellationToken);
+            steps.Add("timings:conversion-timings.json");
             var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, raceCompatibility, voxelResult, cancellationToken);
             steps.Add($"exported:{export.OutputDirectory}");
 
-            return new ConversionResult(true, export.OutputDirectory, steps, export.OutputFiles);
+            var outputFiles = export.OutputFiles.ToList();
+            outputFiles.Add(timingPath);
+            return new ConversionResult(true, export.OutputDirectory, steps, outputFiles);
         }
         finally
         {
