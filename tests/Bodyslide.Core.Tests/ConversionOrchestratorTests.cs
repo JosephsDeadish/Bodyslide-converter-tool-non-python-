@@ -5795,6 +5795,63 @@ public sealed class ConversionOrchestratorTests
         }
     }
 
+    [Fact]
+    public async Task ExportAsync_ConversionQualityReport_MarksLargeMissingNormalMapGapsAsMedium()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await SyntheticNifTestData.WriteAsync(inputFile, SyntheticNifTestData.CreateBodyVertices(24));
+
+        try
+        {
+            var service = new LocalExportService();
+            var request = new ConversionRequest(inputFile, "MyFollower", OutputDirectory: outputDirectory);
+            var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
+            var analysis = new MeshAnalysis("cloth", false, 1);
+            var mesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("none", SmpConfigXml: string.Empty);
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bodySlideProject = new BodySlideProject("TestProject", "MyFollower", ["Body"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
+            var textureSummary = new TextureSummary(
+                20,
+                [],
+                [],
+                Enumerable.Range(1, 20).Select(i => $"armor_{i:00}_n.dds").ToArray());
+            var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detectedBody = new BodyDetectionReport("CBBE", 1.0, ["test"]);
+            var skeletonMapping = new SkeletonMappingResult(
+                "xpmsse-physics",
+                "xpmsse-male-smp",
+                [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)],
+                []);
+            var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bodySlideProject, pluginAnalysis,
+                textureSummary, poseSimulation, [], detectedBody, skeletonMapping, null, voxelResult,
+                CancellationToken.None);
+
+            using var qualityReport = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json")));
+            var issues = qualityReport.RootElement
+                .GetProperty("ValidationSummary")
+                .GetProperty("Issues")
+                .EnumerateArray()
+                .ToArray();
+            var missingNormalsIssue = Assert.Single(issues, issue => issue.GetProperty("Code").GetString() == "missing-normal-maps");
+            Assert.Equal("medium", missingNormalsIssue.GetProperty("Severity").GetString());
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("HorseFollowerArmorAddon", "meshes/armor/horse/hoof_boots_0.nif", "Equine variant")]
     [InlineData("AvianWingedFollowerAddon", "meshes/armor/avian/feather_wrap_0.nif", "Avian variant")]
