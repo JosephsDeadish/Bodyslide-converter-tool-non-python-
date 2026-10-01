@@ -7954,7 +7954,8 @@ public sealed class ConversionOrchestrator(
 
             ReportStage("Exporting outputs", 18);
             AppendPipelineTimingSteps(totalStopwatch.ElapsedMilliseconds);
-            var timingPath = Path.Combine(normalized.Request.OutputDirectory, "conversion-timings.json");
+            var timingPath = Path.Combine(outputDirectory, "conversion-timings.json");
+            Directory.CreateDirectory(outputDirectory);
             await File.WriteAllTextAsync(
                 timingPath,
                 JsonSerializer.Serialize(BuildTimingReport(totalStopwatch.ElapsedMilliseconds), new JsonSerializerOptions { WriteIndented = true }),
