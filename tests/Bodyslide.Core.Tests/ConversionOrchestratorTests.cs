@@ -29546,6 +29546,68 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public async Task ExportAsync_DoesNotReportIncompleteSourceFallback_WithoutMissingAssetsOrPathEvidence()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await SyntheticNifTestData.WriteAsync(nifPath, SyntheticNifTestData.CreateBodyVertices(8));
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("cloth", false, 1);
+            var mesh = new ConvertedMesh("cloth", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet(
+                "low",
+                "high",
+                true,
+                SourceAssetSupport: new SourceAssetSupportMetrics(
+                    HasOsp: true,
+                    HasTriPayloads: false,
+                    HasBsdPayloads: false,
+                    HasReferenceAssets: true,
+                    UsedFallbackSliders: true,
+                    MissingAssets: [],
+                    ReusablePayloadSliderCount: 0,
+                    InferredSourceBody: null,
+                    InferenceSignals: [],
+                    InferredDeformationProfile: null,
+                    HasOsdPayloads: false,
+                    FallbackInferredFromPathEvidenceCount: 0));
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bodySlideProject = new BodySlideProject("TestProject", "CBBE", ["Belly"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel = new SkeletonMappingResult("XPMSSE", "CBBE", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bodySlideProject, pluginAnalysis,
+                textures, pose, ["step1"],
+                detected, skel, null, voxel,
+                CancellationToken.None);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDir, "conversion-quality.json"));
+            Assert.DoesNotContain("\"Code\": \"incomplete-source-fallback\"", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ExportAsync_IncompleteSourceFallback_SurfacesQualityIssues()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

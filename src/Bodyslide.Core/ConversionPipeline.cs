@@ -26392,7 +26392,9 @@ internal sealed class LocalExportService(
             issues.Add(targetBodySupportIssue);
         }
 
-        if (morphs.SourceAssetSupport is { UsedFallbackSliders: true } sourceAssetSupport)
+        if (morphs.SourceAssetSupport is { UsedFallbackSliders: true } sourceAssetSupport &&
+            ((sourceAssetSupport.MissingAssets?.Count ?? 0) > 0 ||
+             sourceAssetSupport.FallbackInferredFromPathEvidenceCount > 0))
         {
             var detail = sourceAssetSupport.MissingAssets is { Count: > 0 }
                 ? $": {string.Join(", ", sourceAssetSupport.MissingAssets)}"
