@@ -27118,17 +27118,56 @@ internal sealed class LocalExportService(
                 }
                 else
                 {
-                    var missingOutputFileMatches = outputFileEntries
-                        .Where(entry =>
+                    var stagedMeshPaths = Directory.EnumerateFiles(shapeDataDirectory, "*.*", SearchOption.AllDirectories).ToArray();
+                    var stagedMeshFileNames = stagedMeshPaths
+                        .Select(static path => Path.GetFileName(path))
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))
+                        .Select(static value => value!)
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var stagedMeshStems = stagedMeshPaths
+                        .Select(static path => Path.GetFileNameWithoutExtension(path))
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))
+                        .Select(static value => NormalizeBodySlideOutputMeshStem(value!))
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    static string NormalizeBodySlideOutputMeshStem(string value)
+                    {
+                        var trimmed = value.Trim();
+                        if (trimmed.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+                            trimmed.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
                         {
-                            var outputPath = NormalizeBodySlidePath(entry.OutputPath);
-                            if (string.IsNullOrWhiteSpace(outputPath))
+                            return trimmed[..^2];
+                        }
+
+                        return trimmed;
+                    }
+
+                    bool HasMatchingStagedMesh(string outputPath, string fileName)
+                    {
+                        var relativeOutputPath = NormalizeBodySlidePath(outputPath);
+                        if (!string.IsNullOrWhiteSpace(relativeOutputPath))
+                        {
+                            var relativeOutputDirectory = relativeOutputPath.Replace('/', Path.DirectorySeparatorChar);
+                            if (File.Exists(Path.Combine(outputDirectory, relativeOutputDirectory, fileName)))
                             {
                                 return true;
                             }
+                        }
 
-                            var relativeOutputDirectory = outputPath.Replace('/', Path.DirectorySeparatorChar);
-                            return !File.Exists(Path.Combine(outputDirectory, relativeOutputDirectory, entry.FileName!));
+                        if (stagedMeshFileNames.Contains(fileName))
+                        {
+                            return true;
+                        }
+
+                        var fileStem = NormalizeBodySlideOutputMeshStem(Path.GetFileNameWithoutExtension(fileName) ?? string.Empty);
+                        return !string.IsNullOrWhiteSpace(fileStem) && stagedMeshStems.Contains(fileStem);
+                    }
+
+                    var missingOutputFileMatches = outputFileEntries
+                        .Where(entry =>
+                        {
+                            return !HasMatchingStagedMesh(entry.OutputPath, entry.FileName!);
                         })
                         .Select(static entry => entry.FileName!)
                         .ToArray();

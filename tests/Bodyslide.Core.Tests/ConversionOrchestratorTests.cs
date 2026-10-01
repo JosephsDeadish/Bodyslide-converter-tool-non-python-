@@ -29079,6 +29079,69 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void BuildPackageArtifactIssues_AllowsBodySlideOutputFileStemMatchForWeightVariantMeshes()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(
+                Path.Combine(sliderSetDirectory, "VariantMatchProject.osp"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <SliderSetInfo version="1">
+                  <SliderSet name="VariantMatchProject" baseShape="Base Shape" bsversion="20">
+                    <SetFolder>CalienteTools\BodySlide\ShapeData\VariantMatchProject</SetFolder>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\VariantMatchProject\armor_0.nif</SourceFile>
+                    <OutputPath>meshes\armor\oracle\</OutputPath>
+                    <OutputFile gender="f" use="true">GNDlegs.nif</OutputFile>
+                    <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "VariantMatchProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "armor_0.nif"), "mesh");
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "GNDlegs_0.nif"), "mesh");
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Belly.bsd"), BuildBsdPayload("Belly", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "meshes", "armor", "oracle"));
+            File.WriteAllText(Path.Combine(outputDirectory, "meshes", "armor", "oracle", "GNDlegs_0.nif"), "mesh");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"CalienteTools\" destination=\"CalienteTools\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("VariantMatchProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void BuildPackageArtifactIssues_FlagsMissingLowHighPayloadCoverage()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
