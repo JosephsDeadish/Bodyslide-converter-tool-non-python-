@@ -685,7 +685,15 @@ internal static class BodySlideSourceProjectSupport
             stamps.Add(GetDirectoryStamp(Path.Combine(probe.BodySlideRoot, "ShapeData")));
             foreach (var projectName in probe.ProjectNames)
             {
-                stamps.Add(GetDirectoryStamp(Path.Combine(probe.BodySlideRoot, "ShapeData", projectName)));
+                var shapeDataFolder = Path.Combine(probe.BodySlideRoot, "ShapeData", projectName);
+                stamps.Add(GetDirectoryStamp(shapeDataFolder));
+                if (Directory.Exists(shapeDataFolder))
+                {
+                    foreach (var filePath in Directory.EnumerateFiles(shapeDataFolder, "*.*", SearchOption.TopDirectoryOnly))
+                    {
+                        stamps.Add(GetFileStamp(filePath));
+                    }
+                }
             }
         }
 
