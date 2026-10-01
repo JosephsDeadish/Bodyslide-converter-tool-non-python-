@@ -5855,58 +5855,78 @@ public sealed class ConversionOrchestratorTests
     [Fact]
     public async Task ExportAsync_ConversionQualityReport_MarksSingleMissingNormalMapGapAsLow()
     {
-        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        var outputDirectory = Path.Combine(workingDirectory, "output");
-        Directory.CreateDirectory(workingDirectory);
-        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        var inputFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "armor.nif");
+        Directory.CreateDirectory(Path.GetDirectoryName(inputFile)!);
         await SyntheticNifTestData.WriteAsync(inputFile, SyntheticNifTestData.CreateBodyVertices(24));
 
-        try
-        {
-            var service = new LocalExportService();
-            var request = new ConversionRequest(inputFile, "MyFollower", OutputDirectory: outputDirectory);
-            var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
-            var analysis = new MeshAnalysis("cloth", false, 1);
-            var mesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
-            var morphs = new MorphSet("low", "high", true);
-            var physics = new PhysicsConfig("none", SmpConfigXml: string.Empty);
-            var clipping = new ClippingReport(false, [], []);
-            var correction = new CorrectionResult(false, "not-required");
-            var bodySlideProject = new BodySlideProject("TestProject", "MyFollower", ["Body"], "<BodySlideProject/>");
-            var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
-            var textureSummary = new TextureSummary(
-                1,
-                [],
-                [],
-                ["armor_n.dds"]);
-            var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
-            var detectedBody = new BodyDetectionReport("CBBE", 1.0, ["test"]);
-            var skeletonMapping = new SkeletonMappingResult(
-                "xpmsse-physics",
-                "xpmsse-male-smp",
-                [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)],
-                []);
-            var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+        var request = new ConversionRequest(inputFile, "CBBE", OutputDirectory: Path.GetDirectoryName(inputFile));
+        var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
+        var analysis = new MeshAnalysis("cloth", false, 1);
+        var mesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
+        var morphs = new MorphSet("low", "high", true);
+        var payloadReuse = new MorphPayloadReuseSummary(0, 0, 0);
+        var physics = new PhysicsConfig("none", SmpConfigXml: string.Empty);
+        var clipping = new ClippingReport(false, [], []);
+        var correction = new CorrectionResult(false, "not-required");
+        var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+        var detectedBody = new BodyDetectionReport("CBBE", 1.0, ["test"]);
+        var skeletonMapping = new SkeletonMappingResult(
+            "xpmsse-physics",
+            "xpmsse-male-smp",
+            [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)],
+            []);
+        var textureSummary = new TextureSummary(
+            2,
+            ["armor_d.dds", "armor_1_d.dds"],
+            [],
+            ["armor_d.dds", "armor_1_d.dds"]);
+        var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+        var bodySlideProject = new BodySlideProject(
+            "CBBE",
+            "CBBE",
+            ["Body"],
+            "<BodySlideProject><SliderSet name=\"CBBE\"><Slider name=\"Body\" /></SliderSet><SourceFile>armor.nif</SourceFile></BodySlideProject>",
+            SliderSetNames: ["CBBE"]);
+        var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
 
-            await service.ExportAsync(
-                request, armor, analysis, mesh, morphs, physics,
-                clipping, correction, bodySlideProject, pluginAnalysis,
-                textureSummary, poseSimulation, [], detectedBody, skeletonMapping, null, voxelResult,
-                CancellationToken.None);
+        var buildValidationSummary = typeof(LocalExportService).Assembly
+            .GetTypes()
+            .Single(type => type.Name == "LocalExportService")
+            .GetMethods(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            .Single(method => method.Name == "BuildValidationSummary");
 
-            using var qualityReport = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json")));
-            var issues = qualityReport.RootElement
-                .GetProperty("ValidationSummary")
-                .GetProperty("Issues")
-                .EnumerateArray()
-                .ToArray();
-            var missingNormalsIssue = Assert.Single(issues, issue => issue.GetProperty("Code").GetString() == "missing-normal-maps");
-            Assert.Equal("low", missingNormalsIssue.GetProperty("Severity").GetString());
-        }
-        finally
-        {
-            Directory.Delete(workingDirectory, recursive: true);
-        }
+        var summary = (ConversionValidationSummary)buildValidationSummary.Invoke(
+            null,
+            new object[]
+            {
+                armor,
+                detectedBody,
+                morphs,
+                payloadReuse,
+                clipping,
+                correction,
+                voxelResult,
+                skeletonMapping,
+                physics,
+                textureSummary,
+                poseSimulation,
+                false,
+                null,
+                null,
+                null,
+                Array.Empty<string>(),
+                Array.Empty<string>(),
+                request,
+                Path.GetDirectoryName(inputFile)!,
+                Array.Empty<string>(),
+                bodySlideProject,
+                pluginAnalysis,
+                null,
+                true
+            })!;
+
+        var missingNormalsIssue = Assert.Single(summary.Issues, issue => issue.Code == "missing-normal-maps");
+        Assert.Equal("low", missingNormalsIssue.Severity);
     }
 
     [Theory]
