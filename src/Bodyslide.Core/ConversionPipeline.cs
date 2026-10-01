@@ -27584,7 +27584,7 @@ internal sealed class LocalExportService(
                 .Where(File.Exists)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            if (existingPhysicsConfigPaths.Length == 0)
+            if (existingPhysicsConfigPaths.Length < 2)
             {
                 return problems;
             }

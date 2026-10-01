@@ -29262,6 +29262,61 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void BuildPackageArtifactIssues_DoesNotAddSemanticMismatchWhenOnlyOneRuntimeConfigExists()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "conversion-quality.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "skeleton-compatibility.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "ube");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem"));
+            File.WriteAllText(Path.Combine(outputDirectory, "cbpc-config.xml"), "<Config><BellyPhysics></BellyPhysics></Config>");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"SKSE\" destination=\"SKSE\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "UBE",
+                OutputDirectory: outputDirectory,
+                PhysicsProfileOverride: "cbpc",
+                GenerateBodySlideFiles: false);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("UnusedProject", "UBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("physics-config-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void EvaluateTargetBodySupportQuality_FlagsShallowBuiltInLikeMetadata()
     {
         var warnings = LocalExportService.EvaluateTargetBodySupportQuality(
