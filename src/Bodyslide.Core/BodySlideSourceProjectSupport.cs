@@ -621,7 +621,7 @@ internal static class BodySlideSourceProjectSupport
 
     private static IEnumerable<string> ResolveLinkedProjectAssets(BodySlideProjectProbe probe)
     {
-        var stamp = GetFileStamp(probe.OspPath);
+        var stamp = BuildLinkedAssetStamp(probe);
         if (stamp is not null &&
             LinkedAssetCache.TryGetValue(probe.OspPath, out var cached) &&
             string.Equals(cached.Stamp, stamp, StringComparison.Ordinal))
@@ -675,6 +675,22 @@ internal static class BodySlideSourceProjectSupport
             LinkedAssetCache[probe.OspPath] = new BodySlideLinkedAssetCacheEntry(stamp, result);
         }
         return result;
+    }
+
+    private static string? BuildLinkedAssetStamp(BodySlideProjectProbe probe)
+    {
+        var stamps = new List<string?> { GetFileStamp(probe.OspPath), GetDirectoryStamp(probe.OspDirectory) };
+        if (!string.IsNullOrWhiteSpace(probe.BodySlideRoot))
+        {
+            stamps.Add(GetDirectoryStamp(Path.Combine(probe.BodySlideRoot, "ShapeData")));
+            foreach (var projectName in probe.ProjectNames)
+            {
+                stamps.Add(GetDirectoryStamp(Path.Combine(probe.BodySlideRoot, "ShapeData", projectName)));
+            }
+        }
+
+        var filtered = stamps.Where(static value => !string.IsNullOrWhiteSpace(value)).Distinct().ToArray();
+        return filtered.Length == 0 ? null : string.Join("|", filtered);
     }
 
     private static IEnumerable<string> ResolveLinkedPathCandidates(BodySlideProjectProbe probe, string referencedPath)
@@ -872,6 +888,24 @@ internal static class BodySlideSourceProjectSupport
             }
 
             return $"{info.Length}:{info.LastWriteTimeUtc.Ticks}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string? GetDirectoryStamp(string path)
+    {
+        try
+        {
+            var info = new DirectoryInfo(path);
+            if (!info.Exists)
+            {
+                return null;
+            }
+
+            return $"{info.LastWriteTimeUtc.Ticks}";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
