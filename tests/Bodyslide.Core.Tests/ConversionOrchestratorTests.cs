@@ -11051,6 +11051,63 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_ReprobesUpdatedOspContents()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "armor", "traveler");
+        var sliderSetDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "SliderSets");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(sliderSetDirectory);
+
+        var meshPath = Path.Combine(meshDirectory, "traveler_armor_0.nif");
+        var ospPath = Path.Combine(sliderSetDirectory, "traveler_pack.osp");
+
+        await File.WriteAllTextAsync(meshPath, "mesh");
+        await File.WriteAllTextAsync(
+            ospPath,
+            """
+            <SliderSetInfo version="1">
+              <SliderSet name="TravelerProject" set="3BA">
+                <OutputPath>meshes\armor\traveler\</OutputPath>
+                <OutputFile gender="f" use="true">traveler_armor_0.nif</OutputFile>
+                <Slider name="TravelerWaist" />
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+
+            var initial = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+            Assert.Contains("TravelerWaist", initial.Sliders);
+            Assert.DoesNotContain("TravelerBelly", initial.Sliders);
+
+            await Task.Delay(1100);
+            await File.WriteAllTextAsync(
+                ospPath,
+                """
+                <SliderSetInfo version="1">
+                  <SliderSet name="TravelerProject" set="3BA">
+                    <OutputPath>meshes\armor\traveler\</OutputPath>
+                    <OutputFile gender="f" use="true">traveler_armor_0.nif</OutputFile>
+                    <Slider name="TravelerWaist" />
+                    <Slider name="TravelerBelly" />
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var updated = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+            Assert.Contains("TravelerWaist", updated.Sliders);
+            Assert.Contains("TravelerBelly", updated.Sliders);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_UsesNestedOspMetadataToDiscoverShapeDataAssets()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

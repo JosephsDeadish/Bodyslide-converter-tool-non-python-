@@ -22,7 +22,7 @@ internal static class BodySlideSourceProjectSupport
     private static readonly StringComparison PathComparison = StringComparison.OrdinalIgnoreCase;
     private static readonly SourceSliderCandidate EmptyCandidate = new(string.Empty, 0);
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, BodySlideProjectProbeCacheEntry> OspProbeCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<string>> LinkedAssetCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, BodySlideLinkedAssetCacheEntry> LinkedAssetCache = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly IReadOnlyDictionary<string, string> ZapSliderHints =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -621,9 +621,12 @@ internal static class BodySlideSourceProjectSupport
 
     private static IEnumerable<string> ResolveLinkedProjectAssets(BodySlideProjectProbe probe)
     {
-        if (LinkedAssetCache.TryGetValue(probe.OspPath, out var cached))
+        var stamp = GetFileStamp(probe.OspPath);
+        if (stamp is not null &&
+            LinkedAssetCache.TryGetValue(probe.OspPath, out var cached) &&
+            string.Equals(cached.Stamp, stamp, StringComparison.Ordinal))
         {
-            return cached;
+            return cached.Files;
         }
 
         var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -667,7 +670,10 @@ internal static class BodySlideSourceProjectSupport
         }
 
         var result = discovered.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase).ToArray();
-        LinkedAssetCache[probe.OspPath] = result;
+        if (stamp is not null)
+        {
+            LinkedAssetCache[probe.OspPath] = new BodySlideLinkedAssetCacheEntry(stamp, result);
+        }
         return result;
     }
 
@@ -698,18 +704,35 @@ internal static class BodySlideSourceProjectSupport
     private static bool TryProbeOspProject(string ospPath, out BodySlideProjectProbe probe)
     {
         var normalizedPath = Path.GetFullPath(ospPath);
-        var cached = OspProbeCache.GetOrAdd(normalizedPath, static path => ProbeOspProject(path));
-        if (!cached.Success || cached.Probe is null)
+        var stamp = GetFileStamp(normalizedPath);
+        if (stamp is null)
         {
             probe = new BodySlideProjectProbe(normalizedPath, Path.GetDirectoryName(normalizedPath) ?? string.Empty, FindBodySlideRoot(Path.GetDirectoryName(normalizedPath)), [], [], [], []);
             return false;
         }
 
-        probe = cached.Probe;
+        if (OspProbeCache.TryGetValue(normalizedPath, out var cached) &&
+            string.Equals(cached.Stamp, stamp, StringComparison.Ordinal) &&
+            cached.Success &&
+            cached.Probe is not null)
+        {
+            probe = cached.Probe;
+            return true;
+        }
+
+        var fresh = ProbeOspProject(normalizedPath, stamp);
+        OspProbeCache[normalizedPath] = fresh;
+        if (!fresh.Success || fresh.Probe is null)
+        {
+            probe = new BodySlideProjectProbe(normalizedPath, Path.GetDirectoryName(normalizedPath) ?? string.Empty, FindBodySlideRoot(Path.GetDirectoryName(normalizedPath)), [], [], [], []);
+            return false;
+        }
+
+        probe = fresh.Probe;
         return true;
     }
 
-    private static BodySlideProjectProbeCacheEntry ProbeOspProject(string ospPath)
+    private static BodySlideProjectProbeCacheEntry ProbeOspProject(string ospPath, string stamp)
     {
         try
         {
@@ -747,6 +770,7 @@ internal static class BodySlideSourceProjectSupport
                 .ToArray();
 
             return new BodySlideProjectProbeCacheEntry(
+                stamp,
                 true,
                 new BodySlideProjectProbe(
                     ospPath,
@@ -759,7 +783,7 @@ internal static class BodySlideSourceProjectSupport
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
-            return new BodySlideProjectProbeCacheEntry(false, null);
+            return new BodySlideProjectProbeCacheEntry(stamp, false, null);
         }
     }
 
@@ -834,7 +858,26 @@ internal static class BodySlideSourceProjectSupport
         return null;
     }
 
-    private sealed record BodySlideProjectProbeCacheEntry(bool Success, BodySlideProjectProbe? Probe);
+    private sealed record BodySlideProjectProbeCacheEntry(string Stamp, bool Success, BodySlideProjectProbe? Probe);
+    private sealed record BodySlideLinkedAssetCacheEntry(string Stamp, IReadOnlyList<string> Files);
+
+    private static string? GetFileStamp(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists)
+            {
+                return null;
+            }
+
+            return $"{info.Length}:{info.LastWriteTimeUtc.Ticks}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     private static async Task<BodySlideSourceSupport> TryReadOspAsync(string filePath, CancellationToken cancellationToken)
     {
