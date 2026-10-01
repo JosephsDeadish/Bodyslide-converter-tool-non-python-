@@ -21,6 +21,8 @@ internal static class BodySlideSourceProjectSupport
     private static readonly IReadOnlyList<string> DefaultSliders = ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
     private static readonly StringComparison PathComparison = StringComparison.OrdinalIgnoreCase;
     private static readonly SourceSliderCandidate EmptyCandidate = new(string.Empty, 0);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, BodySlideProjectProbeCacheEntry> OspProbeCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<string>> LinkedAssetCache = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly IReadOnlyDictionary<string, string> ZapSliderHints =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -619,6 +621,11 @@ internal static class BodySlideSourceProjectSupport
 
     private static IEnumerable<string> ResolveLinkedProjectAssets(BodySlideProjectProbe probe)
     {
+        if (LinkedAssetCache.TryGetValue(probe.OspPath, out var cached))
+        {
+            return cached;
+        }
+
         var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var reference in probe.ReferencedPaths)
@@ -659,7 +666,9 @@ internal static class BodySlideSourceProjectSupport
             }
         }
 
-        return discovered;
+        var result = discovered.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+        LinkedAssetCache[probe.OspPath] = result;
+        return result;
     }
 
     private static IEnumerable<string> ResolveLinkedPathCandidates(BodySlideProjectProbe probe, string referencedPath)
@@ -688,15 +697,20 @@ internal static class BodySlideSourceProjectSupport
 
     private static bool TryProbeOspProject(string ospPath, out BodySlideProjectProbe probe)
     {
-        probe = new BodySlideProjectProbe(
-            ospPath,
-            Path.GetDirectoryName(ospPath) ?? string.Empty,
-            FindBodySlideRoot(Path.GetDirectoryName(ospPath)),
-            [],
-            [],
-            [],
-            []);
+        var normalizedPath = Path.GetFullPath(ospPath);
+        var cached = OspProbeCache.GetOrAdd(normalizedPath, static path => ProbeOspProject(path));
+        if (!cached.Success || cached.Probe is null)
+        {
+            probe = new BodySlideProjectProbe(normalizedPath, Path.GetDirectoryName(normalizedPath) ?? string.Empty, FindBodySlideRoot(Path.GetDirectoryName(normalizedPath)), [], [], [], []);
+            return false;
+        }
 
+        probe = cached.Probe;
+        return true;
+    }
+
+    private static BodySlideProjectProbeCacheEntry ProbeOspProject(string ospPath)
+    {
         try
         {
             var document = XDocument.Load(ospPath, LoadOptions.None);
@@ -732,19 +746,20 @@ internal static class BodySlideSourceProjectSupport
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
-            probe = new BodySlideProjectProbe(
-                ospPath,
-                Path.GetDirectoryName(ospPath) ?? string.Empty,
-                FindBodySlideRoot(Path.GetDirectoryName(ospPath)),
-                projectNames,
-                outputPaths,
-                outputFiles,
-                referencedPaths);
-            return true;
+            return new BodySlideProjectProbeCacheEntry(
+                true,
+                new BodySlideProjectProbe(
+                    ospPath,
+                    Path.GetDirectoryName(ospPath) ?? string.Empty,
+                    FindBodySlideRoot(Path.GetDirectoryName(ospPath)),
+                    projectNames,
+                    outputPaths,
+                    outputFiles,
+                    referencedPaths));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
-            return false;
+            return new BodySlideProjectProbeCacheEntry(false, null);
         }
     }
 
@@ -818,6 +833,8 @@ internal static class BodySlideSourceProjectSupport
 
         return null;
     }
+
+    private sealed record BodySlideProjectProbeCacheEntry(bool Success, BodySlideProjectProbe? Probe);
 
     private static async Task<BodySlideSourceSupport> TryReadOspAsync(string filePath, CancellationToken cancellationToken)
     {

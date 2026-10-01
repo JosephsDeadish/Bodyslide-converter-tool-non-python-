@@ -9,6 +9,7 @@ internal static class ModManagerLaunchArgumentCatalog
         "mo2-launcher",
         "modorganizer-launcher",
         "vortex-launcher",
+        "from-modmanager",
         "mo2",
         "modorganizer",
         "vortex",
@@ -52,6 +53,11 @@ internal static class ModManagerLaunchArgumentCatalog
     [
         "result",
         "load-result",
+        ..LauncherPathOptionNames
+    ];
+
+    internal static readonly string[] LauncherPathOptionNames =
+    [
         "mo2-output",
         "mo2-result",
         "mo2-mod",
@@ -60,6 +66,8 @@ internal static class ModManagerLaunchArgumentCatalog
         "modorganizer-result",
         "modorganizer-mod",
         "modorganizer-path",
+        "vortex-output",
+        "vortex-result",
         "vortex-mod",
         "vortex-path",
         "vortex-staging",
@@ -691,7 +699,7 @@ internal static class DesktopWorkflowSupport
         }
 
         return ModManagerLaunchArgumentCatalog.LauncherSwitchNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
-               ModManagerLaunchArgumentCatalog.PathOptionNames.Contains(key, StringComparer.OrdinalIgnoreCase);
+               ModManagerLaunchArgumentCatalog.LauncherPathOptionNames.Contains(key, StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool LooksLikeRecognizedOptionToken(string arg)
@@ -706,6 +714,7 @@ internal static class DesktopWorkflowSupport
                key.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("from-modmanager", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("mo2", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("modorganizer", StringComparison.OrdinalIgnoreCase) ||

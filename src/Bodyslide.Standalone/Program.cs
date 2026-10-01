@@ -429,7 +429,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
             try
             {
-                if (launchedProcess.WaitForExit(modManagerLaunchEarlyExitWaitMs) && launchedProcess.ExitCode != 0)
+                if (launchedProcess.HasExited && launchedProcess.ExitCode != 0)
                 {
                     WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: {candidateKind} exited early with code {launchedProcess.ExitCode}: {candidatePath}");
                     return true;
@@ -651,7 +651,7 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
     {
         FileName = desktopExePath,
         WorkingDirectory = workingDirectory,
-        UseShellExecute = true
+        UseShellExecute = false
     };
     ForwardDesktopLaunchArgs(startInfo, forwardedArgs, launchedFromModOrganizer, startupDiagnosticsPath);
 
@@ -778,7 +778,7 @@ static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<s
     var alreadyTagged = forwardedArgs.Any(StandaloneStartupRouting.IsModManagerLauncherArgument);
     if (!alreadyTagged)
     {
-        startInfo.ArgumentList.Add("--mo2-launcher");
+        startInfo.ArgumentList.Add("--from-modmanager");
     }
 
     WriteStartupDiagnostics(

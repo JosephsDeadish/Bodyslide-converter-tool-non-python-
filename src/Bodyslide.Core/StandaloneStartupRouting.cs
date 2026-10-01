@@ -71,7 +71,7 @@ public static class StandaloneStartupRouting
                 continue;
             }
 
-            if (!ModManagerLaunchArgumentCatalog.PathOptionNames.Contains(option, StringComparer.OrdinalIgnoreCase))
+            if (!ModManagerLaunchArgumentCatalog.LauncherPathOptionNames.Contains(option, StringComparer.OrdinalIgnoreCase))
             {
                 continue;
             }
