@@ -11194,6 +11194,85 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_ReprobesAddedShapeDataAssets()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "armor", "traveler");
+        var sliderSetDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(sliderSetDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+
+        var meshPath = Path.Combine(meshDirectory, "traveler_armor_0.nif");
+        var ospPath = Path.Combine(sliderSetDirectory, "traveler_pack.osp");
+        var triPath = Path.Combine(shapeDataDirectory, "TravelerProject.tri");
+
+        await File.WriteAllTextAsync(meshPath, "mesh");
+        await File.WriteAllTextAsync(
+            ospPath,
+            """
+            <SliderSetInfo version="1">
+              <SliderSet name="TravelerProject" set="3BA">
+                <OutputPath>meshes\armor\traveler\</OutputPath>
+                <OutputFile gender="f" use="true">traveler_armor_0.nif</OutputFile>
+                <Slider name="TravelerWaist" />
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+
+            var initial = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+            Assert.Contains("TravelerWaist", initial.Sliders);
+            Assert.DoesNotContain("TravelerBust", initial.Sliders);
+
+            await Task.Delay(1100);
+            await File.WriteAllBytesAsync(triPath, BuildInlineTriPayload(
+                1,
+                ("TravelerBust", [(0.125f, -0.25f, 0.375f)])));
+
+            var updated = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+            Assert.Contains("TravelerBust", updated.Sliders);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+
+        static byte[] BuildInlineTriPayload(int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+        {
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
+            writer.Write((uint)vertexCount);
+            writer.Write((uint)morphs.Length);
+
+            foreach (var morph in morphs)
+            {
+                var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+                writer.Write((ushort)nameBytes.Length);
+                writer.Write(nameBytes);
+                writer.Write((uint)morph.Deltas.Count);
+            }
+
+            foreach (var morph in morphs)
+            {
+                foreach (var (x, y, z) in morph.Deltas)
+                {
+                    writer.Write((short)Math.Round(x * 2048f));
+                    writer.Write((short)Math.Round(y * 2048f));
+                    writer.Write((short)Math.Round(z * 2048f));
+                }
+            }
+
+            return ms.ToArray();
+        }
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_UsesNestedOspMetadataToDiscoverShapeDataAssets()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
