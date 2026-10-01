@@ -369,20 +369,6 @@ static bool ShouldPauseOnExit(string[] args)
     return args.Length == 1 && !args[0].StartsWith("--", StringComparison.Ordinal);
 }
 
-static int ResolveModManagerLaunchEarlyExitWaitMs()
-{
-    const int defaultWaitMs = 1500;
-    const string environmentVariable = "BODYSLIDE_MOD_MANAGER_EARLY_EXIT_WAIT_MS";
-
-    var raw = Environment.GetEnvironmentVariable(environmentVariable);
-    if (!int.TryParse(raw, out var parsed) || parsed <= 0)
-    {
-        return defaultWaitMs;
-    }
-
-    return Math.Clamp(parsed, 250, 10000);
-}
-
 static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosticsPath, bool strictLauncherMode)
 {
     if (!OperatingSystem.IsWindows())
@@ -390,7 +376,6 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
         return false;
     }
 
-    var modManagerLaunchEarlyExitWaitMs = ResolveModManagerLaunchEarlyExitWaitMs();
     StandaloneDesktopLaunchDecision? launchDecision = null;
     string? currentExeFullPath = null;
     string? decisionDiagnosticsPath = null;
@@ -835,43 +820,9 @@ static bool HasStartupDiagnosticsArgumentWithValue(IReadOnlyList<string> args)
 
 static bool TryReadLongOptionName(string? arg, out string option)
 {
-    option = string.Empty;
-    if (string.IsNullOrWhiteSpace(arg))
+    if (!StandaloneStartupRouting.TryReadOptionName(arg, out option))
     {
         return false;
-    }
-
-    var trimmed = arg.Trim();
-    if (trimmed.StartsWith("--", StringComparison.Ordinal))
-    {
-        option = trimmed[2..].Trim();
-    }
-    else if (trimmed.StartsWith("-", StringComparison.Ordinal) || trimmed.StartsWith("/", StringComparison.Ordinal))
-    {
-        option = trimmed[1..].Trim();
-    }
-    else
-    {
-        return false;
-    }
-
-    if (option.Length == 0)
-    {
-        return false;
-    }
-
-    var separatorIndex = option.IndexOf('=');
-    if (separatorIndex >= 0)
-    {
-        option = option[..separatorIndex];
-    }
-    else
-    {
-        var colonIndex = option.IndexOf(':');
-        if (colonIndex > 1)
-        {
-            option = option[..colonIndex];
-        }
     }
 
     if (option.Contains(Path.DirectorySeparatorChar) || option.Contains(Path.AltDirectorySeparatorChar))

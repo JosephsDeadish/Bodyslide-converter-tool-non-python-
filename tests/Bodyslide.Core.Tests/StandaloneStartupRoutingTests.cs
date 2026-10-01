@@ -200,6 +200,20 @@ public sealed class StandaloneStartupRoutingTests
     }
 
     [Fact]
+    public void EvaluateDesktopLaunchDecision_FromModManagerTag_AttemptsDesktopHandoff()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--from-modmanager"],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+    }
+
+    [Fact]
     public void EvaluateDesktopLaunchDecision_SlashPrefixedMo2ColonArgument_IsDetected()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
