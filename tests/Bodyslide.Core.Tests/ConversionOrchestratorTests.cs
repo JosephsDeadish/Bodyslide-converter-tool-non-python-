@@ -6923,6 +6923,41 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicTextureAnalysisService_AnalyzeAsync_TracksMissingNormalMaps()
+    {
+        var workdir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workdir);
+
+        try
+        {
+            var diffuseA = Path.Combine(workdir, "armor.dds");
+            var diffuseB = Path.Combine(workdir, "armor_alt.dds");
+            var ddsBytes = new byte[128 + 64];
+            ddsBytes[0] = 0x44; ddsBytes[1] = 0x44; ddsBytes[2] = 0x53; ddsBytes[3] = 0x20;
+            ddsBytes[4] = 124;
+            await File.WriteAllBytesAsync(diffuseA, ddsBytes);
+            await File.WriteAllBytesAsync(diffuseB, ddsBytes);
+
+            var armor = new ImportedArmor(
+                MeshFiles: [],
+                TextureFiles: [diffuseA, diffuseB],
+                PhysicsFiles: [],
+                BodyReferenceFiles: [],
+                SourcePath: workdir);
+
+            var svc = new BasicTextureAnalysisService();
+            var summary = await svc.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.Contains("armor.dds", summary.MissingNormals ?? [], StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("armor_alt.dds", summary.MissingNormals ?? [], StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workdir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicTextureAnalysisService_AnalyzeAsync_DoesNotMarkExistingAuxTexturesAsMissing()
     {
         var workdir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -29240,6 +29275,71 @@ public sealed class OutputCompletenessTests
                 new PluginAnalysisResult([], [], string.Empty));
 
             Assert.DoesNotContain(issues, issue => issue.Message.Contains("staged generated meshes", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_AllowsBodySlideOutputFileStemMatchForCommonVariantSuffixes()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(
+                Path.Combine(sliderSetDirectory, "VariantSuffixProject.osp"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <SliderSetInfo version="1">
+                  <SliderSet name="VariantSuffixProject" baseShape="Base Shape" bsversion="20">
+                    <SetFolder>CalienteTools\BodySlide\ShapeData\VariantSuffixProject</SetFolder>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\VariantSuffixProject\armor_0.nif</SourceFile>
+                    <OutputPath>meshes\armor\oracle\</OutputPath>
+                    <OutputFile gender="f" use="true">GNDlegs_f.nif</OutputFile>
+                    <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "VariantSuffixProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "armor_0.nif"), "mesh");
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "GNDlegs_0.nif"), "mesh");
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Belly.bsd"), BuildBsdPayload("Belly", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "meshes", "armor", "oracle"));
+            File.WriteAllText(Path.Combine(outputDirectory, "meshes", "armor", "oracle", "GNDlegs_f.nif"), "mesh");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"CalienteTools\" destination=\"CalienteTools\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("VariantSuffixProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.DoesNotContain(
+                issues,
+                issue => issue.Message.Contains("OutputFile entries do not match staged generated meshes", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {

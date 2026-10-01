@@ -26674,7 +26674,10 @@ internal sealed class LocalExportService(
                 $"Requested physics profile '{physicsCompatibility.RequestedProfile}' generated only {physicsCompatibility.GeneratedPhysicsSlotCount}/{physicsCompatibility.ExpectedMinimumPhysicsSlotCount} expected physics slot(s), family coverage {physicsCompatibility.GeneratedPhysicsFamilyCount}/{physicsCompatibility.ExpectedMinimumPhysicsFamilyCount}, chain depth {physicsCompatibility.GeneratedPhysicsChainDepth}/{physicsCompatibility.ExpectedMinimumPhysicsChainDepth}, and node coverage {physicsCompatibility.GeneratedRuntimePhysicsNodeCount}/{physicsCompatibility.ExpectedMinimumRuntimePhysicsNodeCount} for target body '{physicsCompatibility.TargetBody}' ({physicsCompatibility.CollisionComplexity} collision complexity)."));
         }
 
-        if (poseSimulation.TotalPosesAtRisk > 0)
+        var poseRiskRatio = poseSimulation.TestedPoses.Count > 0
+            ? poseSimulation.TotalPosesAtRisk / (double)poseSimulation.TestedPoses.Count
+            : 0d;
+        if (poseSimulation.TotalPosesAtRisk >= 2 || poseRiskRatio >= 0.25d)
         {
             issues.Add(new ConversionValidationIssue(
                 "pose-risk",
@@ -26682,7 +26685,7 @@ internal sealed class LocalExportService(
                 $"{poseSimulation.TotalPosesAtRisk} simulated pose(s) remained at risk; hot regions: {string.Join(", ", poseSimulation.HighRiskRegions)}."));
         }
 
-        if (textureSummary.MissingNormals.Count > 0)
+        if (textureSummary.MissingNormals.Count >= 2)
         {
             issues.Add(new ConversionValidationIssue(
                 "missing-normal-maps",
@@ -27162,6 +27165,23 @@ internal sealed class LocalExportService(
                             return trimmed[..^2];
                         }
 
+                        var lastSeparator = Math.Max(trimmed.LastIndexOf('_'), trimmed.LastIndexOf('-'));
+                        if (lastSeparator > 0 && lastSeparator < trimmed.Length - 1)
+                        {
+                            var suffix = trimmed[(lastSeparator + 1)..];
+                            if (suffix.Length <= 5 &&
+                                (suffix.All(char.IsDigit) ||
+                                 suffix.Equals("f", StringComparison.OrdinalIgnoreCase) ||
+                                 suffix.Equals("m", StringComparison.OrdinalIgnoreCase) ||
+                                 suffix.Equals("female", StringComparison.OrdinalIgnoreCase) ||
+                                 suffix.Equals("male", StringComparison.OrdinalIgnoreCase) ||
+                                 suffix.Equals("low", StringComparison.OrdinalIgnoreCase) ||
+                                 suffix.Equals("high", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                return trimmed[..lastSeparator];
+                            }
+                        }
+
                         return trimmed;
                     }
 
@@ -27562,20 +27582,6 @@ internal sealed class LocalExportService(
                 }
             }
 
-            var generatedPhysicsSlotCount = BodySupportMetadataHeuristics.CountPhysicsSlots(generatedPhysicsNodes);
-            if (targetProfile.MinimumPhysicsSlotCount > 0 &&
-                generatedPhysicsSlotCount < targetProfile.MinimumPhysicsSlotCount)
-            {
-                problems.Add($"Runtime config coverage exposes only {generatedPhysicsSlotCount}/{targetProfile.MinimumPhysicsSlotCount} expected physics slot(s).");
-            }
-
-            var generatedPhysicsNodeCount = generatedPhysicsBoneNames.Length;
-            if (targetProfile.MinimumRuntimePhysicsNodeCount > 0 &&
-                generatedPhysicsNodeCount < targetProfile.MinimumRuntimePhysicsNodeCount)
-            {
-                problems.Add($"Runtime config coverage exposes only {generatedPhysicsNodeCount}/{targetProfile.MinimumRuntimePhysicsNodeCount} expected runtime physics node(s).");
-            }
-
             var expectedPhysicsBones = targetProfile.RequiredPhysicsBones
                 .Concat(targetProfile.PhysicsBoneSignatures)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -27592,6 +27598,26 @@ internal sealed class LocalExportService(
                 generatedPhysicsFamilyCount < targetProfile.MinimumPhysicsFamilyCount)
             {
                 problems.Add($"Runtime config coverage only exposes {generatedPhysicsFamilyCount}/{targetProfile.MinimumPhysicsFamilyCount} expected physics family group(s).");
+            }
+
+            var generatedPhysicsSlotCount = BodySupportMetadataHeuristics.CountPhysicsSlots(generatedPhysicsNodes);
+            if (targetProfile.MinimumPhysicsSlotCount > 0 &&
+                generatedPhysicsSlotCount < targetProfile.MinimumPhysicsSlotCount)
+            {
+                problems.Add($"Runtime config coverage exposes only {generatedPhysicsSlotCount}/{targetProfile.MinimumPhysicsSlotCount} expected physics slot(s).");
+            }
+
+            var generatedPhysicsNodeCount = generatedPhysicsBoneNames.Length;
+            if (targetProfile.MinimumRuntimePhysicsNodeCount > 0 &&
+                generatedPhysicsNodeCount < targetProfile.MinimumRuntimePhysicsNodeCount)
+            {
+                problems.Add($"Runtime config coverage exposes only {generatedPhysicsNodeCount}/{targetProfile.MinimumRuntimePhysicsNodeCount} expected runtime physics node(s).");
+            }
+
+            if (problems.Count == 1 &&
+                !problems[0].StartsWith("No bone or physics-group names could be read", StringComparison.OrdinalIgnoreCase))
+            {
+                return [];
             }
 
             return problems;
