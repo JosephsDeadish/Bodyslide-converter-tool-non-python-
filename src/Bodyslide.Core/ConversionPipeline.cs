@@ -26732,9 +26732,10 @@ internal sealed class LocalExportService(
 
         if (textureSummary.MissingNormals.Count >= 2)
         {
+            var missingNormalSeverity = textureSummary.MissingNormals.Count >= 20 ? "medium" : "low";
             issues.Add(new ConversionValidationIssue(
                 "missing-normal-maps",
-                "low",
+                missingNormalSeverity,
                 $"{textureSummary.MissingNormals.Count} diffuse texture(s) were missing authored normal maps and needed generated stubs."));
         }
 
