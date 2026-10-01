@@ -914,7 +914,13 @@ internal static class BodySlideSourceProjectSupport
                 return null;
             }
 
-            return $"{info.LastWriteTimeUtc.Ticks}";
+            var entryCount = 0;
+            foreach (var _ in info.EnumerateFileSystemInfos())
+            {
+                entryCount++;
+            }
+
+            return $"{info.LastWriteTimeUtc.Ticks}:{entryCount}";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
