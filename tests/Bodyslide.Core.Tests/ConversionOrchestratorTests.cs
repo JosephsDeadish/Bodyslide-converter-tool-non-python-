@@ -22198,8 +22198,6 @@ public sealed class RealisticModPackFixtureTests
             using var archive = ZipFile.OpenRead(zipPath);
             AssertZipContainsEntry(archive, "README.txt");
             AssertZipContainsEntry(archive, "meta.ini");
-            AssertZipContainsEntry(archive, "conversion-quality.json");
-            AssertZipContainsEntry(archive, "plugin-patches.json");
             AssertZipContainsEntry(archive, "preview.html");
             AssertZipContainsEntry(archive, "preview-workbench.html");
             AssertZipContainsEntry(archive, "fomod/ModuleConfig.xml");
@@ -22211,12 +22209,13 @@ public sealed class RealisticModPackFixtureTests
                 .Single();
             AssertZipContainsEntry(archive, Path.GetRelativePath(outputDirectory, sliderGroupsPath).Replace('\\', '/'));
 
-            var zippedQualityJson = ReadZipEntryText(archive, "conversion-quality.json");
-            Assert.Contains("\"Code\": \"plugin-link-partial-family-failure\"", zippedQualityJson, StringComparison.Ordinal);
+            var reportsDirectory = outputDirectory + ".reports";
+            var copiedQualityJson = await File.ReadAllTextAsync(Path.Combine(reportsDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"plugin-link-partial-family-failure\"", copiedQualityJson, StringComparison.Ordinal);
 
-            var zippedPatchJson = ReadZipEntryText(archive, "plugin-patches.json");
-            Assert.Contains("LinkedArmorFamilyReviewSteps", zippedPatchJson, StringComparison.Ordinal);
-            Assert.Contains("LinkedDeviousHarnessArmor", zippedPatchJson, StringComparison.Ordinal);
+            var copiedPatchJson = await File.ReadAllTextAsync(Path.Combine(reportsDirectory, "plugin-patches.json"));
+            Assert.Contains("LinkedArmorFamilyReviewSteps", copiedPatchJson, StringComparison.Ordinal);
+            Assert.Contains("LinkedDeviousHarnessArmor", copiedPatchJson, StringComparison.Ordinal);
 
             var zippedReadme = ReadZipEntryText(archive, "README.txt");
             Assert.Contains("Mod Organizer 2 / Vortex", zippedReadme, StringComparison.Ordinal);
@@ -22484,6 +22483,7 @@ public sealed class RealisticModPackFixtureTests
     {
         var expectedFiles = Directory
             .GetFiles(directory, "*", SearchOption.AllDirectories)
+            .Where(path => !Path.GetExtension(path).Equals(".json", StringComparison.OrdinalIgnoreCase))
             .Select(path => Path.GetRelativePath(directory, path).Replace('\\', '/'))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -29621,6 +29621,7 @@ public sealed class OutputCompletenessTests
             Assert.Contains(result.OutputFiles, path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(result.OutputFiles, path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
             Assert.True(File.Exists(outputDirectory + ".zip"));
+            Assert.True(File.Exists(outputDirectory + ".reports/conversion-quality.json"));
         }
         finally
         {

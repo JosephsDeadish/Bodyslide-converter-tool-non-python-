@@ -8696,16 +8696,65 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             .ToList();
     }
 
-    private static void CreateCombinedBatchZip(string rootOutput)
+    internal static string CreateCombinedBatchZip(string rootOutput)
     {
         var zipPath = rootOutput.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
+        CreatePackageZip(rootOutput, zipPath);
+        return zipPath;
+    }
+
+    private static void CreatePackageZip(string rootOutput, string zipPath)
+    {
         if (File.Exists(zipPath))
         {
             File.Delete(zipPath);
         }
 
-        ZipFile.CreateFromDirectory(rootOutput, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
+        using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+        foreach (var file in Directory.EnumerateFiles(rootOutput, "*", SearchOption.AllDirectories))
+        {
+            if (Path.GetExtension(file).Equals(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var relativePath = Path.GetRelativePath(rootOutput, file).Replace('\\', '/');
+            archive.CreateEntryFromFile(file, relativePath, CompressionLevel.Optimal);
+        }
     }
+
+    internal static async Task CopyRootJsonReportsToDiagnosticsDirectoryAsync(
+        string outputDirectory,
+        IReadOnlyList<string> outputFiles,
+        CancellationToken cancellationToken)
+    {
+        var diagnosticsDirectory = GetDiagnosticsDirectory(outputDirectory);
+        var rootJsonFiles = outputFiles
+            .Where(file =>
+                string.Equals(Path.GetDirectoryName(file), outputDirectory, StringComparison.OrdinalIgnoreCase) &&
+                Path.GetExtension(file).Equals(".json", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (rootJsonFiles.Length == 0)
+        {
+            return;
+        }
+
+        if (Directory.Exists(diagnosticsDirectory))
+        {
+            Directory.Delete(diagnosticsDirectory, recursive: true);
+        }
+        Directory.CreateDirectory(diagnosticsDirectory);
+        foreach (var file in rootJsonFiles)
+        {
+            var destination = Path.Combine(diagnosticsDirectory, Path.GetFileName(file));
+            File.Copy(file, destination, overwrite: true);
+        }
+    }
+
+    private static string GetDiagnosticsDirectory(string outputDirectory) =>
+        $"{outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)}.reports";
 
     private static string BuildVariantRootOutput(ConversionRequest originalRequest, NormalizedConversionRequest variant, bool batchMode)
     {
@@ -22434,15 +22483,11 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(conversionPipelineProfilePath);
 
+        await BatchConversionRunner.CopyRootJsonReportsToDiagnosticsDirectoryAsync(outputDirectory, outputFiles, cancellationToken);
+
         if (request.OutputZip)
         {
-            var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
-            if (File.Exists(zipPath))
-            {
-                File.Delete(zipPath);
-            }
-
-            ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
+            var zipPath = BatchConversionRunner.CreateCombinedBatchZip(outputDirectory);
             outputFiles.Add(zipPath);
         }
 
@@ -33264,36 +33309,15 @@ internal sealed class LocalExportService(
         {
             "README.txt",
             "meta.ini",
-            "dependency-map.json",
-            "conversion-pipeline-profile.json",
-            "conversion-quality.json",
-            "conversion-matrix-proof.json",
-            "support-coverage-signals.json",
-            "remaining-gaps-checklist.json",
             "remaining-gaps-checklist.md",
-            "desktop-workflow-automation.json",
-            "in-game-validation.json",
-            "live-game-execution.json",
-            "proof-harness-bundle.json",
-            "runtime-observation-bundle.template.json",
-            "topology-correspondence.json",
-            "runtime-validation-harness.json",
-            "runtime-validation-plan.json",
-            "skeleton-compatibility.json",
-            "pose-simulation-report.json",
-            "world-physics.json",
             "preview.html",
             "preview.svg",
             "preview-workbench.html",
-            "windows-ui-e2e-automation.json"
         };
 
         if (hasPluginArtifacts)
         {
-            files.Add("mod-stack-cross-validation.json");
-            files.Add("race-compatibility.json");
             files.Add("patch-armor.pas");
-            files.Add("plugin-patches.json");
         }
 
         return files;
@@ -33308,28 +33332,7 @@ internal sealed class LocalExportService(
         (fileName.Equals("README.txt", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("meta.ini", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("dependency-map.json", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("conversion-pipeline-profile.json", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("conversion-matrix-proof.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("support-coverage-signals.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("remaining-gaps-checklist.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("remaining-gaps-checklist.md", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("live-game-execution.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("proof-harness-bundle.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("proof-result-bundle.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("runtime-observation-bundle.template.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("topology-correspondence.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("runtime-validation-harness.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("runtime-validation-plan.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("race-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("pose-simulation-report.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("world-physics.json", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("preview.html", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("preview.svg", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase) ||
