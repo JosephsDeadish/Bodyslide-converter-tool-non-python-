@@ -2,6 +2,87 @@ using System.Text;
 
 namespace Bodyslide.Core;
 
+internal static class ModManagerLaunchArgumentCatalog
+{
+    internal static readonly string[] LauncherSwitchNames =
+    [
+        "mo2-launcher",
+        "modorganizer-launcher",
+        "vortex-launcher",
+        "mo2",
+        "modorganizer",
+        "vortex",
+        "nxmhandler",
+        "from-modorganizer",
+        "from-vortex",
+        "from-mo2"
+    ];
+
+    internal static readonly string[] PathOptionNames =
+    [
+        "load-result",
+        "result",
+        "mo2-output",
+        "mo2-result",
+        "mo2-mod",
+        "mo2-path",
+        "modorganizer-output",
+        "modorganizer-result",
+        "modorganizer-mod",
+        "modorganizer-path",
+        "vortex-output",
+        "vortex-result",
+        "vortex-mod",
+        "vortex-path",
+        "vortex-stage",
+        "vortex-staging",
+        "vortex-deployment",
+        "vortex-deploy-path",
+        "vortex-deployment-path",
+        "vortex-staging-path",
+        "vortex-mod-path",
+        "mods-path",
+        "mod-path",
+        "output-dir",
+        "output-path",
+        "staging-path"
+    ];
+
+    internal static readonly string[] InputFallbackPathOptionNames =
+    [
+        "result",
+        "load-result",
+        "mo2-output",
+        "mo2-result",
+        "mo2-mod",
+        "mo2-path",
+        "modorganizer-output",
+        "modorganizer-result",
+        "modorganizer-mod",
+        "modorganizer-path",
+        "vortex-mod",
+        "vortex-path",
+        "vortex-staging",
+        "vortex-stage",
+        "vortex-deployment",
+        "vortex-deploy-path",
+        "vortex-deployment-path",
+        "vortex-staging-path",
+        "vortex-mod-path",
+        "mods-path",
+        "mod-path",
+        "output-dir",
+        "output-path",
+        "staging-path"
+    ];
+
+    internal static readonly string[] StartupDiagnosticsArgumentNames =
+    [
+        "startup-diagnostics",
+        "launcher-handoff-diagnostics"
+    ];
+}
+
 internal sealed record DesktopLaunchOptions(
     string? StartupOutputDirectory,
     string? StartupInputPath,
@@ -25,60 +106,13 @@ internal static class DesktopWorkflowSupport
     private static readonly string[] DesktopResultArgumentNames =
     [
         "load-result",
-        "result",
         "output",
-        "mo2-output",
-        "mo2-result",
-        "mo2-mod",
-        "mo2-path",
-        "modorganizer-output",
-        "modorganizer-result",
-        "modorganizer-mod",
-        "modorganizer-path",
-        "vortex-output",
-        "vortex-result",
-        "vortex-mod",
-        "vortex-path",
-        "vortex-staging",
-        "vortex-stage",
-        "vortex-deployment",
-        "vortex-deploy-path",
-        "vortex-deployment-path",
-        "vortex-staging-path",
-        "vortex-mod-path",
-        "mods-path",
-        "mod-path",
-        "output-dir",
-        "output-path",
-        "staging-path"
+        ..ModManagerLaunchArgumentCatalog.PathOptionNames
     ];
     private static readonly string[] DesktopInputFallbackArgumentNames =
     [
         "output",
-        "result",
-        "load-result",
-        "mo2-output",
-        "mo2-result",
-        "mo2-mod",
-        "mo2-path",
-        "modorganizer-output",
-        "modorganizer-result",
-        "modorganizer-mod",
-        "modorganizer-path",
-        "vortex-mod",
-        "vortex-path",
-        "vortex-staging",
-        "vortex-stage",
-        "vortex-deployment",
-        "vortex-deploy-path",
-        "vortex-deployment-path",
-        "vortex-staging-path",
-        "vortex-mod-path",
-        "mods-path",
-        "mod-path",
-        "output-dir",
-        "output-path",
-        "staging-path"
+        ..ModManagerLaunchArgumentCatalog.InputFallbackPathOptionNames
     ];
     private static readonly string[] DesktopInputArgumentNames =
     [
@@ -88,11 +122,7 @@ internal static class DesktopWorkflowSupport
         "file",
         "folder"
     ];
-    private static readonly string[] StartupDiagnosticsArgumentNames =
-    [
-        "startup-diagnostics",
-        "launcher-handoff-diagnostics"
-    ];
+    private static readonly string[] StartupDiagnosticsArgumentNames = ModManagerLaunchArgumentCatalog.StartupDiagnosticsArgumentNames;
 
     private static readonly string[] DesktopResultMarkerFiles =
     [
@@ -660,16 +690,8 @@ internal static class DesktopWorkflowSupport
             return false;
         }
 
-        return key.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("mo2", StringComparison.OrdinalIgnoreCase) ||
-               key.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("modorganizer", StringComparison.OrdinalIgnoreCase) ||
-               key.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("vortex", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("from-modorganizer", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("from-vortex", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("from-mo2", StringComparison.OrdinalIgnoreCase);
+        return ModManagerLaunchArgumentCatalog.LauncherSwitchNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
+               ModManagerLaunchArgumentCatalog.PathOptionNames.Contains(key, StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool LooksLikeRecognizedOptionToken(string arg)

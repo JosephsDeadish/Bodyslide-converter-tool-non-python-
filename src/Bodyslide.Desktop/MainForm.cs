@@ -510,7 +510,7 @@ public sealed class MainForm : Form
 
         _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Quick import", quickImportPanel), 0, 0);
 
-        var inputRow = CreateThreeColumnRow("Input file / folder", out _inputTextBox);
+        var inputRow = CreateThreeColumnRow("Input source", out _inputTextBox);
         _inputTextBox.Name = "inputPathTextBox";
         _inputTextBox.PlaceholderText = "Select armor input (.nif/.esp/.esm/.esl/.zip/.7z/.rar/.tar) or an armor folder";
         _inputTextBox.AllowDrop = true;
@@ -1092,7 +1092,7 @@ public sealed class MainForm : Form
         _conversionOptionsPanel.Controls.Add(_sourceHintsGroupBox, 1, 0);
         _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Conversion setup", _conversionOptionsPanel), 0, 3);
 
-        var outputRow = CreateThreeColumnRow("Output (optional)", out _outputTextBox);
+        var outputRow = CreateThreeColumnRow("Output destination (optional)", out _outputTextBox);
         _outputTextBox.Name = "outputPathTextBox";
         _outputTextBox.AllowDrop = true;
         _outputTextBox.DragEnter += OnDragEnter;
@@ -1123,6 +1123,13 @@ public sealed class MainForm : Form
             MaximumSize = new Size(920, 0),
         };
         outputSection.Controls.Add(_outputHintLabel, 0, 1);
+        outputSection.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Margin = new Padding(0, 4, 0, 0),
+            MaximumSize = new Size(920, 0),
+            Text = "Choose where converted files should be written. Leave it blank to use the default output destination.",
+        }, 0, 2);
         var inputSection = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -1154,7 +1161,7 @@ public sealed class MainForm : Form
         pathSelectionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         pathSelectionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         pathSelectionPanel.Controls.Add(CreateAutoSizeSection("Input source", inputSection), 0, 0);
-        pathSelectionPanel.Controls.Add(outputSection, 1, 0);
+        pathSelectionPanel.Controls.Add(CreateAutoSizeSection("Output destination", outputSection), 1, 0);
         _topLayoutPanel.Controls.Add(pathSelectionPanel, 0, 1);
 
         var cacheRow = CreateThreeColumnRow("Learning cache (optional)", out _cachePathTextBox);
@@ -3204,15 +3211,22 @@ public sealed class MainForm : Form
                     update.ExtractionTotalBytesEstimated is > 0 &&
                     update.ExtractionTotalBytesCopied is >= 0)
                 {
+                    var completedStagesFraction = Math.Clamp(
+                        Math.Max(0d, update.StageIndex - 1d) / update.StageCount,
+                        0d,
+                        1d);
                     var byteStageFraction = Math.Clamp(
                         update.ExtractionTotalBytesCopied.Value / (double)update.ExtractionTotalBytesEstimated.Value,
                         0d,
                         1d);
-                    progressUnits = Math.Min(total, completed + byteStageFraction);
+                    progressUnits = Math.Min(total, completed + completedStagesFraction + (byteStageFraction / update.StageCount));
                 }
                 else if (!update.IsItemCompleted && update.StageCount > 0)
                 {
-                    var stageFraction = Math.Clamp((double)update.StageIndex / update.StageCount, 0d, 1d);
+                    var stageFraction = Math.Clamp(
+                        Math.Max(0d, update.StageIndex - 1d) / update.StageCount,
+                        0d,
+                        1d);
                     progressUnits = Math.Min(total, completed + stageFraction);
                 }
 
@@ -4037,17 +4051,24 @@ public sealed class MainForm : Form
             return 0;
         }
 
+        if (update.IsItemCompleted)
+        {
+            return 100;
+        }
+
         if (IsArchiveExtractionStage(update.Stage))
         {
             var copiedBytes = update.ExtractionTotalBytesCopied ?? update.ExtractionEntryBytesCopied;
             var totalBytes = update.ExtractionTotalBytesEstimated ?? update.ExtractionEntryBytesTotal;
             if (copiedBytes is > 0 && totalBytes is > 0)
             {
-                return (int)Math.Round(Math.Clamp((double)copiedBytes.Value / totalBytes.Value, 0d, 1d) * 100d, MidpointRounding.AwayFromZero);
+                var completedStages = Math.Clamp(Math.Max(0d, stageIndex - 1d) / stageCount, 0d, 1d);
+                var stageFraction = Math.Clamp((double)copiedBytes.Value / totalBytes.Value, 0d, 1d) / stageCount;
+                return (int)Math.Round(Math.Clamp(completedStages + stageFraction, 0d, 1d) * 100d, MidpointRounding.AwayFromZero);
             }
         }
 
-        return (int)Math.Round(Math.Clamp((double)stageIndex / stageCount, 0d, 1d) * 100d, MidpointRounding.AwayFromZero);
+        return (int)Math.Round(Math.Clamp(Math.Max(0d, stageIndex - 1d) / stageCount, 0d, 1d) * 100d, MidpointRounding.AwayFromZero);
     }
 
     private void ResetPipelineTimeline()
@@ -5455,7 +5476,7 @@ public sealed class MainForm : Form
             ? " Raw output will include README.txt plus fomod/ metadata, and a distributable zip will be created."
             : " Raw output will include README.txt plus fomod/ metadata; enable Package output as zip to bundle them into a distributable archive.";
         _outputHintLabel.Text = string.IsNullOrWhiteSpace(explicitOutput)
-            ? $"If you leave Output blank, SlideSmith will save to: {ResolveEffectiveOutputDirectoryPreview()}.{packageHint}"
+            ? $"If you leave Output destination blank, SlideSmith will save to: {ResolveEffectiveOutputDirectoryPreview()}.{packageHint}"
             : $"Converted files will be saved to: {explicitOutput}.{packageHint}";
     }
 

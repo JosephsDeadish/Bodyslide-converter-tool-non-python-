@@ -38,6 +38,25 @@ public sealed class StandaloneStartupRoutingTests
         Assert.True(decision.ExplicitCliLaunchDetected);
     }
 
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_InputAndOutputCliFlags_StayInCliMode()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            [
+                "--input",
+                @"C:\Mods\Some Armor\nif\armor.nif",
+                "--output",
+                @"C:\Mods\Some Armor\converted"
+            ],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.LauncherSignalDetected);
+        Assert.True(decision.ExplicitCliLaunchDetected);
+    }
+
     [Theory]
     [InlineData("--mo2-output", @"C:\MO2\mods\SomePack")]
     [InlineData("--vortex-staging", @"C:\Users\Test\AppData\Roaming\Vortex\skyrimse\mods")]
@@ -126,7 +145,7 @@ public sealed class StandaloneStartupRoutingTests
         Assert.True(decision.ShouldAttemptDesktopHandoff);
         Assert.True(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
-        Assert.False(decision.ExplicitCliLaunchDetected);
+        Assert.True(decision.ExplicitCliLaunchDetected);
     }
 
     [Fact]
@@ -142,6 +161,42 @@ public sealed class StandaloneStartupRoutingTests
         Assert.True(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
         Assert.True(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_ExplicitCliWithMo2ManagedInput_PathStillPrefersDesktopHandoff()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            [
+                "--self-check",
+                "--profile",
+                "Default"
+            ],
+            executablePath: @"D:\Mod Organizer 2\instances\Portable\mods\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"D:\Mod Organizer 2\instances\Portable\mods\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+        Assert.True(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_ModOrganizerOutputAlias_AttemptsDesktopHandoff()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            [
+                "--modorganizer-output",
+                @"D:\Mod Organizer 2\mods\Some Armor Pack"
+            ],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
     }
 
     [Fact]

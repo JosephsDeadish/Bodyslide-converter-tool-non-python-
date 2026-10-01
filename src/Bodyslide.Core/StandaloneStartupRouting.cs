@@ -25,16 +25,20 @@ public static class StandaloneStartupRouting
         var modManagerLaunch = IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
         var shouldAttemptDesktopHandoff = strictLauncherMode
             ? args.Count == 0 || launcherSignal || modManagerLaunch
-            : launcherSignal || !explicitCliLaunch;
+            : launcherSignal || modManagerLaunch || !explicitCliLaunch;
         var routingReason = strictLauncherMode
             ? shouldAttemptDesktopHandoff
                 ? launcherSignal
                     ? "strict-launcher-mode: launcher signal detected"
+                    : modManagerLaunch
+                        ? "strict-launcher-mode: mod-manager launch detected"
                     : "strict-launcher-mode: no args"
                 : "strict-launcher-mode: no launcher signal"
             : shouldAttemptDesktopHandoff
                 ? launcherSignal
                     ? "launcher signal detected"
+                    : modManagerLaunch
+                        ? "mod-manager launch detected"
                     : "default desktop handoff"
                 : "explicit cli without launcher signal";
 
@@ -54,16 +58,7 @@ public static class StandaloneStartupRouting
             return false;
         }
 
-        return option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("mo2", StringComparison.OrdinalIgnoreCase) ||
-               option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("modorganizer", StringComparison.OrdinalIgnoreCase) ||
-               option.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("vortex", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("nxmhandler", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("from-modorganizer", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("from-vortex", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("from-mo2", StringComparison.OrdinalIgnoreCase);
+        return ModManagerLaunchArgumentCatalog.LauncherSwitchNames.Contains(option, StringComparer.OrdinalIgnoreCase);
     }
 
     public static bool HasLauncherPathOptionArgument(IReadOnlyList<string> args)
@@ -76,7 +71,7 @@ public static class StandaloneStartupRouting
                 continue;
             }
 
-            if (!LauncherPathOptions.Contains(option, StringComparer.OrdinalIgnoreCase))
+            if (!ModManagerLaunchArgumentCatalog.PathOptionNames.Contains(option, StringComparer.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -92,12 +87,7 @@ public static class StandaloneStartupRouting
                 continue;
             }
 
-            if (File.Exists(normalized) || Directory.Exists(normalized))
-            {
-                return true;
-            }
-
-            if (normalized.Contains('\\') || normalized.Contains('/') || normalized.Contains(':'))
+            if (IsModManagerSpecificPathOption(option) || File.Exists(normalized) || Directory.Exists(normalized))
             {
                 return true;
             }
@@ -225,16 +215,6 @@ public static class StandaloneStartupRouting
         return option.Length > 0;
     }
 
-    private static readonly string[] LauncherPathOptions =
-    [
-        "mo2-output", "mo2-result", "mo2-mod", "mo2-path",
-        "modorganizer-path",
-        "load-result", "result", "output", "input",
-        "vortex-output", "vortex-result", "vortex-mod", "vortex-path",
-        "vortex-stage", "vortex-staging", "vortex-deployment",
-        "mods-path", "mod-path", "staging-path"
-    ];
-
     private static bool TryReadOptionValue(IReadOnlyList<string> args, int index, out string? value)
     {
         value = null;
@@ -288,6 +268,11 @@ public static class StandaloneStartupRouting
         hasEnvironmentVariable("VORTEX_INSTANCE_ID") ||
         hasEnvironmentVariable("VORTEX_SESSION");
 
+    private static bool IsModManagerSpecificPathOption(string option) =>
+        option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
+        option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
+        option.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase);
+
     private static bool HasStandaloneCommandSwitch(IReadOnlyList<string> args) =>
         args.Any(static arg =>
         {
@@ -336,6 +321,8 @@ public static class StandaloneStartupRouting
 
             if (option.Equals("preset", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("presets", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("input", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("output", StringComparison.OrdinalIgnoreCase) ||
                 (option.Equals("profile", StringComparison.OrdinalIgnoreCase) && !hasModManagerLauncherArgument) ||
                 option.Equals("source", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("physics", StringComparison.OrdinalIgnoreCase) ||
@@ -369,4 +356,5 @@ public static class StandaloneStartupRouting
 
         return !IsLikelyLauncherPathArgument(args[0]);
     }
+
 }
