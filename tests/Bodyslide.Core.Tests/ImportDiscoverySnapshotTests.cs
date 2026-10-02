@@ -52,6 +52,71 @@ public sealed class ImportDiscoverySnapshotTests(ITestOutputHelper output) : IDi
     }
 
     [Fact]
+    public void ExtensionScanMatchesFullSnapshotAcrossDepthsAndExclusions()
+    {
+        Write("meshes/Z_armor.NIF", "mesh");
+        Write("meshes/a_armor.nif", "mesh");
+        Write("textures/armor.dds", "texture");
+        Write("plugins/armor.ESP", "plugin");
+        Write("materials/armor.BGSM", "material");
+        var deep = string.Join('/', Enumerable.Repeat("level", 17));
+        Write($"{deep}/deep_armor.nif", "mesh");
+        Write("CalienteTools/BodySlide/ShapeData/reference.nif", "reference");
+        Write("excluded/ignored.nif", "excluded");
+        Write("generated/conversion-manifest.json", "{}");
+        Write("generated/ignored.nif", "generated");
+        Write("meshes/slidesmith/ignored.nif", "generated");
+        Write("output/ignored.nif", "generated");
+        Write("Converted/ignored.nif", "generated");
+        var exclusions = new[] { Path.Combine(root, "excluded") };
+        string[] extensions = [".NIF", ".esp", ".bgsm"];
+        var expected = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(root, exclusions)
+            .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+
+        var actual = BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, extensions, exclusions);
+
+        Assert.Equal(expected, actual);
+        Assert.Equal(5, actual.Count);
+        Assert.Empty(BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, []));
+        var selectedMesh = Path.Combine(root, "meshes", "Z_armor.NIF");
+        Assert.Equal(selectedMesh, Assert.Single(
+            BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(selectedMesh, [".nif"])));
+        Assert.Empty(BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(selectedMesh, [".dds"]));
+    }
+
+    [Theory]
+    [InlineData(100)]
+    [InlineData(10000)]
+    public void SparseExtensionScanMatchesFullScanAndRecordsObservationalTimings(int unrelatedCount)
+    {
+        for (var index = 0; index < unrelatedCount; index++)
+        {
+            Write($"textures/set-{index % 20:D2}/texture-{index:D5}.dds", "synthetic-discovery-only");
+        }
+        Write("meshes/armor.nif", "synthetic-discovery-only");
+        Write("plugins/armor.ESP", "synthetic-discovery-only");
+        Write("materials/armor.BGSM", "synthetic-discovery-only");
+        string[] extensions = [".esp", ".esm", ".esl", ".bgsm", ".bgem"];
+
+        var fullScanTimer = Stopwatch.StartNew();
+        var expected = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(root)
+            .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+        fullScanTimer.Stop();
+        var filteredTimer = Stopwatch.StartNew();
+        var actual = BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, extensions);
+        filteredTimer.Stop();
+
+        Assert.Equal(expected, actual);
+        Assert.Equal(2, actual.Count);
+        output.WriteLine(
+            $"Synthetic sparse support scan: {unrelatedCount} unrelated textures; full scan/filter={fullScanTimer.Elapsed.TotalMilliseconds:F2} ms; " +
+            $"filtered traversal={filteredTimer.Elapsed.TotalMilliseconds:F2} ms. " +
+            "Both traverse the tree; timings are observational and order/cache-dependent, not cold-cache or real-user benchmarks.");
+    }
+
+    [Fact]
     public void SnapshotPreservesUnboundedMeshAndBoundedSupportDepths()
     {
         Write("meshes/armor.nif", "mesh");

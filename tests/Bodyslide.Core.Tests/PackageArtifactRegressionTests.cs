@@ -317,6 +317,40 @@ public sealed class PackageArtifactRegressionTests
     }
 
     [Fact]
+    public void BodySlidePayloadSnapshotChecksAllTypesAndIsFreshForEachValidation()
+    {
+        using var package = new PackageFixture();
+        package.WriteBodySlide();
+        foreach (var extension in new[] { "bsd", "tri", "osd" })
+        {
+            package.Write($"CalienteTools/BodySlide/ShapeData/Project/broken.{extension}", "broken payload");
+        }
+
+        foreach (var extension in new[] { "bsd", "tri", "osd" })
+        {
+            Assert.Contains(package.Verify(bodySlide: true), issue => issue.Code == "bodyslide-semantic-mismatch" &&
+                issue.Message.Contains($"ShapeData {extension.ToUpperInvariant()} payload 'broken.{extension}'", StringComparison.Ordinal));
+            File.Delete(package.PathFor($"CalienteTools/BodySlide/ShapeData/Project/broken.{extension}"));
+        }
+        Assert.DoesNotContain(package.Verify(bodySlide: true), issue =>
+            issue.Code == "bodyslide-semantic-mismatch" && issue.Message.Contains("broken.", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("bsd")]
+    [InlineData("tri")]
+    [InlineData("osd")]
+    public void BodySlidePayloadSnapshotPreservesTopDirectoryOnlyValidation(string extension)
+    {
+        using var package = new PackageFixture();
+        package.WriteBodySlide();
+        package.Write($"CalienteTools/BodySlide/ShapeData/Project/nested/broken.{extension}", "broken payload");
+
+        Assert.DoesNotContain(package.Verify(bodySlide: true), issue =>
+            issue.Code == "bodyslide-semantic-mismatch" && issue.Message.Contains("broken.", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void FomodCommentsDoNotCountAsInstallerEntries()
     {
         using var package = new PackageFixture();

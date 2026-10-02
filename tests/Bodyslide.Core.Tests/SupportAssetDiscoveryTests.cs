@@ -95,6 +95,47 @@ public sealed class SupportAssetDiscoveryTests
     }
 
     [Fact]
+    public void DiscoverSupportAssets_PreservesMixedCaseExtensionsAndFreshExcludedScans()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "slidesmith-support-assets-fresh", Guid.NewGuid().ToString("N"));
+        var excludedRoot = Path.Combine(root, "excluded");
+        var sharedRoot = Path.Combine(root, "shared");
+        try
+        {
+            Directory.CreateDirectory(excludedRoot);
+            Directory.CreateDirectory(sharedRoot);
+            var firstPlugin = Path.Combine(root, "ZArmor.ESP");
+            var secondPlugin = Path.Combine(root, "aArmor.EsL");
+            var firstMaterial = Path.Combine(root, "ZArmor.BGSM");
+            var secondMaterial = Path.Combine(root, "aArmor.BgEm");
+            File.WriteAllText(firstPlugin, "plugin");
+            File.WriteAllText(firstMaterial, "material");
+            File.WriteAllText(Path.Combine(excludedRoot, "ignored.ESP"), "excluded");
+            File.WriteAllText(Path.Combine(sharedRoot, "ignored.BGSM"), "excluded");
+
+            var first = LocalExportService.DiscoverSupportAssets(root, excludedRoot, sharedRoot);
+            Assert.Equal(firstPlugin, Assert.Single(first.PluginFiles));
+            Assert.Equal(firstMaterial, Assert.Single(first.MaterialFiles));
+
+            File.WriteAllText(secondPlugin, "plugin");
+            File.WriteAllText(secondMaterial, "material");
+            var added = LocalExportService.DiscoverSupportAssets(root, excludedRoot, sharedRoot);
+            Assert.Equal(new[] { secondPlugin, firstPlugin }, added.PluginFiles);
+            Assert.Equal(new[] { secondMaterial, firstMaterial }, added.MaterialFiles);
+
+            File.Delete(firstPlugin);
+            File.Delete(firstMaterial);
+            var removed = LocalExportService.DiscoverSupportAssets(root, excludedRoot, sharedRoot);
+            Assert.Equal(secondPlugin, Assert.Single(removed.PluginFiles));
+            Assert.Equal(secondMaterial, Assert.Single(removed.MaterialFiles));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void DiscoverSupportAssets_HonorsCancellationBeforeTreeScan()
     {
         var root = Path.Combine(Path.GetTempPath(), "slidesmith-support-assets-cancel", Guid.NewGuid().ToString("N"));

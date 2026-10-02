@@ -8868,10 +8868,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 return [];
             }
 
-            return EnumerateAllFiles(path, excludedDirectories, cancellationToken)
-                .Where(file => extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
-                .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            return EnumerateFileSnapshot(path, excludedDirectories, cancellationToken,
+                    maxTraversalDepth: null, includeBodySlideSupport: false, extensions: extensions)
+                .Select(file => file.Path).ToArray();
         }
 
         public static IReadOnlyList<string> EnumerateAllFiles(
@@ -8904,7 +8903,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             CancellationToken cancellationToken,
             int? maxTraversalDepth,
             bool includeBodySlideSupport,
-            bool preserveDeepMeshes = false)
+            bool preserveDeepMeshes = false,
+            IReadOnlyCollection<string>? extensions = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(path))
@@ -8917,6 +8917,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 return [];
             }
 
+            var extensionFilter = extensions is null
+                ? null
+                : new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase);
             var files = new List<SourceScanFile>();
             var pending = new Stack<(string Directory, int Depth, bool MeshEligible)>();
             pending.Push((Path.GetFullPath(path), 0, true));
@@ -8947,7 +8950,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 foreach (var file in Directory.EnumerateFiles(directory))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    files.Add(new SourceScanFile(Path.GetFullPath(file), depth, meshEligible));
+                    if (extensionFilter is null || extensionFilter.Contains(Path.GetExtension(file)))
+                    {
+                        files.Add(new SourceScanFile(Path.GetFullPath(file), depth, meshEligible));
+                    }
                 }
             }
 
@@ -23340,10 +23346,13 @@ internal sealed class LocalExportService(
         }
 
         static bool IsPlugin(string path) =>
-            Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
+            Path.GetExtension(path).Equals(".esp", StringComparison.OrdinalIgnoreCase) ||
+            Path.GetExtension(path).Equals(".esm", StringComparison.OrdinalIgnoreCase) ||
+            Path.GetExtension(path).Equals(".esl", StringComparison.OrdinalIgnoreCase);
 
         static bool IsMaterial(string path) =>
-            Path.GetExtension(path) is ".bgsm" or ".bgem";
+            Path.GetExtension(path).Equals(".bgsm", StringComparison.OrdinalIgnoreCase) ||
+            Path.GetExtension(path).Equals(".bgem", StringComparison.OrdinalIgnoreCase);
 
         if (File.Exists(scanRoot))
         {
@@ -23365,11 +23374,9 @@ internal sealed class LocalExportService(
             cancellationToken);
         var pluginFiles = files
             .Where(IsPlugin)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var materialFiles = files
             .Where(IsMaterial)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
         return new SupportAssetDiscoveryResult(pluginFiles, materialFiles);
     }
@@ -27555,7 +27562,9 @@ internal sealed class LocalExportService(
                 var lowWeightPayloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var highWeightPayloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var osdPayloadMorphNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var bsdPath in Directory.EnumerateFiles(shapeDataDirectory, "*.bsd"))
+                var payloadPaths = Directory.EnumerateFiles(shapeDataDirectory).ToArray();
+                var payloadPathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                foreach (var bsdPath in payloadPaths.Where(path => path.EndsWith(".bsd", payloadPathComparison)))
                 {
                     if (BsdMorphReader.TryRead(bsdPath, out var bsdPayload) && !string.IsNullOrWhiteSpace(bsdPayload?.SliderName))
                     {
@@ -27577,7 +27586,7 @@ internal sealed class LocalExportService(
                     }
                 }
 
-                foreach (var triPath in Directory.EnumerateFiles(shapeDataDirectory, "*.tri"))
+                foreach (var triPath in payloadPaths.Where(path => path.EndsWith(".tri", payloadPathComparison)))
                 {
                     if (TriMorphReader.TryRead(triPath, out var triPayload))
                     {
@@ -27608,7 +27617,7 @@ internal sealed class LocalExportService(
                     }
                 }
 
-                foreach (var osdPath in Directory.EnumerateFiles(shapeDataDirectory, "*.osd"))
+                foreach (var osdPath in payloadPaths.Where(path => path.EndsWith(".osd", payloadPathComparison)))
                 {
                     if (!OsdMorphReader.TryRead(osdPath, out var osdPayload) || osdPayload is null)
                     {

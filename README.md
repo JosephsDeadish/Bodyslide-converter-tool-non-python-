@@ -103,6 +103,17 @@ packs with matching texture counts. Run it with the existing `dotnet test`
 runner and a TRX logger to retain the timing output. These discovery-only samples
 are not real-user packs, cold-cache benchmarks, or end-to-end conversion proof.
 
+Extension-specific batch/export scans retain and sort only matching files rather
+than all source assets. Export plugin/material classification is case-insensitive
+and still performs a fresh scan, including assets added since import; output and
+shared-package exclusions remain in effect. Sparse synthetic support-scan tests
+record observational timings, not real-pack or cold-cache guarantees. Cross-stage
+snapshot reuse is not enabled because it could hide changed assets or change scan
+depth coverage.
+BodySlide package validation reuses one local ShapeData payload listing for
+BSD/TRI/OSD checks, retaining the existing top-directory scope and refreshing it
+for every validation; recursive staged-mesh discovery remains separate.
+
 Local Release verification is separate from external coverage evidence: the
 Linux packaged CLI can be self-checked here, but Windows desktop/MO2/Vortex click
 paths, BodySlide builds and live-game physics must be validated on the target
