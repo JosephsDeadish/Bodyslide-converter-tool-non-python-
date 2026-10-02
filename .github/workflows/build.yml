@@ -100,6 +100,12 @@ jobs:
           name: slidesmith-linux-x64
           path: artifacts
 
+      - name: Build on Windows
+        run: dotnet build BodyslideConverter.slnx --configuration Release --no-restore
+
+      - name: Test on Windows
+        run: dotnet test tests/Bodyslide.Core.Tests/Bodyslide.Core.Tests.csproj --configuration Release --no-build
+
       - name: Publish Windows desktop app (single file)
         run: >
           dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj
@@ -133,7 +139,13 @@ jobs:
         shell: pwsh
         run: |
           & artifacts/win-x64/SlideSmith.exe --smoke-test
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged Windows desktop smoke test failed with exit code $LASTEXITCODE."
+          }
           & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged Windows CLI self-check failed with exit code $LASTEXITCODE."
+          }
 
       - name: Stage Windows bundle contents
         shell: pwsh
@@ -244,6 +256,12 @@ jobs:
       - name: Restore
         run: dotnet restore BodyslideConverter.slnx
 
+      - name: Build on Windows
+        run: dotnet build BodyslideConverter.slnx --configuration Release --no-restore
+
+      - name: Test on Windows
+        run: dotnet test tests/Bodyslide.Core.Tests/Bodyslide.Core.Tests.csproj --configuration Release --no-build
+
       - name: Publish Windows desktop app (single file)
         run: >
           dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj
@@ -277,7 +295,13 @@ jobs:
         shell: pwsh
         run: |
           & artifacts/win-x64/SlideSmith.exe --smoke-test
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged Windows desktop smoke test failed with exit code $LASTEXITCODE."
+          }
           & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged Windows CLI self-check failed with exit code $LASTEXITCODE."
+          }
 
       - name: Stage Windows bundle contents
         shell: pwsh
