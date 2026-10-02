@@ -10976,28 +10976,72 @@ internal sealed class LocalArmorImportService : IArmorImportService
             return [];
         }
 
-        var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var bodySlideRoot in new[]
-                 {
-                     Path.Combine(supportScanRoot, "CalienteTools", "BodySlide"),
-                     Path.Combine(supportScanRoot, "BodySlide")
-                 }.Where(Directory.Exists))
+        if (discoveredFiles.Count == 0)
         {
-            foreach (var file in Directory.EnumerateFiles(bodySlideRoot, "*.*", SearchOption.AllDirectories))
+            return [];
+        }
+
+        var bodySlideRoots = new[]
             {
-                var extension = Path.GetExtension(file);
-                if (extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
-                    extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
-                    BodySlideSourceProjectSupport.IsLikelyBodySlideSupportXml(file))
-                {
-                    discovered.Add(Path.GetFullPath(file));
-                }
+                Path.GetFullPath(Path.Combine(supportScanRoot, "CalienteTools", "BodySlide")),
+                Path.GetFullPath(Path.Combine(supportScanRoot, "BodySlide"))
+            }
+            .Where(Directory.Exists)
+            .ToArray();
+
+        if (bodySlideRoots.Length == 0)
+        {
+            return [];
+        }
+
+        var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in discoveredFiles)
+        {
+            if (string.IsNullOrWhiteSpace(file))
+            {
+                continue;
+            }
+
+            var extension = Path.GetExtension(file);
+            if (!extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) &&
+                !extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) &&
+                !BodySlideSourceProjectSupport.IsLikelyBodySlideSupportXml(file))
+            {
+                continue;
+            }
+
+            var normalizedFile = Path.GetFullPath(file);
+            if (bodySlideRoots.Any(root => IsPathInsideDirectory(normalizedFile, root)))
+            {
+                discovered.Add(normalizedFile);
             }
         }
 
         return discovered
             .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static bool IsPathInsideDirectory(string candidatePath, string directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(candidatePath) || string.IsNullOrWhiteSpace(directoryPath))
+        {
+            return false;
+        }
+
+        var normalizedCandidate = Path.GetFullPath(candidatePath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedDirectory = Path.GetFullPath(directoryPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (string.Equals(normalizedCandidate, normalizedDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return normalizedCandidate.StartsWith(
+            normalizedDirectory + Path.DirectorySeparatorChar,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

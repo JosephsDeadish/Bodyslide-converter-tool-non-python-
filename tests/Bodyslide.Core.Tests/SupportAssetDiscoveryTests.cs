@@ -101,4 +101,5 @@ public sealed class SupportAssetDiscoveryTests
             }
         }
     }
+
 }
