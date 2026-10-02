@@ -8831,7 +8831,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         public static IReadOnlyList<string> EnumerateAllFiles(
             string path,
             IReadOnlyList<string>? excludedDirectories = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            int? maxTraversalDepth = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(path))
@@ -8845,13 +8846,13 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             }
 
             var files = new List<string>();
-            var pending = new Stack<string>();
-            pending.Push(Path.GetFullPath(path));
+            var pending = new Stack<(string Directory, int Depth)>();
+            pending.Push((Path.GetFullPath(path), 0));
 
             while (pending.Count > 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var directory = pending.Pop();
+                var (directory, depth) = pending.Pop();
                 foreach (var childDirectory in Directory.EnumerateDirectories(directory))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -8860,7 +8861,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                         continue;
                     }
 
-                    pending.Push(childDirectory);
+                    if (maxTraversalDepth is null || depth < maxTraversalDepth.Value)
+                    {
+                        pending.Push((childDirectory, depth + 1));
+                    }
                 }
 
                 foreach (var file in Directory.EnumerateFiles(directory))
@@ -10856,7 +10860,11 @@ internal sealed class LocalArmorImportService : IArmorImportService
         cancellationToken.ThrowIfCancellationRequested();
 
         var supportScanRoot = ResolveSupportScanRoot(sourcePath);
-        var supportFiles = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(supportScanRoot, excludedDirectories, cancellationToken);
+        var supportFiles = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
+            supportScanRoot,
+            excludedDirectories,
+            cancellationToken,
+            maxTraversalDepth: 16);
         IReadOnlyList<string> SelectSupportFiles(params string[] extensions) =>
             supportFiles
                 .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
@@ -21434,7 +21442,8 @@ internal sealed class LocalExportService(
         var supportAssets = DiscoverSupportAssets(
             armor.SourcePath,
             outputDirectory,
-            request.SharedPluginOutputDirectory);
+            request.SharedPluginOutputDirectory,
+            cancellationToken);
         var assetOutputDirectory = outputDirectory;
         var copiedSupportAssets = await CopySupportAssetsAsync(
             armor,
@@ -23076,8 +23085,10 @@ internal sealed class LocalExportService(
     internal static SupportAssetDiscoveryResult DiscoverSupportAssets(
         string sourcePath,
         string? excludedDirectory = null,
-        string? sharedPluginOutputDirectory = null)
+        string? sharedPluginOutputDirectory = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var scanRoot = ResolveSupportAssetRoot(sourcePath);
         var excludedDirectories = new List<string>(capacity: 2);
         if (!string.IsNullOrWhiteSpace(excludedDirectory))
@@ -23112,7 +23123,8 @@ internal sealed class LocalExportService(
         var files = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
             scanRoot,
             excludedDirectories,
-            CancellationToken.None);
+            cancellationToken,
+            maxTraversalDepth: 16);
         var pluginFiles = files
             .Where(IsPlugin)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)

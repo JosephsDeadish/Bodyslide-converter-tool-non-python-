@@ -1,4 +1,6 @@
 using Bodyslide.Core;
+using System.Reflection;
+using System.Threading;
 
 namespace Bodyslide.Core.Tests;
 
@@ -30,12 +32,39 @@ public sealed class SupportAssetDiscoveryTests
 
             var discovery = (LocalExportService.SupportAssetDiscoveryResult)typeof(LocalExportService)
                 .GetMethod("DiscoverSupportAssets", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
-                .Invoke(null, [sourceRoot, outputRoot, null])!;
+                .Invoke(null, [sourceRoot, outputRoot, null, CancellationToken.None])!;
 
             Assert.Contains(pluginPath, discovery.PluginFiles);
             Assert.DoesNotContain(excludedPluginPath, discovery.PluginFiles);
             Assert.Contains(materialPath, discovery.MaterialFiles);
             Assert.DoesNotContain(nifPath, discovery.MaterialFiles);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void DiscoverSupportAssets_HonorsCancellationBeforeTreeScan()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "slidesmith-support-assets-cancel", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            var exception = Assert.Throws<TargetInvocationException>(() =>
+                typeof(LocalExportService)
+                    .GetMethod("DiscoverSupportAssets", BindingFlags.NonPublic | BindingFlags.Static)!
+                    .Invoke(null, [root, null, null, cancellation.Token]));
+
+            Assert.IsType<OperationCanceledException>(exception.InnerException);
         }
         finally
         {

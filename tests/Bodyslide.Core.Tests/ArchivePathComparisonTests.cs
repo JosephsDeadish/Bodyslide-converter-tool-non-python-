@@ -4,6 +4,7 @@ using System.Formats.Tar;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Threading;
 using Xunit;
 
 namespace Bodyslide.Core.Tests
@@ -241,6 +242,43 @@ namespace Bodyslide.Core.Tests
                         workingDirectory,
                         [".nif"],
                         cancellationToken: cancellation.Token));
+            }
+            finally
+            {
+                if (Directory.Exists(workingDirectory))
+                {
+                    Directory.Delete(workingDirectory, recursive: true);
+                }
+            }
+        }
+
+        [Fact]
+        public void EnumerateAllFiles_RespectsTraversalDepthBound()
+        {
+            var workingDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-enumerate-depth", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(workingDirectory);
+
+            try
+            {
+                var shallowFile = Path.Combine(workingDirectory, "root.txt");
+                var childDirectory = Path.Combine(workingDirectory, "child");
+                var grandChildDirectory = Path.Combine(childDirectory, "grandchild");
+                Directory.CreateDirectory(grandChildDirectory);
+
+                var childFile = Path.Combine(childDirectory, "child.txt");
+                var grandChildFile = Path.Combine(grandChildDirectory, "grandchild.txt");
+                File.WriteAllText(shallowFile, "root");
+                File.WriteAllText(childFile, "child");
+                File.WriteAllText(grandChildFile, "grandchild");
+
+                var files = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
+                    workingDirectory,
+                    cancellationToken: CancellationToken.None,
+                    maxTraversalDepth: 1);
+
+                Assert.Contains(Path.GetFullPath(shallowFile), files);
+                Assert.Contains(Path.GetFullPath(childFile), files);
+                Assert.DoesNotContain(Path.GetFullPath(grandChildFile), files);
             }
             finally
             {
