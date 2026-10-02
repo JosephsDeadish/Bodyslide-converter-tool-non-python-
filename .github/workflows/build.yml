@@ -138,9 +138,9 @@ jobs:
       - name: Smoke-test packaged Windows binaries
         shell: pwsh
         run: |
-          & artifacts/win-x64/SlideSmith.exe --smoke-test
-          if ($LASTEXITCODE -ne 0) {
-            throw "Packaged Windows desktop smoke test failed with exit code $LASTEXITCODE."
+          $desktopProcess = Start-Process -FilePath (Resolve-Path artifacts/win-x64/SlideSmith.exe).Path -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($desktopProcess.ExitCode -ne 0) {
+            throw "Packaged Windows desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
           }
           & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
           if ($LASTEXITCODE -ne 0) {
@@ -294,9 +294,9 @@ jobs:
       - name: Smoke-test packaged Windows binaries
         shell: pwsh
         run: |
-          & artifacts/win-x64/SlideSmith.exe --smoke-test
-          if ($LASTEXITCODE -ne 0) {
-            throw "Packaged Windows desktop smoke test failed with exit code $LASTEXITCODE."
+          $desktopProcess = Start-Process -FilePath (Resolve-Path artifacts/win-x64/SlideSmith.exe).Path -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($desktopProcess.ExitCode -ne 0) {
+            throw "Packaged Windows desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
           }
           & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
           if ($LASTEXITCODE -ne 0) {
