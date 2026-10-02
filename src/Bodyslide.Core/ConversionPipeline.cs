@@ -8878,7 +8878,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             string path,
             IReadOnlyList<string>? excludedDirectories = null,
             CancellationToken cancellationToken = default,
-            int? maxTraversalDepth = null)
+            int? maxTraversalDepth = null,
+            bool includeBodySlideSupport = false)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(path))
@@ -8903,7 +8904,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if ((File.GetAttributes(childDirectory) & FileAttributes.ReparsePoint) != 0 ||
-                        ShouldSkipDirectory(childDirectory, excludedDirectories))
+                        ShouldSkipDirectory(childDirectory, excludedDirectories, includeBodySlideSupport))
                     {
                         continue;
                     }
@@ -8926,7 +8927,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 .ToList();
         }
 
-        private static bool ShouldSkipDirectory(string directoryPath, IReadOnlyList<string>? excludedDirectories)
+        private static bool ShouldSkipDirectory(string directoryPath, IReadOnlyList<string>? excludedDirectories, bool includeBodySlideSupport)
         {
             if (IsPathInsideAnyDirectory(directoryPath, excludedDirectories))
             {
@@ -8934,7 +8935,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             }
 
             var normalizedPath = Path.GetFullPath(directoryPath).Replace('\\', '/');
-            if (normalizedPath.Contains("/calientetools/bodyslide", StringComparison.OrdinalIgnoreCase) ||
+            if ((!includeBodySlideSupport && normalizedPath.Contains("/calientetools/bodyslide", StringComparison.OrdinalIgnoreCase)) ||
                 normalizedPath.Contains("/meshes/slidesmith", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
@@ -10916,7 +10917,8 @@ internal sealed class LocalArmorImportService : IArmorImportService
             supportScanRoot,
             excludedDirectories,
             cancellationToken,
-            maxTraversalDepth: 16);
+            maxTraversalDepth: 16,
+            includeBodySlideSupport: true);
         IReadOnlyList<string> SelectSupportFiles(params string[] extensions) =>
             supportFiles
                 .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
