@@ -89,6 +89,9 @@ Their BodySlide project/ShapeData identities are distinct, and their OSP build
 paths match those namespaced plugin mesh references. Folder batches discover
 source plugins once at the pack root; shared exports are serialized and retain
 the accumulated mesh rewrites rather than overwriting earlier armor mappings.
+Plugin references are resolved against the complete batch mesh set before each
+item stages only its owned mappings. BodySlide names are allocated after
+sanitization and body qualification, including natural body-suffixed names.
 
 Body detection ignores GUID-shaped path components and leaf names as opaque
 workspace identifiers. Accidental body-name substrings inside those identifiers

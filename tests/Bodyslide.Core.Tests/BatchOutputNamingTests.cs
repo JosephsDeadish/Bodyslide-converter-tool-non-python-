@@ -56,7 +56,7 @@ public sealed class BatchOutputNamingTests
                 Assert.All(project.Descendants("OutputPath"), element =>
                     Assert.Equal($"meshes/slidesmith/cbbe/{identity}/", element.Value.Replace('\\', '/')));
                 Assert.All(project.Descendants("SliderSet"), element =>
-                    Assert.StartsWith(identity + "_", element.Attribute("name")!.Value, StringComparison.Ordinal));
+                    Assert.StartsWith(Path.GetFileNameWithoutExtension(projectPath), element.Attribute("name")!.Value, StringComparison.Ordinal));
             }
             Assert.Equal(2, results.Select(result => Path.GetFileName(Assert.Single(
                 Directory.GetFiles(result.OutputDirectory, "*.osp", SearchOption.AllDirectories))))
@@ -68,15 +68,17 @@ public sealed class BatchOutputNamingTests
         }
     }
 
-    [Fact]
-    public async Task ScratchPluginNamesDoNotCollideWithNaturalArmorNames()
+    [Theory]
+    [InlineData("cuirass_cuirass")]
+    [InlineData("cuirass_CBBE")]
+    public async Task ScratchPluginNamesDoNotCollideWithNaturalArmorNames(string naturalName)
     {
         var root = Path.Combine(Path.GetTempPath(), "slidesmith-batch-plugin-names", Guid.NewGuid().ToString("N"));
         try
         {
             var input = Path.Combine(root, "input");
             var output = Path.Combine(root, "output");
-            foreach (var (folder, name) in new[] { ("first", "cuirass"), ("second", "cuirass"), ("third", "cuirass_cuirass") })
+            foreach (var (folder, name) in new[] { ("first", "cuirass"), ("second", "cuirass"), ("third", naturalName) })
             {
                 var directory = Path.Combine(input, folder);
                 Directory.CreateDirectory(directory);
@@ -90,6 +92,56 @@ public sealed class BatchOutputNamingTests
             Assert.Equal(3, results.Select(result => Path.GetFileName(Assert.Single(
                 Directory.GetFiles(Path.Combine(result.OutputDirectory, "CalienteTools", "BodySlide", "SliderSets"), "*.osp"))))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SameNamedPluginMeshesAreStagedOnlyForTheirOwningItem(bool archived)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "slidesmith-batch-owned-meshes", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var input = Path.Combine(root, "input");
+            var output = Path.Combine(root, "output");
+            foreach (var folder in new[] { "first", "second" })
+            {
+                var directory = Path.Combine(input, "meshes", "armor", folder);
+                Directory.CreateDirectory(directory);
+                await File.WriteAllBytesAsync(Path.Combine(directory, "cuirass_0.nif"), new byte[64]);
+                var plugin = new BasicScratchPluginGeneratorService().Generate(folder, "CBBE",
+                    [$"meshes/armor/{folder}/cuirass_0.nif"], [32], null)!.Value;
+                await File.WriteAllBytesAsync(Path.Combine(input, folder + ".esp"), plugin.PluginBytes);
+            }
+            var source = input;
+            if (archived)
+            {
+                source = Path.Combine(root, "pack.zip");
+                System.IO.Compression.ZipFile.CreateFromDirectory(input, source);
+            }
+            var results = await new BatchConversionRunner(StandaloneConversionModules.CreateDefault())
+                .ConvertAsync(new ConversionRequest(source, "CBBE", output));
+            Assert.Equal(2, results.Count);
+            foreach (var result in results)
+            {
+                Assert.True(result.Success);
+                var staged = Directory.GetFiles(Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe"),
+                    "cuirass_0.nif", SearchOption.AllDirectories);
+                using var report = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(
+                    Path.Combine(result.OutputDirectory, "plugin-patches.json")));
+                var families = report.RootElement.GetProperty("RewriteMappings").EnumerateArray()
+                    .Select(mapping => mapping.GetProperty("OriginalMeshPath").GetString()!.Split('/')[2])
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                Assert.True(families.Length == 1, report.RootElement.ToString());
+                var ownedTarget = Assert.Single(staged, path => Path.GetFileName(Path.GetDirectoryName(path)) == families[0]);
+                Assert.DoesNotContain(staged, path => Path.GetFileName(Path.GetDirectoryName(path)) ==
+                    (families[0] == "first" ? "second" : "first"));
+            }
         }
         finally
         {
