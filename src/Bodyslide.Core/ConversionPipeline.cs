@@ -27661,12 +27661,6 @@ internal sealed class LocalExportService(
                 problems.Add($"Runtime config coverage exposes only {generatedPhysicsNodeCount}/{targetProfile.MinimumRuntimePhysicsNodeCount} expected runtime physics node(s).");
             }
 
-            if (problems.Count == 1 &&
-                !problems[0].StartsWith("No bone or physics-group names could be read", StringComparison.OrdinalIgnoreCase))
-            {
-                return [];
-            }
-
             return problems;
         }
 

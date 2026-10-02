@@ -29385,6 +29385,70 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void BuildPackageArtifactIssues_AddsSemanticMismatchWhenOnlyRuntimeNodeCoverageIsLow()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "conversion-quality.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "skeleton-compatibility.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            const string cbpcConfig = "<Config><BellyPhysics><bone name=\"NPC L Breast\" /><bone name=\"NPC R Breast\" /><bone name=\"NPC Belly\" /><bone name=\"NPC L Butt\" /></BellyPhysics></Config>";
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem"));
+            File.WriteAllText(Path.Combine(outputDirectory, "cbpc-config.xml"), cbpcConfig);
+            File.WriteAllText(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml"), cbpcConfig);
+
+            const string smpConfig = "<system><bone name=\"NPC L Breast\" /><bone name=\"NPC R Breast\" /><bone name=\"NPC Belly\" /><bone name=\"NPC L Butt\" /></system>";
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "SKSE", "Plugins", "hdtSMP64"));
+            File.WriteAllText(Path.Combine(outputDirectory, "smp-config.xml"), smpConfig);
+            File.WriteAllText(Path.Combine(outputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml"), smpConfig);
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"SKSE\" destination=\"SKSE\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                PhysicsProfileOverride: "smp+cbpc",
+                GenerateBodySlideFiles: false);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("UnusedProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            var runtimeIssue = Assert.Single(issues, issue => issue.Code.Equals("physics-config-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("runtime physics config content is too weak", runtimeIssue.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("runtime physics node", runtimeIssue.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void EvaluateTargetBodySupportQuality_FlagsShallowBuiltInLikeMetadata()
     {
         var warnings = LocalExportService.EvaluateTargetBodySupportQuality(
