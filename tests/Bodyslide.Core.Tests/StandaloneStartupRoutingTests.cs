@@ -2,6 +2,180 @@ namespace Bodyslide.Core.Tests;
 
 public sealed class StandaloneStartupRoutingTests
 {
+    [Theory]
+    [InlineData(@"D:\MO2\mods\Armor\armor.nif", "CBBE", true)]
+    [InlineData(@"D:\Vortex\mods\Armor\armor.nif", "CBBE", true)]
+    [InlineData("/home/test/vortex/mods/armor.nif", "CBBE", true)]
+    [InlineData("armor.nif", "CBBE", true)]
+    [InlineData("--input", "CBBE", false)]
+    [InlineData("-input", "CBBE", false)]
+    [InlineData("/input", "CBBE", false)]
+    [InlineData("-", "CBBE", false)]
+    [InlineData("--", "CBBE", false)]
+    [InlineData("armor.nif", "--target", false)]
+    [InlineData("armor.nif", "-target", false)]
+    [InlineData("armor.nif", "/target", false)]
+    [InlineData("armor.nif", "--", false)]
+    [InlineData("moshortcut://launch/SlideSmith", "CBBE", false)]
+    public void HasStandalonePositionalConversionUsage_MatchesRequestParsing(
+        string input,
+        string target,
+        bool expected)
+    {
+        Assert.Equal(expected, StandaloneStartupRouting.HasStandalonePositionalConversionUsage([input, target]));
+    }
+
+    public static IEnumerable<object[]> ExplicitCliWithLauncherSignals()
+    {
+        string[][] cliArguments =
+        [
+            ["--help"], ["--list-bodies"], ["--list-presets"], ["--list-profiles"],
+            ["--list-physics"], ["--self-check"], ["--conversion-guide"], ["--export-cache"],
+            ["--body-reference"], ["--pause"],
+            ["--input", @"D:\Mod Organizer 2\mods\Armor\armor.nif", "--target", "CBBE"],
+            ["--output", @"D:\Vortex\mods\Converted Armor"],
+            ["--input", @"D:\Vortex\mods\Armor", "--output", @"D:\MO2\mods\Converted"],
+            ["--targets=CBBE,UNP", "--from-mo2"],
+            ["--preset=Default", "--from-vortex"],
+            [@"D:\MO2\mods\Armor\armor.nif", "CBBE"],
+            ["/home/test/vortex/mods/armor.nif", "CBBE"]
+        ];
+
+        foreach (var cliArgs in cliArguments)
+        {
+            foreach (var strict in new[] { false, true })
+            {
+                yield return [cliArgs.Concat(["--mo2-output", @"D:\MO2\mods\Converted"]).ToArray(),
+                    "VORTEX_SESSION", strict];
+                yield return [cliArgs.Concat(["--vortex-launcher"]).ToArray(), "MO2_INSTANCE", strict];
+                yield return [cliArgs, "USVFS_PARAMETERS", strict];
+                yield return [cliArgs, string.Empty, strict];
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(ExplicitCliWithLauncherSignals))]
+    public void EvaluateDesktopLaunchDecision_ExplicitCliAlwaysWinsMixedLauncherSignals(
+        string[] args,
+        string environmentVariable,
+        bool strict)
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            args,
+            executablePath: @"D:\MO2\mods\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"D:\Vortex\mods\SlideSmith",
+            hasEnvironmentVariable: name => name == environmentVariable,
+            strictLauncherMode: strict);
+
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.ModManagerLaunchDetected);
+        Assert.True(decision.ExplicitCliLaunchDetected);
+        Assert.Equal(strict, decision.StrictLauncherModeEnabled);
+        Assert.Equal(strict
+            ? "strict-launcher-mode: explicit cli takes precedence"
+            : "explicit cli takes precedence", decision.RoutingReason);
+        if (environmentVariable.Length > 0)
+        {
+            Assert.True(decision.LauncherSignalDetected);
+        }
+    }
+
+    [Theory]
+    [InlineData("--mo2-launcher", "MO2_INSTANCE", false)]
+    [InlineData("--vortex-launcher", "VORTEX_SESSION", true)]
+    [InlineData("--from-mo2", "VORTEX_PROFILE_ID", true)]
+    [InlineData("--from-vortex", "USVFS_PARAMETERS", false)]
+    public void EvaluateDesktopLaunchDecision_LauncherOnlyWithMetadata_StillUsesDesktop(
+        string launcherSwitch,
+        string environmentVariable,
+        bool strict)
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            [launcherSwitch, "--profile", "Default", "--game", "SkyrimSE"],
+            executablePath: @"D:\MO2\SlideSmith.exe",
+            workingDirectory: @"D:\Vortex\mods",
+            hasEnvironmentVariable: name => name == environmentVariable,
+            strictLauncherMode: strict);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+        Assert.False(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Theory]
+    [InlineData("--mo2-output", "/help")]
+    [InlineData("--vortex-path", "/self-check")]
+    [InlineData("--load-result", "/target")]
+    [InlineData("--startup-diagnostics", "/list-bodies")]
+    [InlineData("--profile", "/input")]
+    public void EvaluateDesktopLaunchDecision_PathOptionValues_AreNotStandaloneCommands(
+        string option,
+        string value)
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--from-mo2", option, value],
+            executablePath: null,
+            workingDirectory: null,
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Theory]
+    [InlineData("--mo2-output=--help", false)]
+    [InlineData("--vortex-path:/self-check", true)]
+    public void EvaluateDesktopLaunchDecision_InlinePathValues_AreNotStandaloneCommands(string option, bool strict)
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--from-vortex", option],
+            executablePath: null,
+            workingDirectory: null,
+            hasEnvironmentVariable: _ => false,
+            strictLauncherMode: strict);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_CommandAfterMissingPathValue_StillUsesCli()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--mo2-output", "--self-check"],
+            executablePath: null,
+            workingDirectory: null,
+            hasEnvironmentVariable: _ => false);
+
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Theory]
+    [InlineData(null, "MO2_INSTANCE", false)]
+    [InlineData(null, "VORTEX_SESSION", true)]
+    [InlineData(@"D:\MO2\mods\Armor", "VORTEX_SESSION", true)]
+    [InlineData(@"D:\Vortex\mods\Armor", "MO2_INSTANCE", false)]
+    [InlineData("moshortcut://launch/SlideSmith", "MO2_INSTANCE", true)]
+    public void EvaluateDesktopLaunchDecision_LauncherWithoutCliIntent_StillUsesDesktop(
+        string? argument,
+        string environmentVariable,
+        bool strict)
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            argument is null ? [] : [argument],
+            executablePath: @"D:\MO2\SlideSmith.exe",
+            workingDirectory: @"D:\Vortex\mods",
+            hasEnvironmentVariable: name => name == environmentVariable,
+            strictLauncherMode: strict);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.False(decision.ExplicitCliLaunchDetected);
+    }
+
     [Fact]
     public void EvaluateDesktopLaunchDecision_NoArgs_AttemptsDesktopHandoff()
     {
@@ -106,7 +280,7 @@ public sealed class StandaloneStartupRoutingTests
     }
 
     [Fact]
-    public void EvaluateDesktopLaunchDecision_EnvOnly_ModManagerLaunchDetected()
+    public void EvaluateDesktopLaunchDecision_EnvWithInput_UsesCliAndRetainsModManagerDiagnostics()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
             ["--input", @"C:\mods\pack"],
@@ -114,13 +288,14 @@ public sealed class StandaloneStartupRoutingTests
             workingDirectory: @"C:\Tools\SlideSmith",
             hasEnvironmentVariable: name => name.Equals("MO2_INSTANCE", StringComparison.OrdinalIgnoreCase));
 
-        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
         Assert.True(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
+        Assert.True(decision.ExplicitCliLaunchDetected);
     }
 
     [Fact]
-    public void EvaluateDesktopLaunchDecision_ExplicitCliWithLauncherArg_PrefersDesktopHandoff()
+    public void EvaluateDesktopLaunchDecision_ExplicitCliWithLauncherArg_PrefersCli()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
             ["--list-bodies", "--mo2-output", @"C:\MO2\mods\SomePack"],
@@ -128,14 +303,14 @@ public sealed class StandaloneStartupRoutingTests
             workingDirectory: @"C:\Tools\SlideSmith",
             hasEnvironmentVariable: _ => false);
 
-        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
         Assert.True(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
         Assert.True(decision.ExplicitCliLaunchDetected);
     }
 
     [Fact]
-    public void EvaluateDesktopLaunchDecision_Mo2InputPathOnly_TreatedAsLauncherSignal()
+    public void EvaluateDesktopLaunchDecision_Mo2InputPathOnly_PrefersCli()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
             ["--input", @"D:\Mod Organizer 2\mods\My Armor\meshes\armor_1.nif"],
@@ -143,14 +318,14 @@ public sealed class StandaloneStartupRoutingTests
             workingDirectory: @"C:\Tools\SlideSmith",
             hasEnvironmentVariable: _ => false);
 
-        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
         Assert.True(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
         Assert.True(decision.ExplicitCliLaunchDetected);
     }
 
     [Fact]
-    public void EvaluateDesktopLaunchDecision_Mo2PathInlineQuotedWithCliFlag_StillPrefersDesktopHandoff()
+    public void EvaluateDesktopLaunchDecision_Mo2PathInlineQuotedWithCliFlag_PrefersCli()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
             ["--self-check", "--mo2-path:\"D:\\Mod Organizer 2\\mods\\Pack With Spaces\""],
@@ -158,14 +333,14 @@ public sealed class StandaloneStartupRoutingTests
             workingDirectory: @"C:\Tools\SlideSmith",
             hasEnvironmentVariable: _ => false);
 
-        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
         Assert.True(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
         Assert.True(decision.ExplicitCliLaunchDetected);
     }
 
     [Fact]
-    public void EvaluateDesktopLaunchDecision_Mo2DirectoryWithoutTrailingSeparator_StillLooksLikeLauncher()
+    public void EvaluateDesktopLaunchDecision_Mo2DirectoryWithoutTrailingSeparator_CommandPrefersCli()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
             ["--self-check"],
@@ -173,7 +348,7 @@ public sealed class StandaloneStartupRoutingTests
             workingDirectory: @"D:\Mod Organizer 2\instances\Portable\mods\SlideSmith\MO2",
             hasEnvironmentVariable: _ => false);
 
-        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
         Assert.False(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
     }
@@ -194,7 +369,21 @@ public sealed class StandaloneStartupRoutingTests
     }
 
     [Fact]
-    public void EvaluateDesktopLaunchDecision_ExplicitCliWithMo2ManagedInput_PathStillPrefersDesktopHandoff()
+    public void EvaluateDesktopLaunchDecision_MoShortcutUriWithPath_IsNotPositionalConversion()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["moshortcut://launch/SlideSmith", @"D:\MO2\mods\Armor"],
+            executablePath: null,
+            workingDirectory: null,
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.False(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_ExplicitCliInMo2ManagedLocation_PrefersCli()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
             [
@@ -206,7 +395,7 @@ public sealed class StandaloneStartupRoutingTests
             workingDirectory: @"D:\Mod Organizer 2\instances\Portable\mods\SlideSmith",
             hasEnvironmentVariable: _ => false);
 
-        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
         Assert.False(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
         Assert.True(decision.ExplicitCliLaunchDetected);
@@ -285,7 +474,7 @@ public sealed class StandaloneStartupRoutingTests
     }
 
     [Fact]
-    public void EvaluateDesktopLaunchDecision_RealWorldMo2ProfileGameAndInputSignature_PrefersDesktop()
+    public void EvaluateDesktopLaunchDecision_RealWorldMo2ProfileGameAndInputSignature_PrefersCli()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
             [
@@ -298,13 +487,13 @@ public sealed class StandaloneStartupRoutingTests
             workingDirectory: @"C:\Tools\SlideSmith",
             hasEnvironmentVariable: _ => false);
 
-        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
         Assert.True(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
     }
 
     [Fact]
-    public void EvaluateDesktopLaunchDecision_Mo2ManagedPositionalInput_DoesNotLookLikeExplicitCli()
+    public void EvaluateDesktopLaunchDecision_Mo2ManagedPositionalInput_PrefersCli()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
             [
@@ -315,10 +504,10 @@ public sealed class StandaloneStartupRoutingTests
             workingDirectory: @"C:\Tools\SlideSmith",
             hasEnvironmentVariable: _ => false);
 
-        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
         Assert.True(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
-        Assert.False(decision.ExplicitCliLaunchDetected);
+        Assert.True(decision.ExplicitCliLaunchDetected);
     }
 
     [Fact]
@@ -354,7 +543,7 @@ public sealed class StandaloneStartupRoutingTests
 
         Assert.False(decision.ShouldAttemptDesktopHandoff);
         Assert.True(decision.StrictLauncherModeEnabled);
-        Assert.Equal("strict-launcher-mode: no launcher signal", decision.RoutingReason);
+        Assert.Equal("strict-launcher-mode: explicit cli takes precedence", decision.RoutingReason);
     }
 
     [Fact]

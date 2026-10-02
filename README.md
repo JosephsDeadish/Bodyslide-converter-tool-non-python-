@@ -30,6 +30,8 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - optional ZIP output (`--output-zip`) for mod-manager-ready packages
 - runtime readiness self-checks in both CLI and desktop GUI so users can verify the executable, pipeline init, cache path, scratch-write access, and preview/runtime availability before converting anything
 - armor-pack validation reporting with per-conversion readiness summaries and batch-level pack risk rollups
+- batch `regression-failure-matrix.json` groups quality-report issue codes and review requirements by source body, target body, mesh type, and support tier; sample IDs replace mesh names and output paths
+- source BodySlide discovery records `DiscoveryMilliseconds` and `DiscoveredFileCount` in source-asset quality metrics, supports cancellation during traversal, skips directory-link cycles, and bounds retained project caches
 
 ## Projects
 
@@ -38,6 +40,26 @@ This repository contains the SlideSmith .NET conversion toolset (current version
   - supports startup result loading via `--load-result`, `--result`, `--output`, or an existing output-path argument (useful for MO2 launcher entries)
 - `/src/Bodyslide.Standalone` - CLI app entry point
 - `/tests/Bodyslide.Core.Tests` - focused orchestration and batch/preset tests
+
+### Readiness and regression coverage
+
+Explicit CLI commands and conversions take precedence over MO2/Vortex environment
+variables, managed paths, and launcher switches. Launcher-only invocations still
+open the desktop app; use `--load-result` or manager-specific result/path options
+for desktop result loading rather than CLI conversion flags.
+
+The regression suite includes synthetic artifact-tampering, mixed launcher,
+catalog-invariant, discovery-cancellation, and failure-matrix cases alongside the
+existing realistic pack fixtures. No new real-user failure packs were supplied.
+To reproduce a reported failure, reduce it to a redistributable fixture, remove
+identifying paths and plugin/mesh names, record the source/target body, skeleton,
+physics and archive layout, and assert the expected issue codes and output
+artifacts in a repeatable test. The batch failure matrix helps prioritize those
+cases but does not itself prove a conversion works in game.
+
+`advanced-review-required` and `experimental-manual-cleanup` remain intentional
+safety gates. Unverified custom rigs, topology changes and external game/UI
+checks must not be relabeled automatic merely to improve readiness counts.
 
 ## Run
 

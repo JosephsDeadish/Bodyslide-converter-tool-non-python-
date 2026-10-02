@@ -192,7 +192,9 @@ public sealed record SourceAssetSupportMetrics(
     IReadOnlyList<string>? InferenceSignals = null,
     string? InferredDeformationProfile = null,
     bool HasOsdPayloads = false,
-    int FallbackInferredFromPathEvidenceCount = 0);
+    int FallbackInferredFromPathEvidenceCount = 0,
+    long DiscoveryMilliseconds = 0,
+    int DiscoveredFileCount = 0);
 public sealed record MorphPayloadReuseSummary(
     int RequestedVariantCount,
     int ReusedVariantCount,
@@ -8852,6 +8854,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             "patch-armor.pas",
             "armor-pack-validation.json",
             "batch-report.json",
+            "regression-failure-matrix.json",
             "conversion-matrix-pack-proof.json",
             "remaining-gaps-pack-checklist.json"
         ];
@@ -8909,7 +8912,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 foreach (var childDirectory in Directory.EnumerateDirectories(directory))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (ShouldSkipDirectory(childDirectory, excludedDirectories))
+                    if ((File.GetAttributes(childDirectory) & FileAttributes.ReparsePoint) != 0 ||
+                        ShouldSkipDirectory(childDirectory, excludedDirectories))
                     {
                         continue;
                     }
@@ -9099,6 +9103,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         var validationJson = JsonSerializer.Serialize(armorPackValidation, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(Path.Combine(rootOutput, "armor-pack-validation.json"), validationJson, cancellationToken);
+        var failureMatrix = RegressionFailureMatrix.Build(targetBody, armorPackValidation.Items);
+        await File.WriteAllTextAsync(
+            Path.Combine(rootOutput, "regression-failure-matrix.json"),
+            JsonSerializer.Serialize(failureMatrix, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
 
         var matrixPackProof = BuildConversionMatrixPackProofReport(resultsWithPaths, targetBody, conversionLabel);
         var matrixPackProofJson = JsonSerializer.Serialize(matrixPackProof, new JsonSerializerOptions { WriteIndented = true });
@@ -27038,14 +27047,19 @@ internal sealed class LocalExportService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        bool HasFile(string path) =>
-            outputFiles.Any(existing => PathsEqual(existing, path)) || File.Exists(path);
+        bool HasFile(string path) => File.Exists(path);
+
+        bool HasNonEmptyFile(string path) => File.Exists(path) && new FileInfo(path).Length > 0;
 
         bool HasAnyFile(string directoryPath, string searchPattern) =>
-            Directory.Exists(directoryPath) && Directory.EnumerateFiles(directoryPath, searchPattern).Any();
+            Directory.Exists(directoryPath) &&
+            Directory.EnumerateFiles(directoryPath, searchPattern).Any(HasNonEmptyFile);
 
-        bool ContainsXmlAttributeValue(string xmlContent, string attributeName, string value) =>
-            xmlContent.Contains($"{attributeName}=\"{SecurityElement.Escape(value)}\"", StringComparison.OrdinalIgnoreCase);
+        bool ContainsXmlAttributeValue(System.Xml.Linq.XDocument document, string attributeName, string value) =>
+            document.Descendants()
+                .Where(element => element.Name.LocalName.Equals("folder", StringComparison.OrdinalIgnoreCase) ||
+                                  element.Name.LocalName.Equals("file", StringComparison.OrdinalIgnoreCase))
+                .Any(element => string.Equals((string?)element.Attribute(attributeName), value, StringComparison.OrdinalIgnoreCase));
 
         bool HasBodySlidePayloadFiles(string directoryPath) =>
             HasAnyFile(directoryPath, "*.bsd") || HasAnyFile(directoryPath, "*.tri") || HasAnyFile(directoryPath, "*.osd");
@@ -27091,21 +27105,13 @@ internal sealed class LocalExportService(
                 static string NormalizeBodySlidePath(string? value) =>
                     string.IsNullOrWhiteSpace(value)
                         ? string.Empty
-                        : value.Trim().Replace('\\', '/').Trim('/');
+                        : value.Trim().Replace('\\', '/').TrimEnd('/');
 
-                static string GetBodySlideLeafName(string? value)
-                {
-                    var normalized = NormalizeBodySlidePath(value);
-                    if (string.IsNullOrWhiteSpace(normalized))
-                    {
-                        return string.Empty;
-                    }
-
-                    var lastSeparator = normalized.LastIndexOf('/');
-                    return lastSeparator >= 0 && lastSeparator < normalized.Length - 1
-                        ? normalized[(lastSeparator + 1)..]
-                        : normalized;
-                }
+                static bool IsSafeBodySlideRelativePath(string value) =>
+                    !string.IsNullOrWhiteSpace(value) &&
+                    !value.StartsWith('/') &&
+                    !value.Contains(':') &&
+                    value.Split('/').All(segment => segment.Length > 0 && segment is not "." and not "..");
 
                 var projectName = Path.GetFileName(shapeDataDirectory);
                 var expectedSetFolderSuffix = NormalizeBodySlidePath(Path.Combine("CalienteTools", "BodySlide", "ShapeData", projectName));
@@ -27218,12 +27224,16 @@ internal sealed class LocalExportService(
                     .Where(static element => string.Equals(element.Name.LocalName, "SourceFile", StringComparison.OrdinalIgnoreCase))
                     .Select(static element => element.Value?.Trim())
                     .Where(static value => !string.IsNullOrWhiteSpace(value))
-                    .Select(static value => GetBodySlideLeafName(value))
+                    .Select(static value => NormalizeBodySlidePath(value))
                     .Where(static value => !string.IsNullOrWhiteSpace(value))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
                 var missingSourceFiles = sourceFiles
-                    .Where(fileName => !File.Exists(Path.Combine(shapeDataDirectory, fileName!)))
+                    .Where(value => !IsSafeBodySlideRelativePath(value) ||
+                                    !value.StartsWith(expectedSetFolderSuffix + "/", StringComparison.OrdinalIgnoreCase) ||
+                                    !value.EndsWith(".nif", StringComparison.OrdinalIgnoreCase) ||
+                                    !HasNonEmptyFile(Path.Combine(shapeDataDirectory,
+                                        value[(expectedSetFolderSuffix.Length + 1)..].Replace('/', Path.DirectorySeparatorChar))))
                     .Cast<string>()
                     .ToArray();
                 if (missingSourceFiles.Length > 0)
@@ -27246,7 +27256,8 @@ internal sealed class LocalExportService(
                 {
                     problems.Add("OSP does not declare a SetFolder for the generated ShapeData project.");
                 }
-                else if (setFolders.Any(folder => !folder.EndsWith(expectedSetFolderSuffix, StringComparison.OrdinalIgnoreCase)))
+                else if (setFolders.Any(folder => !IsSafeBodySlideRelativePath(folder) ||
+                                                  !folder.Equals(expectedSetFolderSuffix, StringComparison.OrdinalIgnoreCase)))
                 {
                     problems.Add($"OSP SetFolder does not point at the generated ShapeData folder '{expectedSetFolderSuffix}'.");
                 }
@@ -27255,8 +27266,9 @@ internal sealed class LocalExportService(
                     .Where(static element => string.Equals(element.Name.LocalName, "SourceFile", StringComparison.OrdinalIgnoreCase))
                     .Select(static element => NormalizeBodySlidePath(element.Value))
                     .Where(static value => !string.IsNullOrWhiteSpace(value))
-                    .Where(value => !value.Contains($"/{projectName}/", StringComparison.OrdinalIgnoreCase) &&
-                                    !value.EndsWith($"/{projectName}", StringComparison.OrdinalIgnoreCase))
+                    .Where(value => !IsSafeBodySlideRelativePath(value) ||
+                                    !value.StartsWith(expectedSetFolderSuffix + "/", StringComparison.OrdinalIgnoreCase) ||
+                                    !value.EndsWith(".nif", StringComparison.OrdinalIgnoreCase))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
                 if (invalidSourceFilePaths.Length > 0)
@@ -27274,8 +27286,7 @@ internal sealed class LocalExportService(
                 {
                     problems.Add("OSP does not declare any OutputPath for generated meshes.");
                 }
-                else if (outputPaths.Any(path => path.StartsWith("/") ||
-                                                 path.Contains(":/", StringComparison.OrdinalIgnoreCase) ||
+                else if (outputPaths.Any(path => !IsSafeBodySlideRelativePath(path) ||
                                                  !path.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase)))
                 {
                     problems.Add("OSP OutputPath must stay data-relative under the meshes/ folder.");
@@ -27285,7 +27296,7 @@ internal sealed class LocalExportService(
                     .Where(static element => string.Equals(element.Name.LocalName, "OutputFile", StringComparison.OrdinalIgnoreCase))
                     .Select(element => new
                     {
-                        FileName = GetBodySlideLeafName(element.Value),
+                        FileName = NormalizeBodySlidePath(element.Value),
                         Gender = ((string?)element.Attribute("gender"))?.Trim(),
                         OutputPath = element.Parent?.Elements()
                             .FirstOrDefault(static child => string.Equals(child.Name.LocalName, "OutputPath", StringComparison.OrdinalIgnoreCase))
@@ -27299,6 +27310,13 @@ internal sealed class LocalExportService(
                 }
                 else
                 {
+                    if (outputFileEntries.Any(entry => !IsSafeBodySlideRelativePath(entry.FileName) ||
+                                                       entry.FileName.Contains('/') ||
+                                                       !entry.FileName.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        problems.Add("OSP OutputFile entries must be NIF leaf names without directory traversal.");
+                    }
+
                     var stagedMeshPaths = Directory.EnumerateFiles(shapeDataDirectory, "*.*", SearchOption.AllDirectories).ToArray();
                     var stagedMeshFileNames = stagedMeshPaths
                         .Select(static path => Path.GetFileName(path))
@@ -27344,7 +27362,9 @@ internal sealed class LocalExportService(
                     bool HasMatchingStagedMesh(string outputPath, string fileName)
                     {
                         var relativeOutputPath = NormalizeBodySlidePath(outputPath);
-                        if (!string.IsNullOrWhiteSpace(relativeOutputPath))
+                        if (IsSafeBodySlideRelativePath(relativeOutputPath) &&
+                            relativeOutputPath.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase) &&
+                            IsSafeBodySlideRelativePath(fileName) && !fileName.Contains('/'))
                         {
                             var relativeOutputDirectory = relativeOutputPath.Replace('/', Path.DirectorySeparatorChar);
                             if (File.Exists(Path.Combine(outputDirectory, relativeOutputDirectory, fileName)))
@@ -27419,6 +27439,10 @@ internal sealed class LocalExportService(
                             lowWeightPayloadSliderNames.Add(normalizedSlider);
                         }
                     }
+                    else
+                    {
+                        problems.Add($"ShapeData BSD payload '{Path.GetFileName(bsdPath)}' could not be parsed.");
+                    }
                 }
 
                 foreach (var triPath in Directory.EnumerateFiles(shapeDataDirectory, "*.tri"))
@@ -27445,6 +27469,10 @@ internal sealed class LocalExportService(
                             }
                         }
 
+                    }
+                    else
+                    {
+                        problems.Add($"ShapeData TRI payload '{Path.GetFileName(triPath)}' could not be parsed.");
                     }
                 }
 
@@ -27833,6 +27861,80 @@ internal sealed class LocalExportService(
             {
                 issues.Add(new ConversionValidationIssue(code, severity, message));
             }
+            else
+            {
+                try
+                {
+                    if (new FileInfo(fullPath).Length == 0)
+                    {
+                        throw new InvalidDataException("Artifact is empty.");
+                    }
+
+                    if (relativePath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    {
+                        using var document = JsonDocument.Parse(File.ReadAllText(fullPath));
+                        if (document.RootElement.ValueKind != JsonValueKind.Object)
+                        {
+                            throw new InvalidDataException("Report must contain a JSON object.");
+                        }
+                    }
+                    else if (relativePath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) ||
+                             relativePath.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var document = System.Xml.Linq.XDocument.Load(fullPath);
+                        var expectedRoot = Path.GetFileName(relativePath) switch
+                        {
+                            "ModuleConfig.xml" => "config",
+                            "info.xml" => "fomod",
+                            "preview.svg" => "svg",
+                            _ => null
+                        };
+                        if (expectedRoot is not null &&
+                            !string.Equals(document.Root?.Name.LocalName, expectedRoot, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidDataException($"Expected XML root '{expectedRoot}'.");
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or System.Xml.XmlException)
+                {
+                    issues.Add(new ConversionValidationIssue(
+                        "invalid-package-artifact",
+                        severity,
+                        $"Package artifact '{relativePath}' is empty, unreadable or structurally invalid: {ex.Message}"));
+                }
+            }
+        }
+
+        foreach (var recordedPath in outputFiles.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!HasFile(recordedPath))
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-recorded-output-artifact",
+                    "medium",
+                    $"Recorded output artifact '{Path.GetFileName(recordedPath)}' no longer exists on disk."));
+            }
+        }
+
+        var manifestPaths = outputFiles
+            .Where(path => string.Equals(Path.GetDirectoryName(path), outputDirectory, StringComparison.OrdinalIgnoreCase) &&
+                           (Path.GetFileName(path).Equals("conversion-manifest.json", StringComparison.OrdinalIgnoreCase) ||
+                            Path.GetFileName(path).StartsWith("conversion-manifest-", StringComparison.OrdinalIgnoreCase) &&
+                            path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
+        if (manifestPaths.Length == 0)
+        {
+            AddMissingFileIssue("conversion-manifest.json", "missing-conversion-manifest", "medium",
+                "The conversion manifest is missing, so recorded conversion provenance is unavailable.");
+        }
+        else
+        {
+            foreach (var manifestPath in manifestPaths)
+            {
+                AddMissingFileIssue(Path.GetFileName(manifestPath), "missing-conversion-manifest", "medium",
+                    "The recorded conversion manifest is missing, so conversion provenance is unavailable.");
+            }
         }
 
         AddMissingFileIssue("README.txt", "missing-readme", "medium",
@@ -27907,38 +28009,45 @@ internal sealed class LocalExportService(
         var moduleConfigPath = Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml");
         if (HasFile(moduleConfigPath))
         {
-            var moduleConfigContent = File.ReadAllText(moduleConfigPath);
-            foreach (var folder in expectedFomodDataFolders)
+            try
             {
-                if (!ContainsXmlAttributeValue(moduleConfigContent, "source", folder))
+                var moduleConfigContent = System.Xml.Linq.XDocument.Load(moduleConfigPath);
+                foreach (var folder in expectedFomodDataFolders)
                 {
-                    issues.Add(new ConversionValidationIssue(
-                        "fomod-missing-folder-entry",
-                        "medium",
-                        $"fomod/ModuleConfig.xml does not include an installer entry for the '{folder}' output folder."));
+                    if (!ContainsXmlAttributeValue(moduleConfigContent, "source", folder))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "fomod-missing-folder-entry",
+                            "medium",
+                            $"fomod/ModuleConfig.xml does not include an installer entry for the '{folder}' output folder."));
+                    }
+                }
+
+                foreach (var pluginFileName in expectedFomodRootPlugins)
+                {
+                    if (!ContainsXmlAttributeValue(moduleConfigContent, "source", pluginFileName))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "fomod-missing-root-plugin-entry",
+                            "medium",
+                            $"fomod/ModuleConfig.xml does not include a root installer entry for plugin '{pluginFileName}'."));
+                    }
+                }
+
+                foreach (var supportFileName in expectedFomodRootSupportFiles)
+                {
+                    if (!ContainsXmlAttributeValue(moduleConfigContent, "source", supportFileName))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "fomod-missing-root-support-entry",
+                            "medium",
+                            $"fomod/ModuleConfig.xml does not include a root installer entry for support file '{supportFileName}'."));
+                    }
                 }
             }
-
-            foreach (var pluginFileName in expectedFomodRootPlugins)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
             {
-                if (!ContainsXmlAttributeValue(moduleConfigContent, "source", pluginFileName))
-                {
-                    issues.Add(new ConversionValidationIssue(
-                        "fomod-missing-root-plugin-entry",
-                        "medium",
-                        $"fomod/ModuleConfig.xml does not include a root installer entry for plugin '{pluginFileName}'."));
-                }
-            }
-
-            foreach (var supportFileName in expectedFomodRootSupportFiles)
-            {
-                if (!ContainsXmlAttributeValue(moduleConfigContent, "source", supportFileName))
-                {
-                    issues.Add(new ConversionValidationIssue(
-                        "fomod-missing-root-support-entry",
-                        "medium",
-                        $"fomod/ModuleConfig.xml does not include a root installer entry for support file '{supportFileName}'."));
-                }
+                // Structural failures are reported by AddMissingFileIssue above.
             }
         }
 
@@ -28038,8 +28147,26 @@ internal sealed class LocalExportService(
                 try
                 {
                     using var archive = ZipFile.OpenRead(zipPath);
+                    var invalidZipEntries = archive.Entries
+                        .Where(entry =>
+                        {
+                            var name = entry.FullName.Replace('\\', '/');
+                            return name.StartsWith('/') || name.Contains(':') ||
+                                   name.TrimEnd('/').Split('/').Any(segment => segment.Length == 0 || segment is "." or "..");
+                        })
+                        .ToArray();
+                    if (invalidZipEntries.Length > 0)
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-invalid-entry-path",
+                            "high",
+                            "The distributable ZIP contains rooted or traversing entry paths and is not safe to install."));
+                    }
+
                     var zipEntries = archive.Entries
-                        .Select(entry => entry.FullName.Replace('\\', '/').Trim('/'))
+                        .Except(invalidZipEntries)
+                        .Where(entry => !entry.FullName.EndsWith('/') && !entry.FullName.EndsWith('\\') && entry.Length > 0)
+                        .Select(entry => entry.FullName.Replace('\\', '/'))
                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
                     bool ZipContains(string relativePath) =>

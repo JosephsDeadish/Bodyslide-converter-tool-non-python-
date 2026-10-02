@@ -3,6 +3,7 @@
     "name": "CBBE",
     "aliases": [
       "Caliente's Beautiful Bodies Enhancer",
+      "Caliente's Beautiful Bodies Edition",
       "CBBE Curvy",
       "CBBE Slim",
       "Shiva CBBE",
@@ -328,7 +329,10 @@
   },
   {
     "name": "UNP",
-    "aliases": [],
+    "aliases": [
+      "DIMONIZED UNP",
+      "DIMONIZED UNP female body"
+    ],
     "gender": "female",
     "defaultPhysics": "cbpc",
     "skeletonFoundation": "XPMSSE",
@@ -516,6 +520,8 @@
     "aliases": [
       "Unified UNP",
       "7Base",
+      "SevenBase",
+      "7B",
       "UN7B",
       "7B Oppai",
       "7BO",
@@ -523,6 +529,7 @@
       "SevenBase Oppai",
       "Wench Body 7B Oppai",
       "7B Bombshell",
+      "7Base Bombshell",
       "SevenBase Bombshell",
       "Shiva UUNP"
     ],
@@ -1106,6 +1113,7 @@
       "SAMLight",
       "SAM Lite",
       "Shape Atlas Light",
+      "Shape Atlas for Men Light",
       "SAM Light NG",
       "Shape Atlas Men Light"
     ],
@@ -1199,6 +1207,7 @@
     "name": "SOS",
     "aliases": [
       "Schlongs of Skyrim",
+      "Schlongs of Skyrim SE",
       "SOS Light",
       "Schlongs of Skyrim Full"
     ],

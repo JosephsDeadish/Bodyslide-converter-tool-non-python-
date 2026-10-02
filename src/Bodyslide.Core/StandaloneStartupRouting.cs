@@ -25,8 +25,8 @@ public static class StandaloneStartupRouting
         var modManagerLaunch = IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
         // Strict launcher mode is currently diagnostics-only; it preserves the same
         // handoff decision but records a stricter routing reason for launcher logs.
-        var shouldAttemptDesktopHandoff = args.Count == 0 || launcherSignal || modManagerLaunch;
-        var routingReason = BuildRoutingReason(strictLauncherMode, shouldAttemptDesktopHandoff, launcherSignal, modManagerLaunch);
+        var shouldAttemptDesktopHandoff = !explicitCliLaunch && (args.Count == 0 || launcherSignal || modManagerLaunch);
+        var routingReason = BuildRoutingReason(strictLauncherMode, shouldAttemptDesktopHandoff, launcherSignal, modManagerLaunch, explicitCliLaunch);
 
         return new StandaloneDesktopLaunchDecision(
             shouldAttemptDesktopHandoff,
@@ -284,8 +284,16 @@ public static class StandaloneStartupRouting
         bool strictLauncherMode,
         bool shouldAttemptDesktopHandoff,
         bool launcherSignal,
-        bool modManagerLaunch)
+        bool modManagerLaunch,
+        bool explicitCliLaunch)
     {
+        if (explicitCliLaunch)
+        {
+            return strictLauncherMode
+                ? "strict-launcher-mode: explicit cli takes precedence"
+                : "explicit cli takes precedence";
+        }
+
         if (strictLauncherMode)
         {
             if (!shouldAttemptDesktopHandoff)
@@ -308,7 +316,7 @@ public static class StandaloneStartupRouting
 
         if (!shouldAttemptDesktopHandoff)
         {
-            return "explicit cli without launcher signal";
+            return "no launcher signal";
         }
 
         if (launcherSignal)
@@ -325,18 +333,8 @@ public static class StandaloneStartupRouting
     }
 
     private static bool HasStandaloneCommandSwitch(IReadOnlyList<string> args) =>
-        args.Any(static arg =>
+        EnumerateStandaloneOptions(args).Any(static option =>
         {
-            if (!TryReadOptionName(arg, out var option))
-            {
-                return false;
-            }
-
-            if (IsModManagerLauncherArgument(arg))
-            {
-                return false;
-            }
-
             return option.Equals("pause", StringComparison.OrdinalIgnoreCase) ||
                    option.Equals("help", StringComparison.OrdinalIgnoreCase) ||
                    option.Equals("h", StringComparison.OrdinalIgnoreCase) ||
@@ -356,13 +354,8 @@ public static class StandaloneStartupRouting
         var hasTarget = false;
         var hasConversionModifier = false;
 
-        foreach (var arg in args)
+        foreach (var option in EnumerateStandaloneOptions(args))
         {
-            if (!TryReadOptionName(arg, out var option))
-            {
-                continue;
-            }
-
             if (option.Equals("target", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("targets", StringComparison.OrdinalIgnoreCase))
             {
@@ -393,19 +386,51 @@ public static class StandaloneStartupRouting
         return hasTarget || hasConversionModifier;
     }
 
-    private static bool HasStandalonePositionalConversionUsage(IReadOnlyList<string> args)
+    private static IEnumerable<string> EnumerateStandaloneOptions(IReadOnlyList<string> args)
+    {
+        for (var index = 0; index < args.Count; index++)
+        {
+            if (!TryReadOptionToken(args[index], out var option, out var inlineValue))
+            {
+                continue;
+            }
+
+            yield return option;
+
+            // Slash-prefixed values can be absolute Unix paths, including /help or /target.
+            // Do not interpret a path option's separate value as another CLI command.
+            if (inlineValue is null &&
+                HasSeparateOptionValue(option) &&
+                index + 1 < args.Count &&
+                !args[index + 1].TrimStart().StartsWith("-", StringComparison.Ordinal))
+            {
+                index++;
+            }
+        }
+    }
+
+    private static bool HasSeparateOptionValue(string option) =>
+        ModManagerLaunchArgumentCatalog.PathOptionNames.Contains(option, StringComparer.OrdinalIgnoreCase) ||
+        ModManagerLaunchArgumentCatalog.StartupDiagnosticsArgumentNames.Contains(option, StringComparer.OrdinalIgnoreCase) ||
+        option.ToLowerInvariant() is "input" or "output" or "target" or "targets" or "preset" or "presets" or
+            "profile" or "source" or "physics" or "cache-path" or "skeleton-nif" or "skeleton-nif-path" or
+            "build-sliders" or "custom-profiles" or "world-mode" or "shared-plugin-output" or "game" or "instance";
+
+    public static bool HasStandalonePositionalConversionUsage(IReadOnlyList<string> args)
     {
         if (args.Count < 2)
         {
             return false;
         }
 
-        if (TryReadOptionName(args[0], out _) || TryReadOptionName(args[1], out _))
+        if (args[0].TrimStart().StartsWith("-", StringComparison.Ordinal) ||
+            args[1].TrimStart().StartsWith("-", StringComparison.Ordinal) ||
+            TryReadOptionName(args[0], out _) || TryReadOptionName(args[1], out _))
         {
             return false;
         }
 
-        return !IsLikelyLauncherPathArgument(args[0]);
+        return !IsMoshortcutUri(args[0]) && !IsMoshortcutUri(args[1]);
     }
 
 }
