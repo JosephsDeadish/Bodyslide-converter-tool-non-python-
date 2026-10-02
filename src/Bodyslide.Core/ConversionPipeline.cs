@@ -8714,7 +8714,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         foreach (var file in Directory.EnumerateFiles(rootOutput, "*", SearchOption.AllDirectories))
         {
             var relativePath = Path.GetRelativePath(rootOutput, file).Replace('\\', '/');
-            if (relativePath.StartsWith(".reports/", StringComparison.OrdinalIgnoreCase))
+            if (Path.GetExtension(file).Equals(".json", StringComparison.OrdinalIgnoreCase) ||
+                relativePath.StartsWith(".reports/", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -33311,8 +33312,6 @@ internal sealed class LocalExportService(
             "README.txt",
             "meta.ini",
             "remaining-gaps-checklist.md",
-            "conversion-quality.json",
-            "plugin-patches.json",
             "preview.html",
             "preview.svg",
             "preview-workbench.html",
@@ -33336,6 +33335,8 @@ internal sealed class LocalExportService(
         fileName.Equals("meta.ini", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("remaining-gaps-checklist.md", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("preview.html", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("preview.svg", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase) ||

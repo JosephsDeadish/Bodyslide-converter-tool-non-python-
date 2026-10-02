@@ -1474,8 +1474,6 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains("<requiredInstallFiles>", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("README.txt", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("patch-armor.pas", moduleConfig, StringComparison.Ordinal);
-            Assert.Contains("conversion-quality.json", moduleConfig, StringComparison.Ordinal);
-            Assert.Contains("plugin-patches.json", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("preview-workbench.html", moduleConfig, StringComparison.Ordinal);
         }
         finally
@@ -1577,12 +1575,6 @@ public sealed class ConversionOrchestratorTests
             Assert.DoesNotContain("missing-conversion-quality-report", issueCodes);
             Assert.DoesNotContain("missing-output-zip", issueCodes);
             Assert.DoesNotContain("zip-missing-conversion-quality-report", issueCodes);
-
-            var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
-            using var archive = ZipFile.OpenRead(zipPath);
-            Assert.Contains(archive.Entries, entry => string.Equals(entry.FullName, "conversion-quality.json", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(archive.Entries, entry => string.Equals(entry.FullName, "conversion-pipeline-profile.json", StringComparison.OrdinalIgnoreCase));
-
             using var pipelineProfile = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-pipeline-profile.json")));
             Assert.True(pipelineProfile.RootElement.GetProperty("TotalDurationMs").GetInt64() >= 0);
             Assert.True(pipelineProfile.RootElement.GetProperty("ExportDurationMs").GetInt64() >= 0);
@@ -14318,7 +14310,6 @@ public sealed class PluginPatchGuidanceTests
 
             Assert.Contains("\"Code\": \"plugin-ambiguous-layout\"", qualityJson, StringComparison.Ordinal);
             Assert.Contains("AmbiguousArmor.esp", qualityJson, StringComparison.Ordinal);
-            Assert.Contains("plugin-patches.json", readme, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("xEdit", readme, StringComparison.OrdinalIgnoreCase);
         }
         finally
@@ -32871,10 +32862,6 @@ public sealed class BasicWeightTransferServicePhysicsTests
                 new BodySlideProject("UnusedProject", "CBBE", [], "<BodySlideProject/>"),
                 new PluginAnalysisResult([], [], string.Empty));
 
-            Assert.Contains(issues, issue => issue.Code.Equals("fomod-missing-root-support-entry", StringComparison.OrdinalIgnoreCase)
-                && issue.Message.Contains("plugin-patches.json", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(issues, issue => issue.Code.Equals("fomod-missing-root-support-entry", StringComparison.OrdinalIgnoreCase)
-                && issue.Message.Contains("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(issues, issue => issue.Code.Equals("fomod-missing-root-support-entry", StringComparison.OrdinalIgnoreCase)
                 && issue.Message.Contains("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
         }

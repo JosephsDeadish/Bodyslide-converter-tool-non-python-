@@ -318,6 +318,8 @@ output/
 | `mod-stack-cross-validation.json` | Mixed plugin/race/body-family review summary: plugin/master counts, distinct mesh families, skeleton reliability, race warnings, and recommended runtime/load-order scenarios for large real mod stacks |
 | `desktop-workflow-automation.json` | Shared-output contract for Desktop/UI workflow coverage: preview/report state, artifact inventory, suggested GUI flow, and automation limitations for result-reload/report-rendering paths |
 | `proof-result-bundle.json` | External-harness result import written back into the output root; records host details, per-axis pass/fail status, scenario coverage, probe coverage, evidence references, and any missing proof inputs |
+
+The optional output ZIP mirrors the installable game files only; the JSON review artifacts stay in the folder output so they remain easy to inspect without bloating the packaged mod archive.
 | `armor-pack-validation.json` | Batch-only pack validation rollup: per-item readiness status/score, dominant issue codes, and pack-level ready/review/high-risk counts for real armor-pack runs |
 | `world-physics.json` | Dropped-item/world-object physics guidance: selected world mode (`static` or `rigid-proxy`), collision-shape recommendation, whether source/equipped physics were detected, ground-mesh availability, and practical install/runtime recommendations |
 | `plugin-patches.json` | Detected sidecar plugin mesh paths + structured rewrite mappings (`OriginalMeshPath` → `RewrittenMeshPath`) and per-mesh patch steps |
