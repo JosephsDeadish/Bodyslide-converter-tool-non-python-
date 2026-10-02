@@ -16204,7 +16204,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         return tuning;
     }
 
-    private static string BuildCbpcXml(bool isMale, PhysicsSolverTuning tuning, IReadOnlyList<string>? targetPhysicsBones)
+    private static string? BuildCbpcXml(bool isMale, PhysicsSolverTuning tuning, IReadOnlyList<string>? targetPhysicsBones)
     {
         static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
         var sb = new System.Text.StringBuilder();
@@ -16235,7 +16235,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         }
 
         sb.AppendLine("</CBPCConfig>");
-        return sb.ToString();
+        return emittedGroups.Count == 0 && targetPhysicsBones is not null ? null : sb.ToString();
 
         void AppendGroup(string group)
         {
@@ -16300,7 +16300,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         }
     }
 
-    private static string BuildSmpXml(string targetBody, bool isMale, PhysicsSolverTuning tuning, IReadOnlyList<string>? targetPhysicsBones)
+    private static string? BuildSmpXml(string targetBody, bool isMale, PhysicsSolverTuning tuning, IReadOnlyList<string>? targetPhysicsBones)
     {
         static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
         var sb = new System.Text.StringBuilder();
@@ -16336,7 +16336,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         }
 
         sb.AppendLine("</system>");
-        return sb.ToString();
+        return emittedBones.Count == 0 ? null : sb.ToString();
 
         void AppendBone(string boneName, double mass, double stiffness, double damping, double angleLimit, double restitution)
         {
@@ -30029,15 +30029,36 @@ internal sealed class LocalExportService(
         return configs;
     }
 
+    private static bool HasRuntimePhysicsBones(string? xml, string rootName)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return false;
+        }
+
+        try
+        {
+            var document = System.Xml.Linq.XDocument.Parse(xml);
+            var bones = document.Descendants("bone").ToArray();
+            return document.Root?.Name == rootName &&
+                bones.Length > 0 &&
+                bones.All(bone => !string.IsNullOrWhiteSpace((string?)bone.Attribute("name")));
+        }
+        catch (System.Xml.XmlException)
+        {
+            return false;
+        }
+    }
+
     private static IReadOnlyList<string> GetGeneratedRuntimeConfigs(PhysicsConfig physics)
     {
         var configs = new List<string>();
-        if (!string.IsNullOrWhiteSpace(physics.CbpcConfigXml))
+        if (HasRuntimePhysicsBones(physics.CbpcConfigXml, "CBPCConfig"))
         {
             configs.Add("cbpc-config.xml");
         }
 
-        if (!string.IsNullOrWhiteSpace(physics.SmpConfigXml))
+        if (HasRuntimePhysicsBones(physics.SmpConfigXml, "system"))
         {
             configs.Add("smp-config.xml");
         }

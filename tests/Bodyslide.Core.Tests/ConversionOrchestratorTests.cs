@@ -5552,7 +5552,8 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains(
                 compatibility.GetProperty("RemappedBones").EnumerateArray().Select(static item => item.GetString()),
                 value => string.Equals(value, "NPC L Breast01=>NPC L Breast", StringComparison.OrdinalIgnoreCase));
-            Assert.Empty(compatibility.GetProperty("MissingRuntimeConfigs").EnumerateArray());
+            Assert.Equal("cbpc-config.xml", Assert.Single(compatibility.GetProperty("MissingRuntimeConfigs").EnumerateArray()).GetString());
+            Assert.False(compatibility.GetProperty("HasRequiredRuntimeConfigs").GetBoolean());
         }
         finally
         {

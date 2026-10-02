@@ -69,6 +69,21 @@ instructions, not an actual real-user reproduction. This coverage is not an
 safety gates. Unverified custom rigs, topology changes and external game/UI
 checks must not be relabeled automatic merely to improve readiness counts.
 
+Physics readiness counts a generated CBPC/SMP config only when its XML has the
+expected root and nonempty named bone entries. Empty, malformed, or unrelated
+XML cannot satisfy a requested runtime config, including one missing half of a
+hybrid profile. Unclassified custom bones can still be emitted for SMP, but do
+not produce an empty CBPC config or silently acquire human fallback bones.
+Support-file import includes source BodySlide projects, SliderGroups XML and OSD
+assets without treating ShapeData reference meshes as conversion inputs; explicit
+directory exclusions and generated-output markers still apply.
+
+Local Release verification is separate from external coverage evidence: the
+Linux packaged CLI can be self-checked here, but Windows desktop/MO2/Vortex click
+paths, BodySlide builds and live-game physics must be validated on the target
+Windows mod stack with redistributable real-user reproductions. CI runs marked
+`action_required` have not executed their jobs and are not passing build evidence.
+
 ## Run
 
 ```bash

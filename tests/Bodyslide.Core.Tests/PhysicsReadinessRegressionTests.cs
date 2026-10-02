@@ -8,6 +8,63 @@ namespace Bodyslide.Core.Tests;
 
 public sealed class PhysicsReadinessRegressionTests
 {
+    [Fact]
+    public async Task UnclassifiedDeclaredBoneDoesNotProduceEmptyCbpcButRemainsAvailableToSmp()
+    {
+        const string bone = "CustomSecondaryNode";
+        var physics = await new BasicPhysicsSupportService().BuildAsync(
+            new WeightedMesh("mixed", "default", true, TargetPhysicsBones: [bone]),
+            "Custom", "cbpc+smp", CancellationToken.None);
+
+        Assert.Null(physics.CbpcConfigXml);
+        Assert.Equal(bone, (string?)Assert.Single(XDocument.Parse(physics.SmpConfigXml!).Descendants("bone")).Attribute("name"));
+    }
+
+    [Fact]
+    public async Task WhitespaceOnlyDeclaredBonesDoNotProduceEmptyRuntimeConfigs()
+    {
+        var physics = await new BasicPhysicsSupportService().BuildAsync(
+            new WeightedMesh("mixed", "default", true, TargetPhysicsBones: ["", " "]),
+            "Custom", "cbpc+smp", CancellationToken.None);
+
+        Assert.Null(physics.CbpcConfigXml);
+        Assert.Null(physics.SmpConfigXml);
+    }
+
+    [Theory]
+    [InlineData("<CBPCConfig/>", "<system/>")]
+    [InlineData("<CBPCConfig><bone name=\"NPC L Breast01\"/>", "<system><bone name=\"NPC L Breast01\"/>")]
+    [InlineData("<unrelated><bone name=\"NPC L Breast01\"/></unrelated>", "<unrelated><bone name=\"NPC L Breast01\"/></unrelated>")]
+    [InlineData("<CBPCConfig><bone name=\" \"/></CBPCConfig>", "<system><bone name=\" \"/></system>")]
+    [InlineData("<CBPCConfig><!-- <bone name=\"NPC L Breast01\"/> --></CBPCConfig>", "<system><!-- <bone name=\"NPC L Breast01\"/> --></system>")]
+    public void InvalidPhysicsContentCannotCountAsGeneratedRuntimeConfigs(string cbpc, string smp)
+    {
+        var report = BuildCompatibilityReport(new PhysicsConfig("cbpc+smp", cbpc, smp));
+
+        Assert.Empty(report.GeneratedRuntimeConfigs);
+        Assert.Contains("cbpc-config.xml", report.MissingRuntimeConfigs);
+        Assert.Contains("smp-config.xml", report.MissingRuntimeConfigs);
+        Assert.False(report.HasRequiredRuntimeConfigs);
+        Assert.False(report.IsCompatible);
+    }
+
+    [Fact]
+    public void ValidSmpCannotHideEmptyCbpcInHybridReadiness()
+    {
+        var report = BuildCompatibilityReport(new PhysicsConfig("cbpc+smp",
+            "<CBPCConfig/>", "<system><bone name=\"NPC L Breast01\"/></system>"));
+
+        Assert.Equal("smp-config.xml", Assert.Single(report.GeneratedRuntimeConfigs));
+        Assert.Equal("cbpc-config.xml", Assert.Single(report.MissingRuntimeConfigs));
+        Assert.False(report.IsCompatible);
+    }
+
+    private static PhysicsCompatibilityReport BuildCompatibilityReport(PhysicsConfig physics) =>
+        (PhysicsCompatibilityReport)typeof(LocalExportService)
+            .GetMethod("BuildPhysicsCompatibilityReport", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, [new ImportedArmor("unused", [], [], [], []), "3BA",
+                new SkeletonMappingResult("xpmsse", "xpmsse", [], []), physics, Array.Empty<string>()])!;
+
     [Theory]
     [InlineData("Vanilla Beast")]
     [InlineData("3BA")]
