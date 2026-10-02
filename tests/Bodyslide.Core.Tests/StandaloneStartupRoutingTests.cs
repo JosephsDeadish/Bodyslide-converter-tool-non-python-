@@ -83,6 +83,7 @@ public sealed class StandaloneStartupRoutingTests
     [Theory]
     [InlineData("--load-result", @"C:\Mod Organizer 2\mods\Some Armor Pack")]
     [InlineData(@"--mo2-result:""C:\Mod Organizer 2\mods\Pack With Spaces""", null)]
+    [InlineData(@"/modorganizer-result:D:\Mod Organizer 2\mods\Legacy Pack", null)]
     [InlineData(@"/modorganizer-mod:D:\Mod Organizer 2\mods\Legacy Pack", null)]
     [InlineData("--from-mo2", null)]
     public void EvaluateDesktopLaunchDecision_RealWorldMo2LaunchPatterns_AttemptDesktopHandoff(
