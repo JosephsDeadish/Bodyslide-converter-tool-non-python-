@@ -8713,12 +8713,12 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
         foreach (var file in Directory.EnumerateFiles(rootOutput, "*", SearchOption.AllDirectories))
         {
-            if (Path.GetExtension(file).Equals(".json", StringComparison.OrdinalIgnoreCase))
+            var relativePath = Path.GetRelativePath(rootOutput, file).Replace('\\', '/');
+            if (relativePath.StartsWith(".reports/", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var relativePath = Path.GetRelativePath(rootOutput, file).Replace('\\', '/');
             archive.CreateEntryFromFile(file, relativePath, CompressionLevel.Optimal);
         }
     }
@@ -33311,6 +33311,8 @@ internal sealed class LocalExportService(
             "README.txt",
             "meta.ini",
             "remaining-gaps-checklist.md",
+            "conversion-quality.json",
+            "plugin-patches.json",
             "preview.html",
             "preview.svg",
             "preview-workbench.html",
