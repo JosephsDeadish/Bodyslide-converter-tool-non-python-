@@ -82,6 +82,9 @@ Batch conversion pairs `_0`/`_1` meshes only within the same source directory.
 Distinct armor folders sharing a mesh name are converted separately, with
 deterministic, collision-free per-armor output folder names. Unique names retain
 their existing output layout.
+Colliding plugin-free armor also receives distinct scratch-plugin names and
+game-relative world/first-person/ground mesh namespaces, preventing installation
+of separate packages from overwriting each other's generated plugin references.
 
 Body detection ignores GUID-shaped path components and leaf names as opaque
 workspace identifiers. Accidental body-name substrings inside those identifiers

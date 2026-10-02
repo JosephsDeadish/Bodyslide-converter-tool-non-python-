@@ -33,7 +33,10 @@ public sealed record ConversionRequest(
     IReadOnlyList<string>? CustomProfilePaths = null,
     string? WorldDropModeOverride = null,
     string? SkeletonNifPath = null,
-    string? SharedPluginOutputDirectory = null);
+    string? SharedPluginOutputDirectory = null)
+{
+    internal string? BatchOutputNamespace { get; init; }
+}
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 internal sealed record NormalizedConversionRequest(ConversionRequest Request, ConversionPreset? Preset, string DisplayName, string OutputSegment);
 
@@ -48,7 +51,11 @@ public sealed record ImportedArmor(
     IReadOnlyList<string> BodyReferenceFiles,
     string? TemporaryWorkspace = null,
     IReadOnlyList<WeightVariantPair>? WeightVariantPairs = null,
-    IReadOnlyList<CustomBodyProfile>? CustomBodyProfiles = null);
+    IReadOnlyList<CustomBodyProfile>? CustomBodyProfiles = null)
+{
+    internal string? BodySlideProjectNamespace { get; init; }
+    internal string? BodySlideOutputPath { get; init; }
+}
 public sealed record BodyDetectionReport(string Body, double Confidence, IReadOnlyList<string> Evidence);
 /// <summary>
 /// Headgear sub-classification values.  Only populated when <c>MeshType</c> is <c>"headgear"</c>.
@@ -7948,7 +7955,14 @@ public sealed class ConversionOrchestrator(
             var physics = await ProfileStageAsync("physics-build", () => physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken));
             steps.Add($"physics:{physics.Profile}");
 
-            var bodySlideProject = await ProfileStageAsync("bodyslide-project", () => bodySlideProjectService.GenerateAsync(armor, converted, normalized.Request.TargetBody, cancellationToken));
+            var bodySlideArmor = normalized.Request.BatchOutputNamespace is null ? armor : armor with
+            {
+                BodySlideProjectNamespace = normalized.Request.BatchOutputNamespace,
+                BodySlideOutputPath = pluginAnalysis.ScannedPlugins.Count == 0
+                    ? $@"meshes\slidesmith\{LocalExportService.BuildSafeBodyToken(normalized.Request.TargetBody)}\{normalized.Request.BatchOutputNamespace}\"
+                    : null
+            };
+            var bodySlideProject = await ProfileStageAsync("bodyslide-project", () => bodySlideProjectService.GenerateAsync(bodySlideArmor, converted, normalized.Request.TargetBody, cancellationToken));
             steps.Add($"bodyslide:{bodySlideProject.ProjectName},{bodySlideProject.Sliders.Count}-sliders");
             if (!normalized.Request.GenerateBodySlideFiles)
             {
@@ -8692,6 +8706,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         var resultBag = new System.Collections.Concurrent.ConcurrentBag<(string MeshFile, ConversionResult Result)>();
         var outputNames = BuildBatchOutputNames(meshFiles);
+        var collidingStems = meshFiles
+            .GroupBy(path => StripWeightSuffix(Path.GetFileNameWithoutExtension(path) ?? string.Empty), StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2);
         await Parallel.ForEachAsync(
             meshFiles,
@@ -8727,6 +8746,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                     InputPath = meshFile,
                     OutputDirectory = perArmorOutput,
                     SharedPluginOutputDirectory = rootOutput,
+                    BatchOutputNamespace = collidingStems.Contains(StripWeightSuffix(Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty))
+                        ? outputNames[meshFile] : null,
                     OutputZip = false
                 };
                 var result = await orchestrator.ConvertAsync(perArmorRequest, ct, stageProgress);
@@ -8738,7 +8759,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             });
 
         return meshFiles
-            .Select(path => resultBag.First(r => string.Equals(r.MeshFile, path, StringComparison.OrdinalIgnoreCase)))
+            .Select(path => resultBag.First(r => string.Equals(r.MeshFile, path,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
             .ToList();
     }
 
@@ -18214,6 +18236,10 @@ internal static class BodySlideLayoutPlanner
     {
         var baseName = BuildProjectBaseName(armor);
         var safeBaseName = SanitizeToken(baseName);
+        if (armor.BodySlideProjectNamespace is not null)
+        {
+            safeBaseName = $"{SanitizeToken(armor.BodySlideProjectNamespace)}_{safeBaseName}";
+        }
         var safeTargetBody = SanitizeToken(targetBody);
 
         if (!safeBaseName.Contains(safeTargetBody, StringComparison.OrdinalIgnoreCase))
@@ -18261,7 +18287,7 @@ internal static class BodySlideLayoutPlanner
                     sliderSetName,
                     setFolder,
                     $@"{setFolder}\{primary.FileName}",
-                    lowVariant.OutputPath,
+                    armor.BodySlideOutputPath ?? lowVariant.OutputPath,
                     lowVariant.FileName,
                     highVariant?.FileName);
             })
@@ -21676,7 +21702,7 @@ internal sealed class LocalExportService(
         var stagedPluginMeshSet = stagedPluginMeshes.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var scratchPluginMeshes = pluginAnalysis.ScannedPlugins.Count == 0
-            ? await StageScratchPluginMeshesAsync(outputDirectory, writtenNifs, request.TargetBody, cancellationToken)
+            ? await StageScratchPluginMeshesAsync(outputDirectory, writtenNifs, request.TargetBody, cancellationToken, request.BatchOutputNamespace)
             : [];
         outputFiles.AddRange(scratchPluginMeshes);
 
@@ -21699,7 +21725,9 @@ internal sealed class LocalExportService(
                                  stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
                     ? stem[..^2]
                     : stem;
-                var groundRelativePath = $"meshes/slidesmith/{safeBodyToken}/{groundStem}_ground.nif";
+                var groundBodyPath = pluginAnalysis.ScannedPlugins.Count == 0 && request.BatchOutputNamespace is not null
+                    ? $"{safeBodyToken}/{request.BatchOutputNamespace}" : safeBodyToken;
+                var groundRelativePath = $"meshes/slidesmith/{groundBodyPath}/{groundStem}_ground.nif";
                 groundMeshRelativePath ??= groundRelativePath;
 
                 var groundAbsPath = Path.Combine(
@@ -22180,6 +22208,10 @@ internal sealed class LocalExportService(
         if (pluginAnalysis.ScannedPlugins.Count == 0 && scratchPluginGen is not null && writtenNifs.Count > 0)
         {
             var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "SlideSmithArmor";
+            if (request.BatchOutputNamespace is not null)
+            {
+                armorName = $"{request.BatchOutputNamespace}_{armorName}";
+            }
             var bipedSlots = pluginAnalysis.ArmorAddons
                 .Where(a => a.BipedSlots is not null)
                 .SelectMany(a => a.BipedSlots!)
@@ -22213,7 +22245,9 @@ internal sealed class LocalExportService(
             }
 
             var pluginNifPaths = writtenNifs
-                .Select(p => $"meshes/slidesmith/{safeBodyToken}/{Path.GetFileName(p)}")
+                .Select(p => request.BatchOutputNamespace is null
+                    ? $"meshes/slidesmith/{safeBodyToken}/{Path.GetFileName(p)}"
+                    : $"meshes/slidesmith/{safeBodyToken}/{request.BatchOutputNamespace}/{Path.GetFileName(p)}")
                 .ToList();
             var scratchMasterHints = BuildScratchPluginMasterHints(pluginAnalysis);
 
@@ -32995,7 +33029,8 @@ internal sealed class LocalExportService(
         string outputDirectory,
         IReadOnlyList<string> writtenNifPaths,
         string targetBody,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? batchOutputNamespace = null)
     {
         if (writtenNifPaths.Count == 0)
         {
@@ -33003,6 +33038,10 @@ internal sealed class LocalExportService(
         }
 
         var safeBodyToken = BuildSafeBodyToken(targetBody);
+        if (batchOutputNamespace is not null)
+        {
+            safeBodyToken = $"{safeBodyToken}/{batchOutputNamespace}";
+        }
         var staged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var sourcePath in writtenNifPaths.Where(path =>
