@@ -531,6 +531,14 @@ internal sealed record PipelineTimingReport(
     IReadOnlyDictionary<string, long> PhaseMilliseconds,
     IReadOnlyList<string> TopStages,
     IReadOnlyList<string> TopPhases);
+public sealed record InspectionTimingReport(
+    long TotalMilliseconds,
+    long ImportMilliseconds,
+    long BodyDetectionMilliseconds,
+    long MeshAnalysisMilliseconds,
+    long SkeletonMappingMilliseconds,
+    long NifInspectionMilliseconds,
+    IReadOnlyList<string> TopStages);
 public sealed record ConversionInspectionResult(
     string InputPath,
     string? RequestedTargetBody,
@@ -538,7 +546,8 @@ public sealed record ConversionInspectionResult(
     BodyDetectionReport Detection,
     MeshAnalysis Analysis,
     SkeletonMappingResult? SkeletonMapping,
-    IReadOnlyList<NifSupportReport>? NifSupport = null);
+    IReadOnlyList<NifSupportReport>? NifSupport = null,
+    InspectionTimingReport? Timing = null);
 
 public sealed record HeelAnalysisReport(
     string Profile,
@@ -8213,7 +8222,21 @@ public sealed class ConversionInspector(
             throw new FileNotFoundException("Input path was not found.", inputPath);
         }
 
-        var armor = await importer.ImportAsync(inputPath, cancellationToken);
+        var stageDurationsMs = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var totalStopwatch = Stopwatch.StartNew();
+
+        async Task<T> ProfileStageAsync<T>(string stageKey, Func<Task<T>> action)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            var value = await action();
+            stopwatch.Stop();
+            stageDurationsMs[stageKey] = stageDurationsMs.TryGetValue(stageKey, out var existing)
+                ? existing + stopwatch.ElapsedMilliseconds
+                : stopwatch.ElapsedMilliseconds;
+            return value;
+        }
+
+        var armor = await ProfileStageAsync("import", () => importer.ImportAsync(inputPath, cancellationToken));
         armor = CustomBodyProfileSupport.MergeProfiles(armor, customProfilePaths);
 
         // If the caller supplied an explicit skeleton NIF path, inject it so the
@@ -8226,17 +8249,31 @@ public sealed class ConversionInspector(
             };
         }
 
-        var detection = await bodyDetector.DetectAsync(armor, cancellationToken);
-        var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);
+        var detection = await ProfileStageAsync("body-detection", () => bodyDetector.DetectAsync(armor, cancellationToken));
+        var analysis = await ProfileStageAsync("mesh-analysis", () => meshAnalyzer.AnalyzeAsync(armor, cancellationToken));
 
         var normalizedTargetBody = string.IsNullOrWhiteSpace(targetBody) ? null : targetBody.Trim();
         SkeletonMappingResult? skeletonMapping = null;
         if (!string.IsNullOrWhiteSpace(normalizedTargetBody))
         {
-            skeletonMapping = await skeletonMapper.MapAsync(armor, normalizedTargetBody, cancellationToken);
+            skeletonMapping = await ProfileStageAsync("skeleton-mapping", () => skeletonMapper.MapAsync(armor, normalizedTargetBody, cancellationToken));
         }
 
-        var nifSupport = NifGeometrySignatureReader.Inspect(armor.MeshFiles);
+        var nifSupport = await ProfileStageAsync("nif-inspection", () => Task.FromResult(NifGeometrySignatureReader.Inspect(armor.MeshFiles)));
+        totalStopwatch.Stop();
+        var timing = new InspectionTimingReport(
+            totalStopwatch.ElapsedMilliseconds,
+            stageDurationsMs.TryGetValue("import", out var importMs) ? importMs : 0,
+            stageDurationsMs.TryGetValue("body-detection", out var detectionMs) ? detectionMs : 0,
+            stageDurationsMs.TryGetValue("mesh-analysis", out var analysisMs) ? analysisMs : 0,
+            stageDurationsMs.TryGetValue("skeleton-mapping", out var skeletonMappingMs) ? skeletonMappingMs : 0,
+            stageDurationsMs.TryGetValue("nif-inspection", out var nifInspectionMs) ? nifInspectionMs : 0,
+            stageDurationsMs
+                .OrderByDescending(static pair => pair.Value)
+                .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Take(3)
+                .Select(pair => $"{pair.Key}:{pair.Value}ms")
+                .ToArray());
 
         return new ConversionInspectionResult(
             inputPath,
@@ -8245,7 +8282,8 @@ public sealed class ConversionInspector(
             detection,
             analysis,
             skeletonMapping,
-            nifSupport);
+            nifSupport,
+            timing);
     }
 }
 

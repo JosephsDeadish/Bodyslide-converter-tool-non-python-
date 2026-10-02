@@ -4989,6 +4989,19 @@ public sealed class MainForm : Form
                 Add("Skeleton mapping", "Select a target or preset to inspect compatibility.");
             }
 
+            if (inspection.Timing is not null)
+            {
+                Add("Inspection timing", $"{inspection.Timing.TotalMilliseconds} ms total");
+                Add("Timing hotspots", inspection.Timing.TopStages.Count == 0
+                    ? "None"
+                    : string.Join(", ", inspection.Timing.TopStages));
+                Add("Timing import", $"{inspection.Timing.ImportMilliseconds} ms");
+                Add("Timing body detection", $"{inspection.Timing.BodyDetectionMilliseconds} ms");
+                Add("Timing mesh analysis", $"{inspection.Timing.MeshAnalysisMilliseconds} ms");
+                Add("Timing skeleton mapping", $"{inspection.Timing.SkeletonMappingMilliseconds} ms");
+                Add("Timing NIF inspection", $"{inspection.Timing.NifInspectionMilliseconds} ms");
+            }
+
             // Show the physics profile that will actually be used for the conversion.
             if (!string.IsNullOrWhiteSpace(inspection.RequestedTargetBody))
             {

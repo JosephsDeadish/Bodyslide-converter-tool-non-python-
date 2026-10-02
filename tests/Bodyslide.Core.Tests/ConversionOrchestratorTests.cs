@@ -1593,6 +1593,12 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains(
                 pipelineProfile.RootElement.GetProperty("Phases").EnumerateArray(),
                 phase => string.Equals(phase.GetProperty("Phase").GetString(), "inspect", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                pipelineProfile.RootElement.GetProperty("Phases").EnumerateArray(),
+                phase => string.Equals(phase.GetProperty("Phase").GetString(), "import", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                pipelineProfile.RootElement.GetProperty("Phases").EnumerateArray(),
+                phase => string.Equals(phase.GetProperty("Phase").GetString(), "convert", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -35602,6 +35608,13 @@ public async Task ConversionInspector_InspectAsync_ReturnsDetectionAnalysisAndCu
         var nifSupport = Assert.Single(inspection.NifSupport ?? []);
         Assert.Equal("unsupported", nifSupport.Status);
         Assert.Equal("missing-header", nifSupport.ParseMode);
+        Assert.NotNull(inspection.Timing);
+        Assert.True(inspection.Timing!.TotalMilliseconds >= 0);
+        Assert.True(inspection.Timing.ImportMilliseconds >= 0);
+        Assert.True(inspection.Timing.BodyDetectionMilliseconds >= 0);
+        Assert.True(inspection.Timing.MeshAnalysisMilliseconds >= 0);
+        Assert.True(inspection.Timing.NifInspectionMilliseconds >= 0);
+        Assert.Contains(inspection.Timing.TopStages, stage => stage.StartsWith("import:", StringComparison.OrdinalIgnoreCase));
     }
     finally
     {
