@@ -200,7 +200,7 @@ public sealed class PackageArtifactRegressionTests
         var issues = package.Verify();
 
         Assert.Contains(issues, issue => issue.Code == "invalid-package-artifact" &&
-                                        issue.Message.Contains(relativePath, StringComparison.Ordinal));
+                                        issue.Message.Replace('\\', '/').Contains(relativePath, StringComparison.Ordinal));
     }
 
     [Fact]

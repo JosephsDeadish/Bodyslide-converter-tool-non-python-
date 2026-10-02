@@ -13451,7 +13451,11 @@ public sealed class PluginPatchGuidanceTests
             Assert.Contains("MasteredArmor_SlidesmithPatch.esp", patchJson, StringComparison.Ordinal);
             Assert.Contains("RecommendedPluginLoadAfter", patchJson, StringComparison.Ordinal);
             Assert.Contains("Mod Organizer 2 or Vortex", patchJson, StringComparison.Ordinal);
-            Assert.Contains("\"RecommendedPluginLoadAfter\": [\n        \"Skyrim.esm\",\n        \"ArmorPack.esm\",\n        \"MasteredArmor.esp\"\n      ]", patchJson, StringComparison.Ordinal);
+            using var patchReport = System.Text.Json.JsonDocument.Parse(patchJson);
+            var installHint = Assert.Single(patchReport.RootElement.GetProperty("PluginInstallHints").EnumerateArray(),
+                hint => hint.GetProperty("SourcePlugin").GetString() == "MasteredArmor.esp");
+            Assert.Equal(new[] { "Skyrim.esm", "ArmorPack.esm", "MasteredArmor.esp" },
+                installHint.GetProperty("RecommendedPluginLoadAfter").EnumerateArray().Select(item => item.GetString()));
             Assert.Contains("\"MissingPatchPluginMasters\": []", patchJson, StringComparison.Ordinal);
             Assert.Contains("\"PatchPluginMasterOrderMismatches\": []", patchJson, StringComparison.Ordinal);
         }
