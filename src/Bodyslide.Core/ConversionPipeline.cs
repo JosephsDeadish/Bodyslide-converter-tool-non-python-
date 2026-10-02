@@ -23124,8 +23124,7 @@ internal sealed class LocalExportService(
             scanRoot,
             [".esp", ".esm", ".esl", ".bgsm", ".bgem"],
             excludedDirectories,
-            cancellationToken,
-            maxTraversalDepth: 16);
+            cancellationToken);
         var pluginFiles = files
             .Where(IsPlugin)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
