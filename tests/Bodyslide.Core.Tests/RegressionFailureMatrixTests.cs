@@ -65,6 +65,51 @@ public sealed class RegressionFailureMatrixTests
         Assert.DoesNotContain("private-message", serialized);
     }
 
+    [Fact]
+    public void Build_SameBodyIssueWithDifferentFrameworks_ProducesSeparateCells()
+    {
+        var first = Sample("CBBE") with { OutputDirectory = "/sample/one" };
+        var second = Sample("CBBE") with { OutputDirectory = "/sample/two" };
+        var proofs = new[]
+        {
+            Proof(first.OutputDirectory, "digitigrade-beast", "soft-body"),
+            Proof(second.OutputDirectory, "ube-extended", "static")
+        };
+
+        var report = RegressionFailureMatrix.Build("CBBE", [first, second], proofs);
+        var cells = report.Cells.Where(static cell => cell.IssueCode == "missing-mesh").ToArray();
+
+        Assert.Equal(2, cells.Length);
+        Assert.Contains(cells, static cell => cell.SkeletonFamily == "digitigrade-beast" && cell.PhysicsMode == "soft-body");
+        Assert.Contains(cells, static cell => cell.SkeletonFamily == "ube-extended" && cell.PhysicsMode == "static");
+        Assert.All(cells, static cell =>
+        {
+            Assert.Equal("oral-or-genital", cell.TopologyFamily);
+            Assert.Equal("linked-family", cell.PluginFamily);
+            Assert.Equal(1, cell.Count);
+        });
+    }
+
+    [Fact]
+    public void Build_MissingProof_IsExplicitlyUnknown()
+    {
+        var report = RegressionFailureMatrix.Build("CBBE", [Sample("CBBE")]);
+
+        Assert.All(report.Cells, static cell =>
+        {
+            Assert.Equal("unknown", cell.SkeletonFamily);
+            Assert.Equal("unknown", cell.PhysicsMode);
+            Assert.Equal("unknown", cell.TopologyFamily);
+            Assert.Equal("unknown", cell.PluginFamily);
+        });
+    }
+
+    private static ConversionMatrixPackProofItem Proof(string outputDirectory, string skeleton, string physics) =>
+        new("private-mesh.nif", outputDirectory, "CBBE", "female", "advanced-review-required",
+            "private-coordinate-key",
+            [$"source-skeleton-family:{skeleton}", $"runtime-physics:{physics}", "topology-family:oral-or-genital", "plugin-family:linked-family"],
+            "partial", "planned-only", false, ["runtime"], ["private-gap-message"]);
+
     private static ArmorPackValidationItem Sample(string? body) =>
         new("private-mesh.nif", "/private-pack/output", true, "needs-review", 75,
             ["missing-mesh"], ["private-message"],

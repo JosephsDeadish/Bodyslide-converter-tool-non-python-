@@ -25,7 +25,8 @@ internal static class BodySlideSourceProjectSupport
     private const int MaximumCachedDirectoryEntries = 4096;
     private const int MaximumDiscoveryDirectories = 10000;
     private const int MaximumDiscoveryEntriesPerDirectory = 100000;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DirectorySnapshot> DirectoryCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DirectorySnapshot> DirectoryCache = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private static readonly object DirectoryCacheLock = new();
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, BodySlideProjectProbeCacheEntry> OspProbeCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, BodySlideLinkedAssetCacheEntry> LinkedAssetCache = new(StringComparer.OrdinalIgnoreCase);

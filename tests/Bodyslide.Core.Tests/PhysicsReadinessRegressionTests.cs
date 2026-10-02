@@ -35,6 +35,7 @@ public sealed class PhysicsReadinessRegressionTests
 
     [Theory]
     [InlineData("HDT Mouth", "MouthPhysics")]
+    [InlineData("HDT Mouth & \"<Tip>", "MouthPhysics")]
     [InlineData("HDT HighHeel_L", "HeelPhysics")]
     [InlineData("WingTip.L", "WingPhysics")]
     public async Task CbpcSecondaryGroupsRetainExactDeclaredBoneReferences(string bone, string group)
@@ -183,15 +184,18 @@ public sealed class PhysicsReadinessRegressionTests
         Assert.Equal(0, output.Length);
     }
 
-    [Fact]
-    public void ArchiveWithoutProgressStillExtractsEveryByte()
+    [Theory]
+    [InlineData("zip")]
+    [InlineData("tar")]
+    [InlineData("tar.gz")]
+    public void ArchiveWithoutProgressStillExtractsEveryByte(string format)
     {
         var root = CreateFixtureDirectory();
         string? extracted = null;
         try
         {
-            var path = Path.Combine(root, "input.zip");
-            WriteArchive(path, "zip");
+            var path = Path.Combine(root, "input." + format);
+            WriteArchive(path, format);
             extracted = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(path, "readiness-complete");
             Assert.Equal(new byte[] { 1, 2, 3, 4 }, File.ReadAllBytes(Path.Combine(extracted, "first.nif")));
             Assert.Equal(new byte[] { 1, 2, 3, 4 }, File.ReadAllBytes(Path.Combine(extracted, "second.nif")));

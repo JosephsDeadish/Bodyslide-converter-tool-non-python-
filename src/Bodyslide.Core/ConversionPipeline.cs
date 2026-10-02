@@ -11404,6 +11404,7 @@ internal static class ArchiveExtractionHelper
                 },
                 EntryProgressReportIntervalBytes,
                 budget);
+            ValidateExtractedLength(entry.FullName, entry.Length, entryBytesCopied);
             totalBytesCopied = entryBaseBytes + entryBytesCopied;
             processedEntries++;
             EmitArchiveProgress(
@@ -11509,6 +11510,7 @@ internal static class ArchiveExtractionHelper
                 },
                 EntryProgressReportIntervalBytes,
                 budget);
+            ValidateExtractedLength(entryKey, entry.Size, entryBytesCopied);
             totalBytesCopied = entryBaseBytes + entryBytesCopied;
             processedEntries++;
             EmitArchiveProgress(
@@ -11622,6 +11624,7 @@ internal static class ArchiveExtractionHelper
                 },
                 EntryProgressReportIntervalBytes,
                 budget);
+            ValidateExtractedLength(entryKey, entry.Size, entryBytesCopied);
             totalBytesCopied = entryBaseBytes + entryBytesCopied;
             processedEntries++;
             EmitArchiveProgress(
@@ -11739,6 +11742,7 @@ internal static class ArchiveExtractionHelper
                     EntryProgressReportIntervalBytes,
                     budget);
             }
+            ValidateExtractedLength(entry.Name, entry.Length, entryBytesCopied);
             totalBytesCopied = entryBaseBytes + entryBytesCopied;
             processedEntries++;
             EmitArchiveProgress(
@@ -11755,6 +11759,14 @@ internal static class ArchiveExtractionHelper
                 force: true);
 
             File.SetLastWriteTimeUtc(destinationPath, entry.ModificationTime.UtcDateTime);
+        }
+    }
+
+    private static void ValidateExtractedLength(string name, long expectedBytes, long copiedBytes)
+    {
+        if (copiedBytes != expectedBytes)
+        {
+            throw new InvalidDataException($"Archive entry length mismatch: {name} ({copiedBytes}/{expectedBytes} bytes).");
         }
     }
 
@@ -16274,14 +16286,14 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             };
 
             sb.AppendLine($"  <{sectionName}>");
-            foreach (var bone in requestedBones.Where(bone => ClassifyPhysicsBoneGroup(bone, isMale).Equals(group, StringComparison.OrdinalIgnoreCase)))
-            {
-                sb.AppendLine($"    <bone name=\"{SecurityElement.Escape(bone)}\" />");
-            }
             sb.AppendLine($"    <Stiffness>{F(stiffness * tuning.StiffnessMultiplier)}</Stiffness>");
             sb.AppendLine($"    <Damping>{F(Math.Clamp(damping * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
             sb.AppendLine($"    <Gravity>{F(Math.Clamp(gravity * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
             sb.AppendLine($"    <MaxOffset>{F(maxOffset * tuning.OffsetMultiplier)}</MaxOffset>");
+            foreach (var bone in requestedBones.Where(bone => ClassifyPhysicsBoneGroup(bone, isMale).Equals(group, StringComparison.OrdinalIgnoreCase)))
+            {
+                sb.AppendLine($"    <bone name=\"{SecurityElement.Escape(bone)}\" />");
+            }
             sb.AppendLine($"  </{sectionName}>");
         }
     }
