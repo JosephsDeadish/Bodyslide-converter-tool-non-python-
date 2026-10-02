@@ -6,6 +6,8 @@ public sealed class StandaloneStartupRoutingTests
     [InlineData("--input", @"D:\MO2\mods\Armor\armor.nif")]
     [InlineData("--input=", @"D:\MO2\mods\Armor\armor.nif")]
     [InlineData("--input:", "/home/test/vortex/mods/armor.nif")]
+    [InlineData("--input:", "/home/test/vortex/mods/armor=variant.nif")]
+    [InlineData("--input:", @"D:\MO2\mods\Armor\armor=variant.nif")]
     [InlineData("--INPUT=", "/home/test/armor=variant.nif")]
     public void NamedConversionArgumentsMatchRoutingUnderLauncherSignals(string option, string input)
     {
@@ -72,6 +74,30 @@ public sealed class StandaloneStartupRoutingTests
 
         Assert.Equal(string.Empty, values["input"]);
         Assert.Equal("true", values["self-check"]);
+    }
+
+    [Theory]
+    [InlineData("--input:/home/test/armor=variant.nif", "input", "/home/test/armor=variant.nif")]
+    [InlineData("--input:C:\\Armor\\armor=variant.nif", "input", "C:\\Armor\\armor=variant.nif")]
+    [InlineData("--input=C:\\Armor\\armor:variant.nif", "input", "C:\\Armor\\armor:variant.nif")]
+    [InlineData("--mo2-output:C:\\MO2\\profiles\\name=variant", "mo2-output", "C:\\MO2\\profiles\\name=variant")]
+    [InlineData("/vortex-path:/home/test/armor=variant", "vortex-path", "/home/test/armor=variant")]
+    public void FirstInlineDelimiterPreservesEveryCharacterOfOptionValue(string arg, string expectedName, string expectedValue)
+    {
+        Assert.True(StandaloneStartupRouting.TryReadOptionToken(arg, out var name, out var value));
+        Assert.Equal(expectedName, name);
+        Assert.Equal(expectedValue, value);
+    }
+
+    [Theory]
+    [InlineData("--mo2-output:/home/test/armor=variant")]
+    [InlineData("--vortex-path:C:\\Vortex\\mods\\name=variant")]
+    public void ManagerInlinePathsWithEqualsSignsRemainLauncherOnly(string arg)
+    {
+        Assert.True(StandaloneStartupRouting.HasLauncherPathOptionArgument([arg]));
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision([arg], null, null, _ => false);
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ExplicitCliLaunchDetected);
     }
 
     [Theory]

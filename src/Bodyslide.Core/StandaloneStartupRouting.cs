@@ -218,22 +218,12 @@ public static class StandaloneStartupRouting
             return false;
         }
 
-        var separatorIndex = option.IndexOf('=');
+        var separatorIndex = option.IndexOfAny(['=', ':']);
         if (separatorIndex >= 0)
         {
             inlineValue = separatorIndex + 1 < option.Length ? option[(separatorIndex + 1)..] : string.Empty;
             option = option[..separatorIndex].Trim();
         }
-        else
-        {
-            var colonIndex = option.IndexOf(':');
-            if (colonIndex >= 1)
-            {
-                inlineValue = colonIndex + 1 < option.Length ? option[(colonIndex + 1)..] : string.Empty;
-                option = option[..colonIndex].Trim();
-            }
-        }
-
         if (option.Contains(Path.DirectorySeparatorChar) || option.Contains(Path.AltDirectorySeparatorChar))
         {
             option = string.Empty;
@@ -252,15 +242,7 @@ public static class StandaloneStartupRouting
             return false;
         }
 
-        var inlineSeparatorIndex = arg.IndexOf('=');
-        if (inlineSeparatorIndex < 0)
-        {
-            var colonIndex = arg.IndexOf(':');
-            if (colonIndex > 1)
-            {
-                inlineSeparatorIndex = colonIndex;
-            }
-        }
+        var inlineSeparatorIndex = arg.IndexOfAny(['=', ':']);
 
         if (inlineSeparatorIndex >= 0)
         {
