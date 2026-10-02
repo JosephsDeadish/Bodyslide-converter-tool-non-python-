@@ -12016,7 +12016,11 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .SelectMany(path =>
             {
-                var fileName = Path.GetFileNameWithoutExtension(path) ?? string.Empty;
+                var fileName = Path.GetFileNameWithoutExtension(path.Replace('\\', '/')) ?? string.Empty;
+                if (Guid.TryParse(fileName, out _))
+                {
+                    fileName = string.Empty;
+                }
                 var normalizedPath = NormalizeDetectionPath(path);
                 return new[] { fileName, normalizedPath };
             })
@@ -12038,6 +12042,10 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             .Select(segment =>
             {
                 var withoutExtension = Path.GetFileNameWithoutExtension(segment) ?? segment;
+                if (Guid.TryParse(withoutExtension, out _))
+                {
+                    return string.Empty;
+                }
                 return withoutExtension
                     .Replace('-', ' ')
                     .Replace('_', ' ')

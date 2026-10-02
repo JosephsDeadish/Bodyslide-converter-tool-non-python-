@@ -182,15 +182,17 @@ internal static class BodySlideSourceProjectSupport
                     continue;
                 }
 
-                var fileStem = Path.GetFileNameWithoutExtension(path);
-                if (!string.IsNullOrWhiteSpace(fileStem))
+                var fileStem = Path.GetFileNameWithoutExtension(path.Replace('\\', '/'));
+                if (!string.IsNullOrWhiteSpace(fileStem) && !Guid.TryParse(fileStem, out _))
                 {
                     AddEvidenceToken(sourceCategory, fileStem);
                 }
 
-                var normalizedPath = path.Replace('\\', '/');
-                foreach (var segment in normalizedPath
-                             .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                var pathSegments = path.Replace('\\', '/')
+                    .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(segment => !Guid.TryParse(Path.GetFileNameWithoutExtension(segment), out _))
+                    .ToArray();
+                foreach (var segment in pathSegments)
                 {
                     if (segment.Length > 1)
                     {
@@ -198,7 +200,7 @@ internal static class BodySlideSourceProjectSupport
                     }
                 }
 
-                var condensedToken = new string(normalizedPath
+                var condensedToken = new string(string.Join('/', pathSegments)
                     .Where(char.IsLetterOrDigit)
                     .Select(char.ToLowerInvariant)
                     .ToArray());

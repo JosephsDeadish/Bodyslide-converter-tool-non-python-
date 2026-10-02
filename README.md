@@ -75,6 +75,12 @@ instructions, not an actual real-user reproduction. This coverage is not an
 safety gates. Unverified custom rigs, topology changes and external game/UI
 checks must not be relabeled automatic merely to improve readiness counts.
 
+Body detection ignores GUID-shaped path components and leaf names as opaque
+workspace identifiers. Accidental body-name substrings inside those identifiers
+cannot outweigh BodySlide metadata; meaningful body-named folders remain signals.
+BodySlide fallback inference also excludes these identifiers from individual and
+condensed path evidence so they cannot inject unrelated built-in slider families.
+
 Physics readiness counts a generated CBPC/SMP config only when its XML has the
 expected root and nonempty named bone entries. Empty, malformed, or unrelated
 XML cannot satisfy a requested runtime config, including one missing half of a
