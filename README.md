@@ -57,6 +57,14 @@ physics and archive layout, and assert the expected issue codes and output
 artifacts in a repeatable test. The batch failure matrix helps prioritize those
 cases but does not itself prove a conversion works in game.
 
+`FailingPackReadinessTests` exercises existing local synthetic, redistributable
+fixtures for unsupported NIF layouts (including NiLines), unresolved cross-plugin
+ties, and oral topology review. It checks issue codes, review gates, nonempty
+guidance artifacts, and batch `regression-failure-matrix.json` against the pack
+validation rollup. `Fixtures/RealUserFailingPackIntake` contains only intake
+instructions, not an actual real-user reproduction. This coverage is not an
+“any armor” guarantee; real load orders and in-game deformation still need proof.
+
 `advanced-review-required` and `experimental-manual-cleanup` remain intentional
 safety gates. Unverified custom rigs, topology changes and external game/UI
 checks must not be relabeled automatic merely to improve readiness counts.

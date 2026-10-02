@@ -22,6 +22,11 @@ internal static class BodySlideSourceProjectSupport
     private static readonly StringComparison PathComparison = StringComparison.OrdinalIgnoreCase;
     private static readonly SourceSliderCandidate EmptyCandidate = new(string.Empty, 0);
     private const int MaximumCachedProjects = 256;
+    private const int MaximumCachedDirectoryEntries = 4096;
+    private const int MaximumDiscoveryDirectories = 10000;
+    private const int MaximumDiscoveryEntriesPerDirectory = 100000;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DirectorySnapshot> DirectoryCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object DirectoryCacheLock = new();
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, BodySlideProjectProbeCacheEntry> OspProbeCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, BodySlideLinkedAssetCacheEntry> LinkedAssetCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -47,6 +52,11 @@ internal static class BodySlideSourceProjectSupport
     private sealed record BodySlideDiscoveryResult(
         IReadOnlyList<string> Files,
         bool HasReferenceAssets);
+
+    private sealed record DirectorySnapshot(
+        string? Stamp,
+        IReadOnlyList<string> Files,
+        IReadOnlyList<string> Directories);
 
     private sealed record BodySlideProjectProbe(
         string OspPath,
@@ -502,20 +512,33 @@ internal static class BodySlideSourceProjectSupport
 
         var discovered = new List<string>();
         var pending = new Stack<string>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         pending.Push(root);
 
         while (pending.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var current = pending.Pop();
+            if (!visited.Add(Path.GetFullPath(current)))
+            {
+                continue;
+            }
+            if (visited.Count > MaximumDiscoveryDirectories)
+            {
+                throw new InvalidDataException($"BodySlide discovery exceeds {MaximumDiscoveryDirectories} directories; select a narrower input folder.");
+            }
             discovered.AddRange(EnumerateSupportedFiles(current, cancellationToken)
                 .Where(path => IsAssociatedWithArmor(path, meshTokens)));
 
-            foreach (var directory in Directory.EnumerateDirectories(current))
+            foreach (var directory in ReadDirectorySnapshot(current, cancellationToken).Directories)
             {
                 if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) == 0 &&
                     ShouldTraverseBodySlideDirectory(root, directory, meshTokens))
                 {
+                    if (pending.Count + visited.Count >= MaximumDiscoveryDirectories)
+                    {
+                        throw new InvalidDataException($"BodySlide discovery exceeds {MaximumDiscoveryDirectories} directories; select a narrower input folder.");
+                    }
                     pending.Push(directory);
                 }
             }
@@ -526,7 +549,7 @@ internal static class BodySlideSourceProjectSupport
 
     private static IEnumerable<string> EnumerateSupportedFiles(string root, CancellationToken cancellationToken)
     {
-        foreach (var path in Directory.EnumerateFiles(root))
+        foreach (var path in ReadDirectorySnapshot(root, cancellationToken).Files)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var extension = Path.GetExtension(path);
@@ -559,8 +582,13 @@ internal static class BodySlideSourceProjectSupport
             {
                 continue;
             }
+            if (visitedDirectories.Count > MaximumDiscoveryDirectories)
+            {
+                throw new InvalidDataException($"BodySlide discovery exceeds {MaximumDiscoveryDirectories} directories; select a narrower input folder.");
+            }
 
-            foreach (var file in Directory.EnumerateFiles(current))
+            var snapshot = ReadDirectorySnapshot(current, cancellationToken);
+            foreach (var file in snapshot.Files)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (Path.GetExtension(file).Equals(".osp", StringComparison.OrdinalIgnoreCase))
@@ -571,16 +599,74 @@ internal static class BodySlideSourceProjectSupport
 
             if (searchOption == SearchOption.AllDirectories)
             {
-                foreach (var directory in Directory.EnumerateDirectories(current))
+                foreach (var directory in snapshot.Directories)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) == 0)
                     {
+                        if (pending.Count + visitedDirectories.Count >= MaximumDiscoveryDirectories)
+                        {
+                            throw new InvalidDataException($"BodySlide discovery exceeds {MaximumDiscoveryDirectories} directories; select a narrower input folder.");
+                        }
                         pending.Push(directory);
                     }
                 }
+
             }
         }
+    }
+
+    private static DirectorySnapshot ReadDirectorySnapshot(string directory, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var fullPath = Path.GetFullPath(directory);
+        static string? ReadStamp(string path)
+        {
+            var info = new DirectoryInfo(path);
+            return info.Exists ? $"{info.CreationTimeUtc.Ticks}:{info.LastWriteTimeUtc.Ticks}" : null;
+        }
+
+        var stamp = ReadStamp(fullPath);
+        if (stamp is not null && DirectoryCache.TryGetValue(fullPath, out var cached) && cached.Stamp == stamp)
+        {
+            return cached;
+        }
+
+        var files = new List<string>();
+        var directories = new List<string>();
+        var entryCount = 0;
+        foreach (var entry in Directory.EnumerateFileSystemEntries(fullPath))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (++entryCount > MaximumDiscoveryEntriesPerDirectory)
+            {
+                throw new InvalidDataException($"BodySlide discovery exceeds {MaximumDiscoveryEntriesPerDirectory} entries in one directory; select a narrower input folder.");
+            }
+            var attributes = File.GetAttributes(entry);
+            if ((attributes & FileAttributes.Directory) == 0)
+            {
+                files.Add(entry);
+            }
+            else if ((attributes & FileAttributes.ReparsePoint) == 0)
+            {
+                directories.Add(entry);
+            }
+        }
+
+        var snapshot = new DirectorySnapshot(stamp, files, directories);
+        if (stamp is not null && stamp == ReadStamp(fullPath) &&
+            entryCount <= MaximumCachedDirectoryEntries)
+        {
+            lock (DirectoryCacheLock)
+            {
+                if (DirectoryCache.Count >= MaximumCachedProjects && !DirectoryCache.ContainsKey(fullPath))
+                {
+                    DirectoryCache.Clear();
+                }
+                DirectoryCache[fullPath] = snapshot;
+            }
+        }
+        return snapshot;
     }
 
     private static bool ShouldTraverseBodySlideDirectory(string searchRoot, string directoryPath, IReadOnlyList<string> meshTokens)
@@ -704,7 +790,7 @@ internal static class BodySlideSourceProjectSupport
                 continue;
             }
 
-            foreach (var asset in Directory.EnumerateFiles(shapeDataFolder).Where(static path =>
+            foreach (var asset in ReadDirectorySnapshot(shapeDataFolder, cancellationToken).Files.Where(static path =>
                          Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase) ||
                          Path.GetExtension(path).Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
                          Path.GetExtension(path).Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
@@ -741,7 +827,7 @@ internal static class BodySlideSourceProjectSupport
                 stamps.Add(GetDirectoryStamp(shapeDataFolder));
                 if (Directory.Exists(shapeDataFolder))
                 {
-                    foreach (var filePath in Directory.EnumerateFiles(shapeDataFolder).Order(StringComparer.OrdinalIgnoreCase))
+                    foreach (var filePath in ReadDirectorySnapshot(shapeDataFolder, cancellationToken).Files.Order(StringComparer.OrdinalIgnoreCase))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         stamps.Add(GetFileStamp(filePath));
@@ -799,12 +885,15 @@ internal static class BodySlideSourceProjectSupport
         }
 
         if (OspProbeCache.TryGetValue(normalizedPath, out var cached) &&
-            string.Equals(cached.Stamp, stamp, StringComparison.Ordinal) &&
-            cached.Success &&
-            cached.Probe is not null)
+            string.Equals(cached.Stamp, stamp, StringComparison.Ordinal))
         {
-            probe = cached.Probe;
-            return true;
+            if (cached.Success && cached.Probe is not null)
+            {
+                probe = cached.Probe;
+                return true;
+            }
+            probe = new BodySlideProjectProbe(normalizedPath, Path.GetDirectoryName(normalizedPath) ?? string.Empty, FindBodySlideRoot(Path.GetDirectoryName(normalizedPath)), [], [], [], []);
+            return false;
         }
 
         var fresh = ProbeOspProject(normalizedPath, stamp);

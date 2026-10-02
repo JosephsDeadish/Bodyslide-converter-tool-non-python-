@@ -57,30 +57,6 @@ public sealed class BodySlideDiscoveryRegressionTests : IDisposable
             return;
         }
 
-        [Fact]
-        public void SourceScan_DirectoryLinkCycle_IsNotTraversed()
-        {
-            if (OperatingSystem.IsWindows())
-            {
-                return;
-            }
-
-            Directory.CreateDirectory(root);
-            var mesh = Path.Combine(root, "armor.nif");
-            File.WriteAllText(mesh, "synthetic-discovery-only");
-            var link = Path.Combine(root, "loop");
-            Directory.CreateSymbolicLink(link, root);
-            try
-            {
-                var files = BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, [".nif"]);
-                Assert.Equal([mesh], files);
-            }
-            finally
-            {
-                Directory.Delete(link);
-            }
-        }
-
         var bodySlideRoot = Path.Combine(root, "BodySlide");
         Directory.CreateDirectory(bodySlideRoot);
         var link = Path.Combine(bodySlideRoot, "BodySlide");
@@ -90,6 +66,30 @@ public sealed class BodySlideDiscoveryRegressionTests : IDisposable
         {
             var result = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
             Assert.Equal(0, result.SourceAssetSupport!.DiscoveredFileCount);
+        }
+        finally
+        {
+            Directory.Delete(link);
+        }
+    }
+
+    [Fact]
+    public void SourceScan_DirectoryLinkCycle_IsNotTraversed()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(root);
+        var mesh = Path.Combine(root, "armor.nif");
+        File.WriteAllText(mesh, "synthetic-discovery-only");
+        var link = Path.Combine(root, "loop");
+        Directory.CreateSymbolicLink(link, root);
+        try
+        {
+            var files = BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, [".nif"]);
+            Assert.Equal([mesh], files);
         }
         finally
         {

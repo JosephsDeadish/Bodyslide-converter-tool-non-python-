@@ -553,6 +553,7 @@ public sealed record ConversionInspectionResult(
     IReadOnlyList<NifSupportReport>? NifSupport = null,
     InspectionTimingReport? Timing = null);
 
+/// <param name="GroundContactRatio">Sampled vertices in the mesh-local bottom band, not measured world-space sole contact or ankle alignment.</param>
 public sealed record HeelAnalysisReport(
     string Profile,
     double Confidence,
@@ -5937,9 +5938,10 @@ internal static class NifGeometrySignatureReader
         if (signature is not null && signature.Height > 0.001f && signature.SampleVertices.Count > 0)
         {
             groundContactRatio = EstimateGroundContactRatio(signature);
+            evidence.Add("geometry:mesh-local-bottom-band-not-ground-or-ankle-proof");
             if (groundContactRatio is <= 0.18d)
             {
-                evidence.Add($"low-ground-contact:{groundContactRatio.Value:P0}");
+                evidence.Add($"sparse-bottom-band:{groundContactRatio.Value:P0}");
             }
         }
 
@@ -5948,18 +5950,6 @@ internal static class NifGeometrySignatureReader
             return new HeelAnalysisReport(
                 Profile: "high-heel",
                 Confidence: groundContactRatio is <= 0.18d ? 0.98d : 0.95d,
-                Evidence: evidence,
-                HasFootPartition: hasFootPartition,
-                HasCalfPartition: hasCalfPartition,
-                HasFootwearKeywords: hasFootwearKeywords,
-                GroundContactRatio: groundContactRatio);
-        }
-
-        if ((hasCalfPartition || hasFootwearKeywords) && groundContactRatio is <= 0.18d)
-        {
-            return new HeelAnalysisReport(
-                Profile: "raised-heel",
-                Confidence: hasCalfPartition ? 0.72d : 0.62d,
                 Evidence: evidence,
                 HasFootPartition: hasFootPartition,
                 HasCalfPartition: hasCalfPartition,
@@ -11175,6 +11165,41 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
 internal static class ArchiveExtractionHelper
 {
+    internal sealed record ExtractionLimits(
+        int MaximumEntries = 100_000,
+        long MaximumEntryBytes = 4L * 1024 * 1024 * 1024,
+        long MaximumTotalBytes = 64L * 1024 * 1024 * 1024);
+
+    private sealed class ExtractionBudget(ExtractionLimits limits)
+    {
+        private int entries;
+        private long declaredBytes;
+        private long copiedBytes;
+
+        public void RegisterEntry(long length)
+        {
+            if (++entries > limits.MaximumEntries ||
+                length < 0 || length > limits.MaximumEntryBytes ||
+                length > limits.MaximumTotalBytes - declaredBytes)
+            {
+                throw new InvalidDataException("Archive exceeds extraction resource limits; the pack was not extracted.");
+            }
+
+            declaredBytes += length;
+        }
+
+        public void AccountBytes(long entryBytes, int count)
+        {
+            if (count > limits.MaximumEntryBytes - entryBytes ||
+                count > limits.MaximumTotalBytes - copiedBytes)
+            {
+                throw new InvalidDataException("Archive exceeds extraction resource limits; the pack was not extracted.");
+            }
+
+            copiedBytes += count;
+        }
+    }
+
     public sealed record ArchiveExtractionProgress(int ProcessedEntries, int? TotalEntries, string CurrentEntry)
     {
         public long TotalBytesCopied { get; init; }
@@ -11205,44 +11230,59 @@ internal static class ArchiveExtractionHelper
         string archivePath,
         string tempFolderPrefix,
         CancellationToken cancellationToken = default,
-        Action<ArchiveExtractionProgress>? onProgress = null)
+        Action<ArchiveExtractionProgress>? onProgress = null,
+        ExtractionLimits? limits = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var tempDirectory = Path.Combine(Path.GetTempPath(), tempFolderPrefix, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDirectory);
-        ExtractArchive(archivePath, tempDirectory, cancellationToken, onProgress);
-        return tempDirectory;
+        try
+        {
+            ExtractArchive(archivePath, tempDirectory, cancellationToken, onProgress, new ExtractionBudget(limits ?? new ExtractionLimits()));
+            return tempDirectory;
+        }
+        catch
+        {
+            try
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     private static void ExtractArchive(
         string archivePath,
         string destinationDirectory,
         CancellationToken cancellationToken,
-        Action<ArchiveExtractionProgress>? onProgress)
+        Action<ArchiveExtractionProgress>? onProgress,
+        ExtractionBudget budget)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
-            ExtractZipArchive(archivePath, destinationDirectory, cancellationToken, onProgress);
+            ExtractZipArchive(archivePath, destinationDirectory, cancellationToken, onProgress, budget);
             return;
         }
 
         if (archivePath.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
         {
-            ExtractSevenZipArchive(archivePath, destinationDirectory, cancellationToken, onProgress);
+            ExtractSevenZipArchive(archivePath, destinationDirectory, cancellationToken, onProgress, budget);
             return;
         }
 
         if (archivePath.EndsWith(".rar", StringComparison.OrdinalIgnoreCase))
         {
-            ExtractRarArchive(archivePath, destinationDirectory, cancellationToken, onProgress);
+            ExtractRarArchive(archivePath, destinationDirectory, cancellationToken, onProgress, budget);
             return;
         }
 
         if (archivePath.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
         {
             using var archiveStream = File.OpenRead(archivePath);
-            ExtractTarArchive(archiveStream, destinationDirectory, cancellationToken, onProgress);
+            ExtractTarArchive(archiveStream, destinationDirectory, cancellationToken, onProgress, budget);
             return;
         }
 
@@ -11251,7 +11291,7 @@ internal static class ArchiveExtractionHelper
         {
             using var archiveStream = File.OpenRead(archivePath);
             using var gzipStream = new GZipStream(archiveStream, CompressionMode.Decompress);
-            ExtractTarArchive(gzipStream, destinationDirectory, cancellationToken, onProgress);
+            ExtractTarArchive(gzipStream, destinationDirectory, cancellationToken, onProgress, budget);
             return;
         }
 
@@ -11262,7 +11302,8 @@ internal static class ArchiveExtractionHelper
         string archivePath,
         string destinationDirectory,
         CancellationToken cancellationToken,
-        Action<ArchiveExtractionProgress>? onProgress)
+        Action<ArchiveExtractionProgress>? onProgress,
+        ExtractionBudget budget)
     {
         var destinationRoot = Path.GetFullPath(destinationDirectory);
         if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
@@ -11271,6 +11312,10 @@ internal static class ArchiveExtractionHelper
         }
 
         using var archive = ZipFile.OpenRead(archivePath);
+        foreach (var entry in archive.Entries)
+        {
+            budget.RegisterEntry(entry.Length);
+        }
         var totalEntries = archive.Entries.Count();
         var processedEntries = 0;
         long totalBytesCopied = 0;
@@ -11339,12 +11384,12 @@ internal static class ArchiveExtractionHelper
                 cancellationToken,
                 copiedBytes =>
                 {
+                    entryBytesCopied = copiedBytes;
                     if (onProgress is null)
                     {
                         return;
                     }
 
-                    entryBytesCopied = copiedBytes;
                     EmitArchiveProgress(
                         onProgress,
                         ref lastProgressUtc,
@@ -11357,7 +11402,8 @@ internal static class ArchiveExtractionHelper
                         entryBytesTotal: Math.Max(0, entry.Length),
                         extractionStopwatch: extractionStopwatch);
                 },
-                EntryProgressReportIntervalBytes);
+                EntryProgressReportIntervalBytes,
+                budget);
             totalBytesCopied = entryBaseBytes + entryBytesCopied;
             processedEntries++;
             EmitArchiveProgress(
@@ -11379,7 +11425,8 @@ internal static class ArchiveExtractionHelper
         string archivePath,
         string destinationDirectory,
         CancellationToken cancellationToken,
-        Action<ArchiveExtractionProgress>? onProgress)
+        Action<ArchiveExtractionProgress>? onProgress,
+        ExtractionBudget budget)
     {
         var destinationRoot = Path.GetFullPath(destinationDirectory);
         if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
@@ -11388,6 +11435,10 @@ internal static class ArchiveExtractionHelper
         }
 
         using var archive = SevenZipArchive.OpenArchive(archivePath, new ReaderOptions());
+        foreach (var entry in archive.Entries)
+        {
+            budget.RegisterEntry(entry.Size);
+        }
         var entries = archive.Entries
             .Where(entry => !entry.IsDirectory && !string.IsNullOrWhiteSpace(entry.Key))
             .ToArray();
@@ -11438,12 +11489,12 @@ internal static class ArchiveExtractionHelper
                 cancellationToken,
                 copiedBytes =>
                 {
+                    entryBytesCopied = copiedBytes;
                     if (onProgress is null || copiedBytes <= 0)
                     {
                         return;
                     }
 
-                    entryBytesCopied = copiedBytes;
                     EmitArchiveProgress(
                         onProgress,
                         ref lastProgressUtc,
@@ -11456,7 +11507,8 @@ internal static class ArchiveExtractionHelper
                         entryBytesTotal: entry.Size,
                         extractionStopwatch: extractionStopwatch);
                 },
-                EntryProgressReportIntervalBytes);
+                EntryProgressReportIntervalBytes,
+                budget);
             totalBytesCopied = entryBaseBytes + entryBytesCopied;
             processedEntries++;
             EmitArchiveProgress(
@@ -11483,7 +11535,8 @@ internal static class ArchiveExtractionHelper
         string archivePath,
         string destinationDirectory,
         CancellationToken cancellationToken,
-        Action<ArchiveExtractionProgress>? onProgress)
+        Action<ArchiveExtractionProgress>? onProgress,
+        ExtractionBudget budget)
     {
         var destinationRoot = Path.GetFullPath(destinationDirectory);
         if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
@@ -11492,6 +11545,10 @@ internal static class ArchiveExtractionHelper
         }
 
         using var archive = RarArchive.OpenArchive(archivePath, new ReaderOptions());
+        foreach (var entry in archive.Entries)
+        {
+            budget.RegisterEntry(entry.Size);
+        }
         var entries = archive.Entries
             .Select(entry => (Entry: entry, Key: entry.Key?.ToString()))
             .Where(static item => !item.Entry.IsDirectory && !string.IsNullOrWhiteSpace(item.Key))
@@ -11545,12 +11602,12 @@ internal static class ArchiveExtractionHelper
                 cancellationToken,
                 copiedBytes =>
                 {
+                    entryBytesCopied = copiedBytes;
                     if (onProgress is null || copiedBytes <= 0)
                     {
                         return;
                     }
 
-                    entryBytesCopied = copiedBytes;
                     EmitArchiveProgress(
                         onProgress,
                         ref lastProgressUtc,
@@ -11563,7 +11620,8 @@ internal static class ArchiveExtractionHelper
                         entryBytesTotal: entry.Size,
                         extractionStopwatch: extractionStopwatch);
                 },
-                EntryProgressReportIntervalBytes);
+                EntryProgressReportIntervalBytes,
+                budget);
             totalBytesCopied = entryBaseBytes + entryBytesCopied;
             processedEntries++;
             EmitArchiveProgress(
@@ -11585,7 +11643,8 @@ internal static class ArchiveExtractionHelper
         Stream tarStream,
         string destinationDirectory,
         CancellationToken cancellationToken,
-        Action<ArchiveExtractionProgress>? onProgress)
+        Action<ArchiveExtractionProgress>? onProgress,
+        ExtractionBudget budget)
     {
         var destinationRoot = Path.GetFullPath(destinationDirectory);
         if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
@@ -11602,6 +11661,7 @@ internal static class ArchiveExtractionHelper
         while ((entry = reader.GetNextEntry()) is not null)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            budget.RegisterEntry(entry.Length);
             if (string.IsNullOrWhiteSpace(entry.Name))
             {
                 continue;
@@ -11624,9 +11684,9 @@ internal static class ArchiveExtractionHelper
                 continue;
             }
 
-            if (entry.EntryType is TarEntryType.SymbolicLink or TarEntryType.HardLink)
+            if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile or TarEntryType.ContiguousFile))
             {
-                throw new InvalidDataException($"Unsupported tar link entry: {entry.Name}");
+                throw new InvalidDataException($"Unsupported tar entry type {entry.EntryType}: {entry.Name}");
             }
 
             var destinationParent = Path.GetDirectoryName(destinationPath);
@@ -11658,12 +11718,12 @@ internal static class ArchiveExtractionHelper
                     cancellationToken,
                     copiedBytes =>
                     {
+                        entryBytesCopied = copiedBytes;
                         if (onProgress is null || copiedBytes <= 0)
                         {
                             return;
                         }
 
-                        entryBytesCopied = copiedBytes;
                         EmitArchiveProgress(
                             onProgress,
                             ref lastProgressUtc,
@@ -11676,7 +11736,8 @@ internal static class ArchiveExtractionHelper
                             entryBytesTotal: null,
                             extractionStopwatch: extractionStopwatch);
                     },
-                    EntryProgressReportIntervalBytes);
+                    EntryProgressReportIntervalBytes,
+                    budget);
             }
             totalBytesCopied = entryBaseBytes + entryBytesCopied;
             processedEntries++;
@@ -11702,7 +11763,8 @@ internal static class ArchiveExtractionHelper
         Stream output,
         CancellationToken cancellationToken,
         Action<long>? onBytesCopied = null,
-        long reportIntervalBytes = long.MaxValue)
+        long reportIntervalBytes = long.MaxValue,
+        ExtractionBudget? budget = null)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(ExtractionCopyBufferSizeBytes);
         try
@@ -11718,6 +11780,7 @@ internal static class ArchiveExtractionHelper
                     break;
                 }
 
+                budget?.AccountBytes(copiedBytes, read);
                 output.Write(buffer, 0, read);
                 copiedBytes += read;
                 if (onBytesCopied is not null &&
@@ -15780,6 +15843,10 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
             : BuiltInBodyMetadataCatalog.TryGet(targetBody, out builtInBody)
                 ? builtInBody.AvailablePhysicsBones
                 : null;
+        if (analysis.PhysicsEnabled && targetPhysBones is null)
+        {
+            targetPhysBones = [];
+        }
         List<string>? physicsBoneRemaps = null;
         List<string>? unsupportedTargetPhysicsBones = null;
 
@@ -16077,7 +16144,8 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
     {
         var hasCbpc = physicsProfile.Contains("cbpc", StringComparison.OrdinalIgnoreCase);
         var hasSmp  = physicsProfile.Contains("smp",  StringComparison.OrdinalIgnoreCase);
-        var suppressPhysicsConfigs = mesh.TargetPhysicsBones is { Count: 0 };
+        var suppressPhysicsConfigs = mesh.TargetPhysicsBones is { Count: 0 } ||
+            mesh.MeshType.Equals("headgear", StringComparison.OrdinalIgnoreCase);
         var isMale  = MeshBehaviorCatalog.MaleBodyTargets.Contains(targetBody, StringComparer.OrdinalIgnoreCase) ||
             (mesh.TargetPhysicsBones?.Any(static bone => bone.Contains("pec", StringComparison.OrdinalIgnoreCase)) ?? false);
 
@@ -16206,6 +16274,10 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             };
 
             sb.AppendLine($"  <{sectionName}>");
+            foreach (var bone in requestedBones.Where(bone => ClassifyPhysicsBoneGroup(bone, isMale).Equals(group, StringComparison.OrdinalIgnoreCase)))
+            {
+                sb.AppendLine($"    <bone name=\"{SecurityElement.Escape(bone)}\" />");
+            }
             sb.AppendLine($"    <Stiffness>{F(stiffness * tuning.StiffnessMultiplier)}</Stiffness>");
             sb.AppendLine($"    <Damping>{F(Math.Clamp(damping * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
             sb.AppendLine($"    <Gravity>{F(Math.Clamp(gravity * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
@@ -16439,7 +16511,8 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         var commonBones = SkeletonMappingCatalog.CommonBones;
         IReadOnlySet<string> targetPhysicsBones;
         IReadOnlyList<string>? customPhysicsBones = null;
-        var hasCustomPhysicsProfile = CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
+        var hasCustomProfile = CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile);
+        var hasCustomPhysicsProfile = hasCustomProfile &&
             (customPhysicsBones = customProfile.PhysicsBones) is { Count: > 0 };
         if (hasCustomPhysicsProfile)
         {
@@ -16451,7 +16524,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         }
 
         var targetFrameworkId = ResolveTargetFrameworkId(targetBody, armor, targetPhysicsBones);
-        var commonTargetBones = hasCustomPhysicsProfile
+        var commonTargetBones = hasCustomProfile
             ? commonBones.Where(static bone => !IsPhysicsBone(bone))
             : commonBones;
         var allTargetBones = commonTargetBones
@@ -16487,9 +16560,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             catch (NotSupportedException) { /* Skip unreadable skeleton files */ }
         }
 
-        // Custom bones from the skeleton NIF widen what the target can accept.
-        if (parsedBones.Count > 0)
-            allTargetBones.UnionWith(parsedBones);
+        // Bundled skeletons describe the source rig, not proof of target bone support.
 
         var allSourceBones = commonBones
             .Concat(sourcePhysicsBones)
@@ -17036,10 +17107,22 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         return bones;
     }
 
-    private static IReadOnlySet<string> GetBuiltInPhysicsBones(string targetBody) =>
-        BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata)
-            ? metadata.AvailablePhysicsBones.ToHashSet(StringComparer.OrdinalIgnoreCase)
-            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private static IReadOnlySet<string> GetBuiltInPhysicsBones(string targetBody)
+    {
+        var bones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        {
+            foreach (var bone in metadata.AvailablePhysicsBones)
+            {
+                if (SkeletonMappingCatalog.TryResolveSupportedBone(bone, metadata.SkeletonFramework, out var resolvedBone))
+                {
+                    bones.Add(resolvedBone);
+                }
+            }
+        }
+
+        return bones;
+    }
 
     private static bool IsPhysicsBone(string bone) =>
         BuiltInBodyMetadataCatalog.All.Any(body =>
