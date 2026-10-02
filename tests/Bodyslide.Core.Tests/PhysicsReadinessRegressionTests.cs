@@ -37,6 +37,7 @@ public sealed class PhysicsReadinessRegressionTests
     [InlineData("<unrelated><bone name=\"NPC L Breast01\"/></unrelated>", "<unrelated><bone name=\"NPC L Breast01\"/></unrelated>")]
     [InlineData("<CBPCConfig><bone name=\" \"/></CBPCConfig>", "<system><bone name=\" \"/></system>")]
     [InlineData("<CBPCConfig><!-- <bone name=\"NPC L Breast01\"/> --></CBPCConfig>", "<system><!-- <bone name=\"NPC L Breast01\"/> --></system>")]
+    [InlineData("<!DOCTYPE CBPCConfig [<!ENTITY bone 'NPC L Breast01'>]><CBPCConfig><bone name=\"&bone;\"/></CBPCConfig>", "<!DOCTYPE system [<!ENTITY bone 'NPC L Breast01'>]><system><bone name=\"&bone;\"/></system>")]
     public void InvalidPhysicsContentCannotCountAsGeneratedRuntimeConfigs(string cbpc, string smp)
     {
         var report = BuildCompatibilityReport(new PhysicsConfig("cbpc+smp", cbpc, smp));

@@ -72,7 +72,12 @@ checks must not be relabeled automatic merely to improve readiness counts.
 Physics readiness counts a generated CBPC/SMP config only when its XML has the
 expected root and nonempty named bone entries. Empty, malformed, or unrelated
 XML cannot satisfy a requested runtime config, including one missing half of a
-hybrid profile. Unclassified custom bones can still be emitted for SMP, but do
+hybrid profile. On-disk package validation applies the same XML checks to every
+root and staged runtime config, even for an unsupported target or a lone file,
+and rejects DTD/entity declarations. Staged XML must match its exported root,
+including bone names and solver values; formatting and attribute quote differences
+do not count as drift. Physics coverage is read from parsed elements, not regex
+matches in comments or broken XML. Unclassified custom bones can still be emitted for SMP, but do
 not produce an empty CBPC config or silently acquire human fallback bones.
 Support-file import includes source BodySlide projects, SliderGroups XML and OSD
 assets without treating ShapeData reference meshes as conversion inputs; explicit

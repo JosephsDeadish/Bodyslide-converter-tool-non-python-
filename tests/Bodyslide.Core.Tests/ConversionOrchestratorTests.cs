@@ -29310,8 +29310,8 @@ public sealed class OutputCompletenessTests
             File.WriteAllText(Path.Combine(outputDirectory, "smp-config.xml"), "<system><bone name=\"NPC Belly\" /></system>");
             File.WriteAllText(Path.Combine(outputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml"), "<system><bone name=\"NPC Belly\" /></system>");
             Directory.CreateDirectory(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem"));
-            File.WriteAllText(Path.Combine(outputDirectory, "cbpc-config.xml"), "<Config><BellyPhysics></BellyPhysics></Config>");
-            File.WriteAllText(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml"), "<Config><BellyPhysics></BellyPhysics></Config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "cbpc-config.xml"), "<CBPCConfig><BellyPhysics><bone name=\"NPC Belly\" /></BellyPhysics></CBPCConfig>");
+            File.WriteAllText(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml"), "<CBPCConfig><BellyPhysics><bone name=\"NPC Belly\" /></BellyPhysics></CBPCConfig>");
 
             Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
             File.WriteAllText(
@@ -29346,7 +29346,7 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
-    public void BuildPackageArtifactIssues_DoesNotAddSemanticMismatchWhenOnlyOneRuntimeConfigExists()
+    public void BuildPackageArtifactIssues_ValidatesMalformedRuntimeConfigEvenWhenOnlyOneExists()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(outputDirectory);
@@ -29392,7 +29392,9 @@ public sealed class OutputCompletenessTests
                 new BodySlideProject("UnusedProject", "UBE", ["Belly"], "<BodySlideProject/>"),
                 new PluginAnalysisResult([], [], string.Empty));
 
-            Assert.DoesNotContain(issues, issue => issue.Code.Equals("physics-config-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(issues, issue => issue.Code.Equals("physics-config-semantic-mismatch", StringComparison.OrdinalIgnoreCase) &&
+                issue.Message.Contains("valid CBPCConfig root", StringComparison.Ordinal));
+            Assert.Contains(issues, issue => issue.Code.Equals("missing-staged-cbpc-config", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -29422,7 +29424,7 @@ public sealed class OutputCompletenessTests
             Directory.CreateDirectory(stagedMeshDirectory);
             File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
 
-            const string cbpcConfig = "<Config><BellyPhysics><bone name=\"NPC L Breast\" /><bone name=\"NPC R Breast\" /><bone name=\"NPC Belly\" /><bone name=\"NPC L Butt\" /></BellyPhysics></Config>";
+            const string cbpcConfig = "<CBPCConfig><BellyPhysics><bone name=\"NPC L Breast\" /><bone name=\"NPC R Breast\" /><bone name=\"NPC Belly\" /><bone name=\"NPC L Butt\" /></BellyPhysics></CBPCConfig>";
             Directory.CreateDirectory(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem"));
             File.WriteAllText(Path.Combine(outputDirectory, "cbpc-config.xml"), cbpcConfig);
             File.WriteAllText(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml"), cbpcConfig);

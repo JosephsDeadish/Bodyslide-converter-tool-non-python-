@@ -6,6 +6,154 @@ namespace Bodyslide.Core.Tests;
 
 public sealed class PackageArtifactRegressionTests
 {
+    public static IEnumerable<object[]> InvalidRuntimePhysicsArtifacts()
+    {
+        foreach (var root in new[] { "CBPCConfig", "system" })
+        {
+            foreach (var staged in new[] { false, true })
+            {
+                foreach (var xml in new[]
+                         {
+                             string.Empty,
+                             $"<{root}/>",
+                             $"<{root}><bone name=\"NPC L Breast01\"/>",
+                             "<unrelated><bone name=\"NPC L Breast01\"/></unrelated>",
+                             $"<{root}><bone name=\" \"/></{root}>",
+                             $"<{root}><!-- <bone name=\"NPC L Breast01\"/> --></{root}>",
+                             $"<!DOCTYPE {root} [<!ENTITY bone 'NPC L Breast01'>]><{root}><bone name=\"&bone;\"/></{root}>"
+                         })
+                {
+                    yield return [root, staged, xml];
+                }
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidRuntimePhysicsArtifacts))]
+    public void InvalidExportedPhysicsCannotBorrowEvidenceFromValidPartner(string root, bool staged, string xml)
+    {
+        using var package = new PackageFixture();
+        var (rootPath, stagedPath) = PhysicsPaths(root);
+        var validXml = $"<{root}><bone name=\"NPC L Breast01\"/></{root}>";
+        package.Write(rootPath, staged ? validXml : xml);
+        package.Write(stagedPath, staged ? xml : validXml);
+
+        var invalidPath = staged ? stagedPath : rootPath;
+        Assert.Contains(package.Verify(), issue => issue.Code == "physics-config-semantic-mismatch" &&
+            issue.Message.Contains(invalidPath.Replace('/', Path.DirectorySeparatorChar), StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("CBPCConfig")]
+    [InlineData("system")]
+    public void LoneMalformedStagedPhysicsIsValidatedEvenWithoutRoot(string root)
+    {
+        using var package = new PackageFixture();
+        var (_, stagedPath) = PhysicsPaths(root);
+        package.Write(stagedPath, $"<{root}><bone name=\"NPC L Breast01\"/>");
+
+        Assert.Contains(package.Verify(), issue => issue.Code == "physics-config-semantic-mismatch" &&
+            issue.Message.Contains("could not be validated", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("CBPCConfig", "NPC R Breast01", "1")]
+    [InlineData("system", "NPC R Breast01", "1")]
+    [InlineData("CBPCConfig", "NPC L Breast01", "2")]
+    [InlineData("system", "NPC L Breast01", "2")]
+    public void ChangedStagedPhysicsBonesOrSolverValuesAreNotMatchingEvidence(string root, string stagedBone, string stagedValue)
+    {
+        using var package = new PackageFixture();
+        var (rootPath, stagedPath) = PhysicsPaths(root);
+        package.Write(rootPath, $"<{root}><bone name=\"NPC L Breast01\" mass=\"1\"/></{root}>");
+        package.Write(stagedPath, $"<{root}><bone name=\"{stagedBone}\" mass=\"{stagedValue}\"/></{root}>");
+
+        Assert.Contains(package.Verify(), issue => issue.Code == "physics-config-semantic-mismatch" &&
+            issue.Message.Contains("does not match", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("CBPCConfig")]
+    [InlineData("system")]
+    public void MatchingPhysicsXmlAcceptsWhitespaceAndAttributeQuoteDifferences(string root)
+    {
+        using var package = new PackageFixture();
+        var (rootPath, stagedPath) = PhysicsPaths(root);
+        package.Write(rootPath, $"<{root}><bone name=\"NPC L Breast01\"/></{root}>");
+        package.Write(stagedPath, $"<{root}>\n  <bone name='NPC L Breast01' />\n</{root}>");
+
+        Assert.DoesNotContain(package.Verify(), issue => issue.Code == "physics-config-semantic-mismatch" &&
+            (issue.Message.Contains("does not match", StringComparison.Ordinal) ||
+             issue.Message.Contains("could not be validated", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void ValidPhysicsBoneNamesAreDecodedFromXmlRatherThanRegex()
+    {
+        using var package = new PackageFixture();
+        var (rootPath, stagedPath) = PhysicsPaths("CBPCConfig");
+        const string xml = "<CBPCConfig><bone mass='1' name='NPC L Breast&#48;1'/></CBPCConfig>";
+        package.Write(rootPath, xml);
+        package.Write(stagedPath, xml);
+
+        var encodedIssues = package.Verify();
+        package.Write(rootPath, "<CBPCConfig><bone name=\"NPC L Breast01\" mass=\"1\"/></CBPCConfig>");
+        package.Write(stagedPath, "<CBPCConfig><bone name=\"NPC L Breast01\" mass=\"1\"/></CBPCConfig>");
+        Assert.Equal(package.Verify(), encodedIssues);
+    }
+
+    [Theory]
+    [InlineData("cbpc")]
+    [InlineData("smp")]
+    [InlineData("cbpc+smp")]
+    public async Task GeneratedPhysicsPairsRetainNoRuntimeArtifactFailures(string profile)
+    {
+        using var package = new PackageFixture();
+        var weighted = await new BasicWeightTransferService().TransferAsync(
+            new ConvertedMesh("physics-enabled", "vertex-projection", 1, new Dictionary<string, double>()),
+            new MeshAnalysis("physics-enabled", true, 1), "CBBE", null, CancellationToken.None);
+        var physics = await new BasicPhysicsSupportService().BuildAsync(weighted, "CBBE", profile, CancellationToken.None);
+        if (profile.Contains("cbpc", StringComparison.Ordinal)) Assert.NotNull(physics.CbpcConfigXml);
+        if (profile.Contains("smp", StringComparison.Ordinal)) Assert.NotNull(physics.SmpConfigXml);
+        foreach (var (xml, root) in new[] { (physics.CbpcConfigXml, "CBPCConfig"), (physics.SmpConfigXml, "system") })
+        {
+            if (xml is null) continue;
+            var (rootPath, stagedPath) = PhysicsPaths(root);
+            package.Write(rootPath, xml);
+            package.Write(stagedPath, xml);
+        }
+        package.Write("fomod/ModuleConfig.xml", "<config><folder source=\"meshes\"/><folder source=\"SKSE\"/></config>");
+
+        Assert.Empty(package.Verify());
+    }
+
+    [Fact]
+    public void ValidStagedPhysicsWithoutRootIsNotMatchingPackageEvidence()
+    {
+        using var package = new PackageFixture();
+        package.Write("SKSE/Plugins/hdtSMP64/smp-config.xml", "<system><bone name=\"NPC L Breast01\"/></system>");
+
+        Assert.Contains(package.Verify(), issue => issue.Code == "physics-config-semantic-mismatch" &&
+            issue.Message.Contains("no corresponding exported root config", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void UnsupportedTargetCannotBypassRuntimeXmlValidation()
+    {
+        using var package = new PackageFixture();
+        package.Write("smp-config.xml", "<system><bone name=\"CustomBone\"/>");
+
+        Assert.Contains(package.Verify(targetBody: "UnknownCustomTarget"), issue =>
+            issue.Code == "physics-config-semantic-mismatch" &&
+            issue.Message.Contains("could not be validated", StringComparison.Ordinal));
+    }
+
+    private static (string RootPath, string StagedPath) PhysicsPaths(string root) =>
+        root == "CBPCConfig"
+            ? ("cbpc-config.xml", "SKSE/Plugins/CBPCSystem/cbpc-config.xml")
+            : ("smp-config.xml", "SKSE/Plugins/hdtSMP64/smp-config.xml");
+
     [Theory]
     [InlineData("README.txt", "missing-readme")]
     [InlineData("conversion-quality.json", "missing-conversion-quality-report")]
@@ -264,9 +412,10 @@ public sealed class PackageArtifactRegressionTests
         public IReadOnlyList<ConversionValidationIssue> Verify(
             IReadOnlyList<string>? recordedFiles = null,
             bool bodySlide = false,
-            bool outputZip = false)
+            bool outputZip = false,
+            string targetBody = "CBBE")
         {
-            var request = new ConversionRequest(PathFor("input.nif"), "CBBE",
+            var request = new ConversionRequest(PathFor("input.nif"), targetBody,
                 OutputDirectory: Root, GenerateBodySlideFiles: bodySlide, OutputZip: outputZip);
             return LocalExportService.BuildPackageArtifactIssues(
                 request, new ImportedArmor(request.InputPath, [request.InputPath], [], [], []),

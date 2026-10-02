@@ -27815,11 +27815,51 @@ internal sealed class LocalExportService(
             string stagedSmpPath)
         {
             var problems = new List<string>();
-            var existingPhysicsConfigPaths = new[] { rootCbpcPath, stagedCbpcPath, rootSmpPath, stagedSmpPath }
-                .Where(File.Exists)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            if (existingPhysicsConfigPaths.Length < 2)
+            var documents = new Dictionary<string, System.Xml.Linq.XDocument>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (path, expectedRoot) in new[]
+                     {
+                         (rootCbpcPath, "CBPCConfig"), (stagedCbpcPath, "CBPCConfig"),
+                         (rootSmpPath, "system"), (stagedSmpPath, "system")
+                     })
+            {
+                if (!File.Exists(path))
+                {
+                    continue;
+                }
+
+                var relativePath = Path.GetRelativePath(outputDirectory, path);
+                try
+                {
+                    var document = ReadRuntimePhysicsXml(File.ReadAllText(path));
+                    if (!HasRuntimePhysicsBones(document, expectedRoot))
+                    {
+                        problems.Add($"Runtime config '{relativePath}' must contain a valid {expectedRoot} root and nonempty named bone entries.");
+                        continue;
+                    }
+
+                    documents[path] = document;
+                }
+                catch (Exception ex) when (ex is System.Xml.XmlException or IOException or UnauthorizedAccessException)
+                {
+                    problems.Add($"Runtime config '{relativePath}' could not be validated: {ex.Message}");
+                }
+            }
+
+            foreach (var (rootPath, stagedPath) in new[] { (rootCbpcPath, stagedCbpcPath), (rootSmpPath, stagedSmpPath) })
+            {
+                if (File.Exists(stagedPath) && !File.Exists(rootPath))
+                {
+                    problems.Add($"Staged runtime config '{Path.GetRelativePath(outputDirectory, stagedPath)}' has no corresponding exported root config.");
+                }
+                else if (documents.TryGetValue(rootPath, out var rootDocument) &&
+                         documents.TryGetValue(stagedPath, out var stagedDocument) &&
+                         !System.Xml.Linq.XNode.DeepEquals(rootDocument.Root, stagedDocument.Root))
+                {
+                    problems.Add($"Staged runtime config '{Path.GetRelativePath(outputDirectory, stagedPath)}' does not match its exported root config.");
+                }
+            }
+
+            if (documents.Count == 0)
             {
                 return problems;
             }
@@ -27830,12 +27870,16 @@ internal sealed class LocalExportService(
                 return problems;
             }
 
-            var generatedPhysicsNodes = existingPhysicsConfigPaths
-                .SelectMany(ReadPhysicsNodeNamesFromConfigFile)
+            var generatedPhysicsBoneNames = documents.Values
+                .SelectMany(document => document.Descendants("bone"))
+                .Select(bone => ((string)bone.Attribute("name")!).Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            var generatedPhysicsBoneNames = existingPhysicsConfigPaths
-                .SelectMany(ReadPhysicsBoneNamesFromConfigFile)
+            var generatedPhysicsNodes = generatedPhysicsBoneNames
+                .Concat(documents.Values.SelectMany(document => document.Descendants())
+                    .Where(element => element.Name.LocalName.EndsWith("Physics", StringComparison.Ordinal) &&
+                                      element.Name.NamespaceName.Length == 0)
+                    .Select(element => element.Name.LocalName))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
             if (generatedPhysicsNodes.Length == 0)
@@ -27896,59 +27940,6 @@ internal sealed class LocalExportService(
             }
 
             return problems;
-        }
-
-        static IReadOnlyList<string> ReadPhysicsNodeNamesFromConfigFile(string path)
-        {
-            if (!File.Exists(path))
-            {
-                return [];
-            }
-
-            var xml = File.ReadAllText(path);
-            var nodes = ReadPhysicsBoneNamesFromXml(xml).ToList();
-
-            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
-                         xml,
-                         @"<(\w+Physics)>",
-                         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled))
-            {
-                var name = match.Groups[1].Value;
-                if (!string.IsNullOrWhiteSpace(name) && !nodes.Contains(name, StringComparer.OrdinalIgnoreCase))
-                {
-                    nodes.Add(name);
-                }
-            }
-
-            return nodes;
-        }
-
-        static IReadOnlyList<string> ReadPhysicsBoneNamesFromConfigFile(string path)
-        {
-            if (!File.Exists(path))
-            {
-                return [];
-            }
-
-            return ReadPhysicsBoneNamesFromXml(File.ReadAllText(path));
-        }
-
-        static IReadOnlyList<string> ReadPhysicsBoneNamesFromXml(string xml)
-        {
-            var nodes = new List<string>();
-            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
-                         xml,
-                         @"<bone\s+name=""([^""]+)""",
-                         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled))
-            {
-                var name = match.Groups[1].Value;
-                if (!string.IsNullOrWhiteSpace(name) && !nodes.Contains(name, StringComparer.OrdinalIgnoreCase))
-                {
-                    nodes.Add(name);
-                }
-            }
-
-            return nodes;
         }
 
         void AddMissingFileIssue(string relativePath, string code, string severity, string message)
@@ -28092,7 +28083,7 @@ internal sealed class LocalExportService(
             issues.Add(new ConversionValidationIssue(
                 "physics-config-semantic-mismatch",
                 "medium",
-                $"Generated runtime physics config content is too weak for '{request.TargetBody}': {string.Join(" | ", runtimePhysicsSemanticProblems.Take(3))}"));
+                $"Generated runtime physics config content is too weak, invalid or inconsistent for '{request.TargetBody}': {string.Join(" | ", runtimePhysicsSemanticProblems.Take(3))}"));
         }
 
         if (!HasAnyFile(stagedMeshDirectory, "*.nif"))
@@ -30038,16 +30029,32 @@ internal sealed class LocalExportService(
 
         try
         {
-            var document = System.Xml.Linq.XDocument.Parse(xml);
-            var bones = document.Descendants("bone").ToArray();
-            return document.Root?.Name == rootName &&
-                bones.Length > 0 &&
-                bones.All(bone => !string.IsNullOrWhiteSpace((string?)bone.Attribute("name")));
+            return HasRuntimePhysicsBones(ReadRuntimePhysicsXml(xml), rootName);
         }
         catch (System.Xml.XmlException)
         {
             return false;
         }
+    }
+
+    private static System.Xml.Linq.XDocument ReadRuntimePhysicsXml(string xml)
+    {
+        using var textReader = new StringReader(xml);
+        using var reader = System.Xml.XmlReader.Create(textReader, new System.Xml.XmlReaderSettings
+        {
+            DtdProcessing = System.Xml.DtdProcessing.Prohibit,
+            XmlResolver = null,
+            IgnoreWhitespace = true
+        });
+        return System.Xml.Linq.XDocument.Load(reader);
+    }
+
+    private static bool HasRuntimePhysicsBones(System.Xml.Linq.XDocument document, string rootName)
+    {
+        var bones = document.Descendants("bone").ToArray();
+        return document.Root?.Name == rootName &&
+            bones.Length > 0 &&
+            bones.All(bone => !string.IsNullOrWhiteSpace((string?)bone.Attribute("name")));
     }
 
     private static IReadOnlyList<string> GetGeneratedRuntimeConfigs(PhysicsConfig physics)
