@@ -74,4 +74,31 @@ public sealed class SupportAssetDiscoveryTests
             }
         }
     }
+
+    [Fact]
+    public void BodySlideSupportXmlDetection_RecognizesSliderGroupsMetadata()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "slidesmith-support-xml", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var sliderGroups = Path.Combine(root, "CalienteTools", "BodySlide", "SliderGroups", "DemoArmor.xml");
+            Directory.CreateDirectory(Path.GetDirectoryName(sliderGroups)!);
+            File.WriteAllText(sliderGroups, "<SliderGroups><SliderSet name=\"DemoArmor\" /></SliderGroups>");
+
+            var unrelatedXml = Path.Combine(root, "notes.xml");
+            File.WriteAllText(unrelatedXml, "<root />");
+
+            Assert.True(BodySlideSourceProjectSupport.IsLikelyBodySlideSupportXml(sliderGroups));
+            Assert.False(BodySlideSourceProjectSupport.IsLikelyBodySlideSupportXml(unrelatedXml));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }
