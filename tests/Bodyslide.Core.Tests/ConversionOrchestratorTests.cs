@@ -345,6 +345,41 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BatchRunner_PreservesSameNamedArmorInDifferentDirectoriesAndWeightPairs()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var input = Path.Combine(root, "input");
+        var output = Path.Combine(root, "results");
+        try
+        {
+            foreach (var relative in new[]
+                     {
+                         "meshes/armor/first/cuirass_0.nif", "meshes/armor/first/cuirass_1.nif",
+                         "meshes/armor/second/cuirass_0.nif", "meshes/armor/second/cuirass_1.nif",
+                         "meshes/armor/third/cuirass_2.nif"
+                     })
+            {
+                var path = Path.Combine(input, relative.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                await File.WriteAllTextAsync(path, "mesh");
+            }
+            var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
+
+            var results = await runner.ConvertAsync(new ConversionRequest(input, "CBBE", output));
+
+            Assert.Equal(3, results.Count);
+            Assert.Equal(3, results.Select(result => result.OutputDirectory).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+            Assert.Contains(results, result => result.OutputDirectory == Path.Combine(output, "cuirass"));
+            Assert.Contains(results, result => result.OutputDirectory == Path.Combine(output, "cuirass_2"));
+            Assert.Contains(results, result => result.OutputDirectory == Path.Combine(output, "cuirass_3"));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchRunner_ConvertsAllNifsInDirectory()
     {
         var inputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -2430,10 +2465,11 @@ public sealed class ConversionOrchestratorTests
             VoxelCollisionResult voxelResult,
             CancellationToken cancellationToken)
         {
-            ExportPath = request.OutputDirectory ?? throw new InvalidOperationException("Output should be provided for this test.");
+            var exportPath = request.OutputDirectory ?? throw new InvalidOperationException("Output should be provided for this test.");
+            ExportPath = exportPath;
             RaceCompatibility = raceCompatibility;
-            Directory.CreateDirectory(ExportPath);
-            return Task.FromResult<(string, IReadOnlyList<string>)>((ExportPath, []));
+            Directory.CreateDirectory(exportPath);
+            return Task.FromResult<(string, IReadOnlyList<string>)>((exportPath, []));
         }
     }
     // ── Gap 1: Headgear detection ─────────────────────────────────────────────
@@ -21406,7 +21442,7 @@ public sealed class RealisticModPackFixtureTests
             var runner = new BatchConversionRunner(orchestrator);
             var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "Alien Hybrid", outputDirectory));
 
-            Assert.NotEmpty(results);
+            Assert.Equal(8, results.Count);
             Assert.All(results, result => Assert.True(result.Success));
 
             using var armorPackValidation = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "armor-pack-validation.json")));
@@ -21475,9 +21511,15 @@ public sealed class RealisticModPackFixtureTests
             Assert.DoesNotContain(
                 packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase));
-            Assert.DoesNotContain(
+            Assert.Contains(
                 packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "body-hardcase-runtime", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MatrixCombinationCoverage").EnumerateArray(),
+                summary => string.Equals(summary.GetProperty("CoverageKey").GetString(), "body-hardcase-runtime", StringComparison.OrdinalIgnoreCase) &&
+                           !summary.GetProperty("MeetsMinimumCoverage").GetBoolean() &&
+                           summary.GetProperty("DistinctCombinationCount").GetInt32() == 3 &&
+                           summary.GetProperty("MinimumDistinctCombinationCount").GetInt32() == 4);
             Assert.DoesNotContain(
                 packProof.RootElement.GetProperty("MissingMatrixCombinations").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase));

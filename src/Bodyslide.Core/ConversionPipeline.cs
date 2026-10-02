@@ -8555,8 +8555,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         // per-armor output folder instead of being split across separate sub-directories.
         var processableMeshFiles = meshFiles
             .GroupBy(
-                f => StripWeightSuffix(Path.GetFileNameWithoutExtension(f) ?? string.Empty),
-                StringComparer.OrdinalIgnoreCase)
+                f => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(f)) ?? string.Empty,
+                    StripWeightSuffix(Path.GetFileNameWithoutExtension(f) ?? string.Empty).ToUpperInvariant()),
+                OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
             .Select(g => g.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).First())
             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -8690,6 +8691,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         getCompleted ??= () => Volatile.Read(ref localCompleted);
 
         var resultBag = new System.Collections.Concurrent.ConcurrentBag<(string MeshFile, ConversionResult Result)>();
+        var outputNames = BuildBatchOutputNames(meshFiles);
         var maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2);
         await Parallel.ForEachAsync(
             meshFiles,
@@ -8701,8 +8703,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             async (meshFile, ct) =>
             {
                 ct.ThrowIfCancellationRequested();
-                var baseStem = StripWeightSuffix(Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty);
-                var perArmorOutput = Path.Combine(rootOutput, baseStem);
+                var perArmorOutput = Path.Combine(rootOutput, outputNames[meshFile]);
                 var currentLabel = Path.GetFileName(meshFile);
                 if (!string.IsNullOrWhiteSpace(variantLabel))
                 {
@@ -8739,6 +8740,33 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         return meshFiles
             .Select(path => resultBag.First(r => string.Equals(r.MeshFile, path, StringComparison.OrdinalIgnoreCase)))
             .ToList();
+    }
+
+    internal static IReadOnlyDictionary<string, string> BuildBatchOutputNames(IReadOnlyList<string> meshFiles)
+    {
+        var names = new Dictionary<string, string>(OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var reservedNames = meshFiles
+            .Select(path => StripWeightSuffix(Path.GetFileNameWithoutExtension(path) ?? string.Empty))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var assignedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var meshFile in meshFiles.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ThenBy(path => path, StringComparer.Ordinal))
+        {
+            var stem = StripWeightSuffix(Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty);
+            var name = stem;
+            var index = 2;
+            while (assignedNames.Contains(name))
+            {
+                do
+                {
+                    name = $"{stem}_{index++}";
+                }
+                while (reservedNames.Contains(name));
+            }
+            assignedNames.Add(name);
+            names.Add(meshFile, name);
+        }
+        return names;
     }
 
     internal static string CreateCombinedBatchZip(string rootOutput)

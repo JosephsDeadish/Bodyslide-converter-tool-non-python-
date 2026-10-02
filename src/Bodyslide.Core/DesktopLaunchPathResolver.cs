@@ -5,6 +5,13 @@ internal static class DesktopLaunchPathResolver
     private const string DesktopTargetFramework = "net10.0-windows";
     private static readonly string[] DesktopConfigurations = ["Debug", "Release"];
 
+    internal static string ResolveWorkingDirectory(string launchWorkingDirectory, string desktopPath)
+    {
+        return Directory.Exists(launchWorkingDirectory)
+            ? Path.GetFullPath(launchWorkingDirectory)
+            : Path.GetDirectoryName(Path.GetFullPath(desktopPath))!;
+    }
+
     internal static IReadOnlyList<string> GetLikelyDesktopCandidateDirectories(string executableDirectory)
     {
         if (string.IsNullOrWhiteSpace(executableDirectory))

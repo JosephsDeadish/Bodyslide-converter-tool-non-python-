@@ -438,7 +438,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
                 continue;
             }
 
-            if (TryStartDesktopProcess(desktopExePath, executableDirectory, launchedFromModOrganizer, args, startupDiagnosticsPath, out var launched))
+            if (TryStartDesktopProcess(desktopExePath, Environment.CurrentDirectory, launchedFromModOrganizer, args, startupDiagnosticsPath, out var launched))
             {
                 if (TryContinueAfterEarlyExit(launched, "candidate", desktopExePath))
                 {
@@ -468,7 +468,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
                 continue;
             }
 
-            if (TryStartDesktopDllProcess(desktopDllPath, executableDirectory, launchedFromModOrganizer, args, startupDiagnosticsPath, out var launched))
+            if (TryStartDesktopDllProcess(desktopDllPath, Environment.CurrentDirectory, launchedFromModOrganizer, args, startupDiagnosticsPath, out var launched))
             {
                 if (TryContinueAfterEarlyExit(launched, "dll candidate", desktopDllPath))
                 {
@@ -626,10 +626,10 @@ static IReadOnlyList<string> EnumerateDirectoryCandidates(string directory, stri
     }
 }
 
-static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, string? startupDiagnosticsPath, out Process? launchedProcess)
+static bool TryStartDesktopProcess(string desktopExePath, string launchWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, string? startupDiagnosticsPath, out Process? launchedProcess)
 {
     launchedProcess = null;
-    var workingDirectory = Path.GetDirectoryName(desktopExePath) ?? fallbackWorkingDirectory;
+    var workingDirectory = DesktopLaunchPathResolver.ResolveWorkingDirectory(launchWorkingDirectory, desktopExePath);
 
     var startInfo = new ProcessStartInfo
     {
@@ -653,10 +653,10 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
     }
 }
 
-static bool TryStartDesktopDllProcess(string desktopDllPath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, string? startupDiagnosticsPath, out Process? launchedProcess)
+static bool TryStartDesktopDllProcess(string desktopDllPath, string launchWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, string? startupDiagnosticsPath, out Process? launchedProcess)
 {
     launchedProcess = null;
-    var workingDirectory = Path.GetDirectoryName(desktopDllPath) ?? fallbackWorkingDirectory;
+    var workingDirectory = DesktopLaunchPathResolver.ResolveWorkingDirectory(launchWorkingDirectory, desktopDllPath);
     var dotnetHost = ResolveDotnetHostPath();
     var startInfo = new ProcessStartInfo
     {

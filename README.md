@@ -53,6 +53,9 @@ The standalone CLI accepts named options as `--name value`, `--name=value`, or
 names as startup routing; inline conversion options are not mistaken for launcher
 metadata. This parser/routing coverage does not replace real Windows manager
 handoff testing.
+EXE and DLL desktop handoff preserve the caller's working directory when it
+exists, keeping relative result/diagnostic paths anchored to the manager launch
+context rather than silently resolving them beside the desktop binary.
 
 The regression suite includes synthetic artifact-tampering, mixed launcher,
 catalog-invariant, discovery-cancellation, and failure-matrix cases alongside the
@@ -74,6 +77,11 @@ instructions, not an actual real-user reproduction. This coverage is not an
 `advanced-review-required` and `experimental-manual-cleanup` remain intentional
 safety gates. Unverified custom rigs, topology changes and external game/UI
 checks must not be relabeled automatic merely to improve readiness counts.
+
+Batch conversion pairs `_0`/`_1` meshes only within the same source directory.
+Distinct armor folders sharing a mesh name are converted separately, with
+deterministic, collision-free per-armor output folder names. Unique names retain
+their existing output layout.
 
 Body detection ignores GUID-shaped path components and leaf names as opaque
 workspace identifiers. Accidental body-name substrings inside those identifiers
