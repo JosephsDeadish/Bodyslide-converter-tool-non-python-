@@ -93,7 +93,9 @@ public static class StandaloneStartupRouting
         return normalizedPath.Contains("mod organizer", StringComparison.OrdinalIgnoreCase) ||
                normalizedPath.Contains("modorganizer", StringComparison.OrdinalIgnoreCase) ||
                normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.EndsWith("/mo2", StringComparison.OrdinalIgnoreCase) ||
                normalizedPath.Contains("/vortex/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.EndsWith("/vortex", StringComparison.OrdinalIgnoreCase) ||
                normalizedPath.Contains("black tree gaming", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -129,6 +131,10 @@ public static class StandaloneStartupRouting
 
         return PathLooksLikeModManagerManagedLocation(trimmed);
     }
+
+    private static bool IsMoshortcutUri(string? arg) =>
+        !string.IsNullOrWhiteSpace(arg) &&
+        arg.Trim().StartsWith("moshortcut://", StringComparison.OrdinalIgnoreCase);
 
     public static bool HasExplicitStandaloneCliSwitch(IReadOnlyList<string> args) =>
         HasStandaloneCommandSwitch(args) || HasStandaloneConversionSwitches(args) || HasStandalonePositionalConversionUsage(args);
@@ -193,7 +199,7 @@ public static class StandaloneStartupRouting
         else
         {
             var colonIndex = option.IndexOf(':');
-            if (colonIndex > 1)
+            if (colonIndex >= 1)
             {
                 inlineValue = colonIndex + 1 < option.Length ? option[(colonIndex + 1)..] : string.Empty;
                 option = option[..colonIndex].Trim();
@@ -269,6 +275,7 @@ public static class StandaloneStartupRouting
 
     private static bool HasLauncherSignal(IReadOnlyList<string> args, Func<string, bool> hasEnvironmentVariable) =>
         IsLikelyModManagerEnvironment(hasEnvironmentVariable) ||
+        args.Any(IsMoshortcutUri) ||
         args.Any(IsModManagerLauncherArgument) ||
         args.Any(IsLikelyLauncherPathArgument) ||
         HasLauncherPathOptionArgument(args);

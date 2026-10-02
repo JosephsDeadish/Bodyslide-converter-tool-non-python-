@@ -165,6 +165,35 @@ public sealed class StandaloneStartupRoutingTests
     }
 
     [Fact]
+    public void EvaluateDesktopLaunchDecision_Mo2DirectoryWithoutTrailingSeparator_StillLooksLikeLauncher()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--self-check"],
+            executablePath: @"D:\Mod Organizer 2\instances\Portable\mods\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"D:\Mod Organizer 2\instances\Portable\mods\SlideSmith\MO2",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+    }
+
+    [Fact]
+    public void EvaluateDesktopLaunchDecision_MoShortcutUri_AttemptsDesktopHandoff()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["moshortcut://launch/SlideSmith"],
+            executablePath: @"C:\Tools\SlideSmith\SlideSmith.exe",
+            workingDirectory: @"C:\Tools\SlideSmith",
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.True(decision.LauncherSignalDetected);
+        Assert.True(decision.ModManagerLaunchDetected);
+        Assert.False(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Fact]
     public void EvaluateDesktopLaunchDecision_ExplicitCliWithMo2ManagedInput_PathStillPrefersDesktopHandoff()
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
@@ -181,6 +210,19 @@ public sealed class StandaloneStartupRoutingTests
         Assert.False(decision.LauncherSignalDetected);
         Assert.True(decision.ModManagerLaunchDetected);
         Assert.True(decision.ExplicitCliLaunchDetected);
+    }
+
+    [Theory]
+    [InlineData("-o:output")]
+    [InlineData("/o:output")]
+    [InlineData("--o:output")]
+    public void TryReadOptionToken_ParsesSingleCharacterColonSeparatedValues(string arg)
+    {
+        var parsed = StandaloneStartupRouting.TryReadOptionToken(arg, out var option, out var inlineValue);
+
+        Assert.True(parsed);
+        Assert.Equal("o", option);
+        Assert.Equal("output", inlineValue);
     }
 
     [Fact]

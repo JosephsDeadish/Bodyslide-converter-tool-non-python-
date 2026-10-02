@@ -834,7 +834,7 @@ internal static class DesktopWorkflowSupport
         if (separatorIndex < 0)
         {
             var colonIndex = trimmed.IndexOf(':');
-            if (colonIndex > 1)
+            if (colonIndex >= 1)
             {
                 var potentialKey = trimmed[..colonIndex];
                 var recognizesColonSeparatedValue =
