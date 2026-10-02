@@ -20,9 +20,9 @@ if (TryLaunchDesktopGuiOnWindows(args, startupDiagnosticsPath, strictLauncherMod
     return;
 }
 
-var parsedArgs = ParseNamedArguments(args);
+var parsedArgs = StandaloneStartupRouting.ParseNamedArguments(args);
 
-if (args.Contains("--conversion-guide", StringComparer.OrdinalIgnoreCase))
+if (parsedArgs.ContainsKey("conversion-guide"))
 {
     WriteConversionGuide();
     return;
@@ -34,7 +34,7 @@ if (TryGetNamedValue(parsedArgs, "body-reference", out var bodyReference))
     return;
 }
 
-if (args.Contains("--export-cache", StringComparer.OrdinalIgnoreCase))
+if (parsedArgs.ContainsKey("export-cache"))
 {
     parsedArgs.TryGetValue("export-cache", out var exportCachePath);
     parsedArgs.TryGetValue("cache-path", out var exportCacheOverridePath);
@@ -83,7 +83,7 @@ if (args.Contains("--export-cache", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
-if (args.Contains("--list-presets", StringComparer.OrdinalIgnoreCase))
+if (parsedArgs.ContainsKey("list-presets"))
 {
     Console.WriteLine("Available presets:");
     foreach (var preset in PresetCatalog.All.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
@@ -94,7 +94,7 @@ if (args.Contains("--list-presets", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
-if (args.Contains("--list-profiles", StringComparer.OrdinalIgnoreCase))
+if (parsedArgs.ContainsKey("list-profiles"))
 {
     Console.WriteLine("Available deformation profiles:");
     foreach (var profile in DeformationProfileModifier.All)
@@ -105,7 +105,7 @@ if (args.Contains("--list-profiles", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
-if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
+if (parsedArgs.ContainsKey("list-bodies"))
 {
     Console.WriteLine("Supported body types (signature detection + conversion reference):");
     foreach (var body in BodyTypeCatalog.All)
@@ -134,7 +134,7 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
-if (args.Contains("--list-physics", StringComparer.OrdinalIgnoreCase))
+if (parsedArgs.ContainsKey("list-physics"))
 {
     Console.WriteLine("Available canonical physics engine profiles (can be applied to ANY body via --physics):");
     foreach (var profile in PhysicsProfileCatalog.All)
@@ -152,13 +152,13 @@ if (args.Contains("--list-physics", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
-if (args.Contains("--self-check", StringComparer.OrdinalIgnoreCase))
+if (parsedArgs.ContainsKey("self-check"))
 {
     WriteSelfCheck();
     return;
 }
 
-if (args.Contains("--help", StringComparer.OrdinalIgnoreCase)
+if (parsedArgs.ContainsKey("help")
     || args.Contains("-h", StringComparer.OrdinalIgnoreCase))
 {
     WriteUsage();
@@ -241,7 +241,7 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
         return true;
     }
 
-    var parsed = ParseNamedArguments(args);
+    var parsed = StandaloneStartupRouting.ParseNamedArguments(args);
     parsed.TryGetValue("input", out var input);
     parsed.TryGetValue("target", out var target);
     parsed.TryGetValue("output", out var output);
@@ -330,31 +330,6 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
         SkeletonNifPath: string.IsNullOrWhiteSpace(skeletonNif) ? null : skeletonNif);
 
     return true;
-}
-
-static Dictionary<string, string> ParseNamedArguments(string[] args)
-{
-    var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-    for (var i = 0; i < args.Length; i++)
-    {
-        var arg = args[i];
-        if (!arg.StartsWith("--", StringComparison.Ordinal))
-        {
-            continue;
-        }
-
-        var key = arg[2..];
-        if (i + 1 >= args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal))
-        {
-            map[key] = "true";
-            continue;
-        }
-
-        map[key] = args[i + 1];
-        i++;
-    }
-
-    return map;
 }
 
 static bool ShouldPauseOnExit(string[] args)

@@ -10,6 +10,34 @@ public sealed record StandaloneDesktopLaunchDecision(
 
 public static class StandaloneStartupRouting
 {
+    public static Dictionary<string, string> ParseNamedArguments(IReadOnlyList<string> args)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < args.Count; index++)
+        {
+            if (!args[index].StartsWith("--", StringComparison.Ordinal) ||
+                !TryReadOptionToken(args[index], out var option, out var inlineValue))
+            {
+                continue;
+            }
+
+            if (inlineValue is not null)
+            {
+                values[option] = inlineValue;
+            }
+            else if (index + 1 < args.Count && !args[index + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                values[option] = args[++index];
+            }
+            else
+            {
+                values[option] = "true";
+            }
+        }
+
+        return values;
+    }
+
     public static StandaloneDesktopLaunchDecision EvaluateDesktopLaunchDecision(
         IReadOnlyList<string> args,
         string? executablePath,

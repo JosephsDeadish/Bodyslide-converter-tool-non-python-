@@ -3,6 +3,78 @@ namespace Bodyslide.Core.Tests;
 public sealed class StandaloneStartupRoutingTests
 {
     [Theory]
+    [InlineData("--input", @"D:\MO2\mods\Armor\armor.nif")]
+    [InlineData("--input=", @"D:\MO2\mods\Armor\armor.nif")]
+    [InlineData("--input:", "/home/test/vortex/mods/armor.nif")]
+    [InlineData("--INPUT=", "/home/test/armor=variant.nif")]
+    public void NamedConversionArgumentsMatchRoutingUnderLauncherSignals(string option, string input)
+    {
+        string[] args = option.EndsWith('=') || option.EndsWith(':')
+            ? ["--from-mo2", option + input, "--target=CBBE", "--output:/tmp/result", "--build-sliders=false"]
+            : ["--from-mo2", option, input, "--target", "CBBE", "--output", "/tmp/result", "--build-sliders", "false"];
+        var values = StandaloneStartupRouting.ParseNamedArguments(args);
+        Assert.Equal(input, values["input"]);
+        Assert.Equal("CBBE", values["target"]);
+        Assert.Equal("/tmp/result", values["output"]);
+        Assert.Equal("false", values["build-sliders"]);
+
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(args,
+            @"D:\MO2\SlideSmith.exe", @"D:\Vortex\mods", _ => true);
+        Assert.True(decision.ExplicitCliLaunchDetected);
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
+    }
+
+    [Theory]
+    [InlineData("--self-check")]
+    [InlineData("--list-bodies")]
+    [InlineData("--export-cache")]
+    [InlineData("--help")]
+    public void InlineCommandsUseSameNamesAsStartupRouting(string command)
+    {
+        var args = new[] { "--from-vortex", command + "=true" };
+        var values = StandaloneStartupRouting.ParseNamedArguments(args);
+
+        Assert.Equal("true", values[command[2..]]);
+        Assert.False(StandaloneStartupRouting.EvaluateDesktopLaunchDecision(args,
+            null, null, _ => true).ShouldAttemptDesktopHandoff);
+    }
+
+    [Fact]
+    public void InlineValuesDoNotConsumeFollowingOptionOrPositionalToken()
+    {
+        var values = StandaloneStartupRouting.ParseNamedArguments(
+            ["--input=armor.nif", "unrelated", "--target:CBBE", "--output-zip", "--build-sliders=false"]);
+
+        Assert.Equal("armor.nif", values["input"]);
+        Assert.Equal("CBBE", values["target"]);
+        Assert.Equal("true", values["output-zip"]);
+        Assert.Equal("false", values["build-sliders"]);
+    }
+
+    [Fact]
+    public void NamedParserPreservesSeparateValuesFlagsAndLastValueWins()
+    {
+        var values = StandaloneStartupRouting.ParseNamedArguments(
+            ["armor.nif", "CBBE", "--input", "/help", "--target=UNP", "--TARGET", "CBBE", "--output-zip"]);
+
+        Assert.Equal("/help", values["input"]);
+        Assert.Equal("CBBE", values["target"]);
+        Assert.Equal("true", values["output-zip"]);
+        Assert.False(values.ContainsKey("help"));
+    }
+
+    [Theory]
+    [InlineData("--input=")]
+    [InlineData("--input:")]
+    public void ExplicitEmptyInlineValueDoesNotAcquireNextCommand(string inputOption)
+    {
+        var values = StandaloneStartupRouting.ParseNamedArguments([inputOption, "--self-check"]);
+
+        Assert.Equal(string.Empty, values["input"]);
+        Assert.Equal("true", values["self-check"]);
+    }
+
+    [Theory]
     [InlineData(@"D:\MO2\mods\Armor\armor.nif", "CBBE", true)]
     [InlineData(@"D:\Vortex\mods\Armor\armor.nif", "CBBE", true)]
     [InlineData("/home/test/vortex/mods/armor.nif", "CBBE", true)]

@@ -48,6 +48,12 @@ variables, managed paths, and launcher switches. Launcher-only invocations still
 open the desktop app; use `--load-result` or manager-specific result/path options
 for desktop result loading rather than CLI conversion flags.
 
+The standalone CLI accepts named options as `--name value`, `--name=value`, or
+`--name:value`. Inline commands such as `--self-check=true` use the same command
+names as startup routing; inline conversion options are not mistaken for launcher
+metadata. This parser/routing coverage does not replace real Windows manager
+handoff testing.
+
 The regression suite includes synthetic artifact-tampering, mixed launcher,
 catalog-invariant, discovery-cancellation, and failure-matrix cases alongside the
 existing realistic pack fixtures. No new real-user failure packs were supplied.
