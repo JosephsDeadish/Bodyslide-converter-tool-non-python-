@@ -30994,7 +30994,7 @@ internal sealed class LocalExportService(
             .GroupBy(entry => entry.Value, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group =>
             {
-                var rewritten = plan.RewriteMap[group.First().Key].Replace('/', '\\');
+                var rewritten = ResolveOutputMeshPath(plan.RewriteMap[group.First().Key]).Replace('/', '\\');
                 return rewritten[..(rewritten.LastIndexOf('\\') + 1)];
             }, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     }

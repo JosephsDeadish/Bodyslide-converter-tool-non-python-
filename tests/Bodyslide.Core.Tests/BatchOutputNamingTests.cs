@@ -162,6 +162,19 @@ public sealed class BatchOutputNamingTests
     }
 
     [Fact]
+    public void BodySlidePluginTargetsNormalizeOptionalMeshesPrefix()
+    {
+        var source = Path.Combine(Path.GetTempPath(), "meshes", "armor", "example", "cuirass_0.nif");
+        foreach (var reference in new[] { "meshes/armor/example/cuirass_0.nif", "armor/example/cuirass_0.nif" })
+        {
+            var analysis = new PluginAnalysisResult(["Example.esp"],
+                [new PluginArmorAddon("Example.esp", [reference])], string.Empty);
+            var targets = LocalExportService.BuildBodySlideMeshOutputPaths(analysis, [source], "CBBE");
+            Assert.Equal(@"meshes\slidesmith\cbbe\armor\example\", targets[source]);
+        }
+    }
+
+    [Fact]
     public void CollisionsReserveNaturalNamesAndRemainStableRegardlessOfInputOrder()
     {
         var root = Path.Combine(Path.GetTempPath(), "batch-naming");
