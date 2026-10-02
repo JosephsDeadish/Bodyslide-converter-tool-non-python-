@@ -8880,11 +8880,36 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             CancellationToken cancellationToken = default,
             int? maxTraversalDepth = null,
             bool includeBodySlideSupport = false)
+            => EnumerateFileSnapshot(path, excludedDirectories, cancellationToken, maxTraversalDepth, includeBodySlideSupport)
+                .Select(file => file.Path).ToArray();
+
+        public static (IReadOnlyList<string> MeshFiles, IReadOnlyList<string> SupportFiles) EnumerateImportFiles(
+            string path,
+            IReadOnlyList<string>? excludedDirectories,
+            CancellationToken cancellationToken)
+        {
+            var files = EnumerateFileSnapshot(path, excludedDirectories, cancellationToken,
+                maxTraversalDepth: 16, includeBodySlideSupport: true, preserveDeepMeshes: true);
+            return (
+                files.Where(file => file.MeshEligible && Path.GetExtension(file.Path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+                    .Select(file => file.Path).ToArray(),
+                files.Where(file => file.Depth <= 16).Select(file => file.Path).ToArray());
+        }
+
+        private readonly record struct SourceScanFile(string Path, int Depth, bool MeshEligible);
+
+        private static IReadOnlyList<SourceScanFile> EnumerateFileSnapshot(
+            string path,
+            IReadOnlyList<string>? excludedDirectories,
+            CancellationToken cancellationToken,
+            int? maxTraversalDepth,
+            bool includeBodySlideSupport,
+            bool preserveDeepMeshes = false)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(path))
             {
-                return [Path.GetFullPath(path)];
+                return [new SourceScanFile(Path.GetFullPath(path), 0, true)];
             }
 
             if (!Directory.Exists(path))
@@ -8892,14 +8917,14 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 return [];
             }
 
-            var files = new List<string>();
-            var pending = new Stack<(string Directory, int Depth)>();
-            pending.Push((Path.GetFullPath(path), 0));
+            var files = new List<SourceScanFile>();
+            var pending = new Stack<(string Directory, int Depth, bool MeshEligible)>();
+            pending.Push((Path.GetFullPath(path), 0, true));
 
             while (pending.Count > 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var (directory, depth) = pending.Pop();
+                var (directory, depth, meshEligible) = pending.Pop();
                 foreach (var childDirectory in Directory.EnumerateDirectories(directory))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -8909,21 +8934,25 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                         continue;
                     }
 
-                    if (maxTraversalDepth is null || depth < maxTraversalDepth.Value)
+                    var childMeshEligible = meshEligible &&
+                        !Path.GetFullPath(childDirectory).Replace('\\', '/')
+                            .Contains("/calientetools/bodyslide", StringComparison.OrdinalIgnoreCase);
+                    if (maxTraversalDepth is null || depth < maxTraversalDepth.Value ||
+                        (preserveDeepMeshes && childMeshEligible))
                     {
-                        pending.Push((childDirectory, depth + 1));
+                        pending.Push((childDirectory, depth + 1, childMeshEligible));
                     }
                 }
 
                 foreach (var file in Directory.EnumerateFiles(directory))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    files.Add(Path.GetFullPath(file));
+                    files.Add(new SourceScanFile(Path.GetFullPath(file), depth, meshEligible));
                 }
             }
 
             return files
-                .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(file => file.Path, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
 
@@ -10909,16 +10938,22 @@ internal sealed class LocalArmorImportService : IArmorImportService
             sourcePath = ResolveSupportScanRoot(fullInputPath);
         }
 
-        var meshFiles = EnumerateFiles(sourcePath, [".nif"], excludedDirectories, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-
         var supportScanRoot = ResolveSupportScanRoot(sourcePath);
-        var supportFiles = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
-            supportScanRoot,
-            excludedDirectories,
-            cancellationToken,
-            maxTraversalDepth: 16,
-            includeBodySlideSupport: true);
+        IReadOnlyList<string> meshFiles;
+        IReadOnlyList<string> supportFiles;
+        if (Directory.Exists(sourcePath))
+        {
+            var snapshot = BatchConversionRunner.SourceScanEnumerator.EnumerateImportFiles(
+                supportScanRoot, excludedDirectories, cancellationToken);
+            meshFiles = snapshot.MeshFiles;
+            supportFiles = snapshot.SupportFiles;
+        }
+        else
+        {
+            meshFiles = EnumerateFiles(sourcePath, [".nif"], excludedDirectories, cancellationToken);
+            supportFiles = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
+                supportScanRoot, excludedDirectories, cancellationToken, maxTraversalDepth: 16, includeBodySlideSupport: true);
+        }
         IReadOnlyList<string> SelectSupportFiles(params string[] extensions) =>
             supportFiles
                 .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))

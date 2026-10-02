@@ -89,6 +89,20 @@ Support-file import includes source BodySlide projects, SliderGroups XML and OSD
 assets without treating ShapeData reference meshes as conversion inputs; explicit
 directory exclusions and generated-output markers still apply.
 
+Folder/archive/plugin-root import discovers meshes and support files from one
+per-import directory snapshot instead of two independent walks. Support discovery
+keeps its depth-16 boundary; mesh discovery still reaches deeper armor folders,
+without descending into excluded BodySlide reference trees beyond that support
+boundary. Direct NIF import still selects only its weight pair and uses a bounded
+support scan. Snapshots are not a global cache: subsequent imports see added or
+removed files.
+
+`ImportDiscoverySnapshotTests` compares the snapshot against independent scans
+and records observational scan/import timings for 100- and 5,000-mesh synthetic
+packs with matching texture counts. Run it with the existing `dotnet test`
+runner and a TRX logger to retain the timing output. These discovery-only samples
+are not real-user packs, cold-cache benchmarks, or end-to-end conversion proof.
+
 Local Release verification is separate from external coverage evidence: the
 Linux packaged CLI can be self-checked here, but Windows desktop/MO2/Vortex click
 paths, BodySlide builds and live-game physics must be validated on the target
