@@ -23120,8 +23120,9 @@ internal sealed class LocalExportService(
             return new SupportAssetDiscoveryResult([], []);
         }
 
-        var files = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
+        var files = BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(
             scanRoot,
+            [".esp", ".esm", ".esl", ".bgsm", ".bgem"],
             excludedDirectories,
             cancellationToken,
             maxTraversalDepth: 16);

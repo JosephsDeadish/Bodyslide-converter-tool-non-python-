@@ -513,17 +513,12 @@ internal static class BodySlideSourceProjectSupport
     }
 
     private static IEnumerable<string> EnumerateSupportedFiles(string root) =>
-        Directory.EnumerateFiles(root, "*", SearchOption.TopDirectoryOnly)
-            .Where(path =>
-            {
-                var extension = Path.GetExtension(path);
-                return extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
-                       extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
-                       extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase) ||
-                       extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
-                       (extension.Equals(".xml", StringComparison.OrdinalIgnoreCase) &&
-                        IsLikelyBodySlideSupportXml(path));
-            });
+        Directory.EnumerateFiles(root, "*.osp", SearchOption.TopDirectoryOnly)
+            .Concat(Directory.EnumerateFiles(root, "*.osd", SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(root, "*.bsd", SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(root, "*.tri", SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(root, "*.xml", SearchOption.TopDirectoryOnly)
+                .Where(IsLikelyBodySlideSupportXml));
 
     private static IEnumerable<string> EnumerateOspFiles(string root, SearchOption searchOption)
     {
@@ -655,15 +650,12 @@ internal static class BodySlideSourceProjectSupport
                 continue;
             }
 
-            foreach (var asset in Directory.EnumerateFiles(shapeDataFolder, "*.*", SearchOption.TopDirectoryOnly)
-                         .Where(static path =>
-                         {
-                             var extension = Path.GetExtension(path);
-                             return extension.Equals(".nif", StringComparison.OrdinalIgnoreCase) ||
-                                    extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
-                                    extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
-                                    extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase);
-                         }))
+            foreach (var asset in Directory.EnumerateFiles(shapeDataFolder, "*.nif", SearchOption.TopDirectoryOnly)
+                         .Concat(Directory.EnumerateFiles(shapeDataFolder, "*.osd", SearchOption.TopDirectoryOnly))
+                         .Concat(Directory.EnumerateFiles(shapeDataFolder, "*.tri", SearchOption.TopDirectoryOnly))
+                         .Concat(Directory.EnumerateFiles(shapeDataFolder, "*.bsd", SearchOption.TopDirectoryOnly))
+                         .Concat(Directory.EnumerateFiles(shapeDataFolder, "*.xml", SearchOption.TopDirectoryOnly)
+                             .Where(IsLikelyBodySlideSupportXml)))
             {
                 discovered.Add(asset);
             }
