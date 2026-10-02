@@ -538,7 +538,9 @@ public sealed record InspectionTimingReport(
     long MeshAnalysisMilliseconds,
     long SkeletonMappingMilliseconds,
     long NifInspectionMilliseconds,
-    IReadOnlyList<string> TopStages);
+    IReadOnlyDictionary<string, long> PhaseMilliseconds,
+    IReadOnlyList<string> TopStages,
+    IReadOnlyList<string> TopPhases);
 public sealed record ConversionInspectionResult(
     string InputPath,
     string? RequestedTargetBody,
@@ -8261,6 +8263,9 @@ public sealed class ConversionInspector(
 
         var nifSupport = await ProfileStageAsync("nif-inspection", () => Task.FromResult(NifGeometrySignatureReader.Inspect(armor.MeshFiles)));
         totalStopwatch.Stop();
+        long GetStageDuration(params string[] stageKeys) =>
+            stageKeys.Sum(stageKey => stageDurationsMs.TryGetValue(stageKey, out var duration) ? duration : 0L);
+
         var timing = new InspectionTimingReport(
             totalStopwatch.ElapsedMilliseconds,
             stageDurationsMs.TryGetValue("import", out var importMs) ? importMs : 0,
@@ -8268,12 +8273,22 @@ public sealed class ConversionInspector(
             stageDurationsMs.TryGetValue("mesh-analysis", out var analysisMs) ? analysisMs : 0,
             stageDurationsMs.TryGetValue("skeleton-mapping", out var skeletonMappingMs) ? skeletonMappingMs : 0,
             stageDurationsMs.TryGetValue("nif-inspection", out var nifInspectionMs) ? nifInspectionMs : 0,
+            new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["import"] = GetStageDuration("import"),
+                ["inspect"] = GetStageDuration("body-detection", "mesh-analysis", "skeleton-mapping", "nif-inspection")
+            },
             stageDurationsMs
                 .OrderByDescending(static pair => pair.Value)
                 .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-                .Take(3)
+                .Take(5)
                 .Select(pair => $"{pair.Key}:{pair.Value}ms")
-                .ToArray());
+                .ToList(),
+            new[]
+            {
+                $"import:{GetStageDuration("import")}ms",
+                $"inspect:{GetStageDuration("body-detection", "mesh-analysis", "skeleton-mapping", "nif-inspection")}ms"
+            });
 
         return new ConversionInspectionResult(
             inputPath,

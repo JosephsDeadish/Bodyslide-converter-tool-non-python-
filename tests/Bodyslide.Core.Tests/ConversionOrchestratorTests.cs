@@ -36,7 +36,16 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains(result.Steps, s => s.StartsWith("phase-ms:inspect=", StringComparison.Ordinal));
             Assert.Contains(result.Steps, s => s.StartsWith("phase-ms:convert=", StringComparison.Ordinal));
             Assert.Contains(result.Steps, s => s.StartsWith("pipeline-total-ms:", StringComparison.Ordinal));
-            Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-timings.json")));
+            var timingsPath = Path.Combine(outputDirectory, "conversion-timings.json");
+            Assert.True(File.Exists(timingsPath));
+
+            using var timings = JsonDocument.Parse(await File.ReadAllTextAsync(timingsPath));
+            var phaseMilliseconds = timings.RootElement.GetProperty("PhaseMilliseconds");
+            Assert.True(phaseMilliseconds.GetProperty("import").GetInt64() >= 0);
+            Assert.True(phaseMilliseconds.GetProperty("inspect").GetInt64() >= 0);
+            Assert.Contains(
+                timings.RootElement.GetProperty("TopPhases").EnumerateArray().Select(static item => item.GetString()),
+                value => value is not null && value.StartsWith("import:", StringComparison.OrdinalIgnoreCase));
         }
 
         finally
@@ -35615,6 +35624,9 @@ public async Task ConversionInspector_InspectAsync_ReturnsDetectionAnalysisAndCu
         Assert.True(inspection.Timing.MeshAnalysisMilliseconds >= 0);
         Assert.True(inspection.Timing.NifInspectionMilliseconds >= 0);
         Assert.Contains(inspection.Timing.TopStages, stage => stage.StartsWith("import:", StringComparison.OrdinalIgnoreCase));
+        Assert.True(inspection.Timing.PhaseMilliseconds.TryGetValue("import", out var importPhaseMs) && importPhaseMs >= 0);
+        Assert.True(inspection.Timing.PhaseMilliseconds.TryGetValue("inspect", out var inspectPhaseMs) && inspectPhaseMs >= 0);
+        Assert.Contains(inspection.Timing.TopPhases, phase => phase.StartsWith("inspect:", StringComparison.OrdinalIgnoreCase));
     }
     finally
     {
