@@ -41,7 +41,7 @@ public sealed class BatchOutputNamingTests
             foreach (var result in results)
             {
                 var identity = Path.GetFileName(result.OutputDirectory);
-                var plugin = Assert.Single(plugins, path => Path.GetFileName(path).Contains($"_{identity}_cuirass_0", StringComparison.Ordinal));
+                var plugin = Assert.Single(plugins, path => Path.GetFileName(path) == $"SlideSmith_{identity}_0.esp");
                 var content = System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(plugin)).Replace('\\', '/');
                 foreach (var name in new[] { "cuirass_0.nif", "cuirass_1.nif", "cuirass_1stperson_0.nif", "cuirass_ground.nif" })
                 {
@@ -61,6 +61,99 @@ public sealed class BatchOutputNamingTests
             Assert.Equal(2, results.Select(result => Path.GetFileName(Assert.Single(
                 Directory.GetFiles(result.OutputDirectory, "*.osp", SearchOption.AllDirectories))))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ScratchPluginNamesDoNotCollideWithNaturalArmorNames()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "slidesmith-batch-plugin-names", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var input = Path.Combine(root, "input");
+            var output = Path.Combine(root, "output");
+            foreach (var (folder, name) in new[] { ("first", "cuirass"), ("second", "cuirass"), ("third", "cuirass_cuirass") })
+            {
+                var directory = Path.Combine(input, folder);
+                Directory.CreateDirectory(directory);
+                await File.WriteAllBytesAsync(Path.Combine(directory, $"{name}_0.nif"), new byte[64]);
+            }
+            var results = await new BatchConversionRunner(StandaloneConversionModules.CreateDefault())
+                .ConvertAsync(new ConversionRequest(input, "CBBE", output));
+            Assert.Equal(3, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+            Assert.Equal(3, Directory.GetFiles(output, "*.esp", SearchOption.TopDirectoryOnly).Length);
+            Assert.Equal(3, results.Select(result => Path.GetFileName(Assert.Single(
+                Directory.GetFiles(Path.Combine(result.OutputDirectory, "CalienteTools", "BodySlide", "SliderSets"), "*.osp"))))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SharedSourcePluginsRetainRewriteMappingsFromEveryBatchItem(bool archived)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "slidesmith-batch-source-plugins", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var input = Path.Combine(root, "input");
+            var output = Path.Combine(root, "output");
+            var fixture = GetFixtureDirectory("RealisticLinkedModularFrameworkModPack");
+            foreach (var file in Directory.GetFiles(fixture, "*", SearchOption.AllDirectories))
+            {
+                var destination = Path.Combine(input, Path.GetRelativePath(fixture, file));
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(file, destination);
+            }
+            var source = input;
+            if (archived)
+            {
+                source = Path.Combine(root, "pack.zip");
+                System.IO.Compression.ZipFile.CreateFromDirectory(input, source);
+            }
+            var results = await new BatchConversionRunner(StandaloneConversionModules.CreateDefault())
+                .ConvertAsync(new ConversionRequest(source, "CBBE", output));
+            Assert.True(results.Count > 1);
+            Assert.All(results, result => Assert.True(result.Success));
+            var mappings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var result in results)
+            {
+                using var report = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(
+                    Path.Combine(result.OutputDirectory, "plugin-patches.json")));
+                foreach (var mapping in report.RootElement.GetProperty("RewriteMappings").EnumerateArray())
+                    mappings.Add(mapping.GetProperty("RewrittenMeshPath").GetString()!.Replace('\\', '/'));
+                var projectName = Assert.Single(result.Steps, step => step.StartsWith("bodyslide:", StringComparison.Ordinal))
+                    ["bodyslide:".Length..].Split(',')[0];
+                var projectPath = Path.Combine(result.OutputDirectory, "CalienteTools", "BodySlide", "SliderSets", projectName + ".osp");
+                var project = System.Xml.Linq.XDocument.Load(projectPath);
+                foreach (var set in project.Descendants("SliderSet"))
+                {
+                    var buildPath = set.Element("OutputPath")!.Value.Replace('\\', Path.DirectorySeparatorChar);
+                    foreach (var mesh in set.Elements("OutputFile"))
+                        Assert.True(File.Exists(Path.Combine(result.OutputDirectory, buildPath, mesh.Value)),
+                            $"BodySlide build target was not staged: {buildPath}{mesh.Value}");
+                }
+            }
+            Assert.True(mappings.Count > 1);
+            var plugins = Directory.GetFiles(output, "*_patched.esp", SearchOption.TopDirectoryOnly);
+            Assert.NotEmpty(plugins);
+            var content = string.Join("\n", await Task.WhenAll(plugins.Select(async plugin =>
+                System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(plugin)).Replace('\\', '/'))));
+            Assert.All(mappings, mapping => Assert.Contains(mapping, content, StringComparison.OrdinalIgnoreCase));
+            var overrides = Directory.GetFiles(output, "*_SlidesmithPatch.esp", SearchOption.TopDirectoryOnly);
+            Assert.NotEmpty(overrides);
+            var overrideContent = string.Join("\n", await Task.WhenAll(overrides.Select(async plugin =>
+                System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(plugin)).Replace('\\', '/'))));
+            Assert.All(mappings, mapping => Assert.Contains(mapping, overrideContent, StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -94,4 +187,7 @@ public sealed class BatchOutputNamingTests
         Assert.Equal("unique", names[files[5]]);
         Assert.All(files, path => Assert.Equal(names[path], reversed[path]));
     }
+
+    private static string GetFixtureDirectory(string name, [System.Runtime.CompilerServices.CallerFilePath] string currentFilePath = "") =>
+        Path.Combine(Path.GetDirectoryName(currentFilePath)!, "Fixtures", name);
 }

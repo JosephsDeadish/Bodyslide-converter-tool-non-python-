@@ -36,6 +36,29 @@ public sealed record ConversionRequest(
     string? SharedPluginOutputDirectory = null)
 {
     internal string? BatchOutputNamespace { get; init; }
+    internal BatchPluginExportContext? BatchPluginExportContext { get; init; }
+}
+
+internal sealed class BatchPluginExportContext : IDisposable
+{
+    private readonly SemaphoreSlim gate = new(1, 1);
+    internal Dictionary<string, string> RewriteMappings { get; } = new(StringComparer.OrdinalIgnoreCase);
+    internal IReadOnlyList<string> PluginFiles { get; init; } = [];
+
+    internal async Task<T> ExecuteAsync<T>(Func<Task<T>> export, CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            return await export();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public void Dispose() => gate.Dispose();
 }
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 internal sealed record NormalizedConversionRequest(ConversionRequest Request, ConversionPreset? Preset, string DisplayName, string OutputSegment);
@@ -55,6 +78,8 @@ public sealed record ImportedArmor(
 {
     internal string? BodySlideProjectNamespace { get; init; }
     internal string? BodySlideOutputPath { get; init; }
+    internal IReadOnlyDictionary<string, string>? BodySlideMeshOutputPaths { get; init; }
+    internal IReadOnlyList<string>? BatchPluginFiles { get; init; }
 }
 public sealed record BodyDetectionReport(string Body, double Confidence, IReadOnlyList<string> Evidence);
 /// <summary>
@@ -7479,6 +7504,10 @@ public sealed class ConversionOrchestrator(
             var excludedScanDirectories = BuildExcludedScanDirectories(normalized.Request);
             ReportStage("Importing input", 1);
             armor = await ProfileStageAsync("import", () => importer.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories));
+            if (normalized.Request.BatchPluginExportContext is { } batchPluginContext)
+            {
+                armor = armor with { BatchPluginFiles = batchPluginContext.PluginFiles };
+            }
 
             // Merge any explicitly-provided custom profile paths from the request with the
             // auto-scanned profiles that the importer found inside the input directory.
@@ -7955,11 +7984,15 @@ public sealed class ConversionOrchestrator(
             var physics = await ProfileStageAsync("physics-build", () => physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken));
             steps.Add($"physics:{physics.Profile}");
 
-            var bodySlideArmor = normalized.Request.BatchOutputNamespace is null ? armor : armor with
+            var bodySlideArmor = normalized.Request.BatchPluginExportContext is null ? armor : armor with
             {
                 BodySlideProjectNamespace = normalized.Request.BatchOutputNamespace,
                 BodySlideOutputPath = pluginAnalysis.ScannedPlugins.Count == 0
-                    ? $@"meshes\slidesmith\{LocalExportService.BuildSafeBodyToken(normalized.Request.TargetBody)}\{normalized.Request.BatchOutputNamespace}\"
+                    ? $@"meshes\slidesmith\{LocalExportService.BuildSafeBodyToken(normalized.Request.TargetBody)}\"
+                        + (normalized.Request.BatchOutputNamespace is null ? "" : normalized.Request.BatchOutputNamespace + @"\")
+                    : null,
+                BodySlideMeshOutputPaths = pluginAnalysis.ScannedPlugins.Count > 0
+                    ? LocalExportService.BuildBodySlideMeshOutputPaths(pluginAnalysis, armor.MeshFiles, normalized.Request.TargetBody)
                     : null
             };
             var bodySlideProject = await ProfileStageAsync("bodyslide-project", () => bodySlideProjectService.GenerateAsync(bodySlideArmor, converted, normalized.Request.TargetBody, cancellationToken));
@@ -7978,7 +8011,10 @@ public sealed class ConversionOrchestrator(
                 JsonSerializer.Serialize(BuildTimingReport(totalStopwatch.ElapsedMilliseconds), new JsonSerializerOptions { WriteIndented = true }),
                 cancellationToken);
             steps.Add("timings:conversion-timings.json");
-            var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, raceCompatibility, voxelResult, cancellationToken);
+            Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync() => exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, raceCompatibility, voxelResult, cancellationToken);
+            var export = normalized.Request.BatchPluginExportContext is { PluginFiles.Count: > 0 } batchExport
+                ? await batchExport.ExecuteAsync(ExportAsync, cancellationToken)
+                : await ExportAsync();
             steps.Add($"exported:{export.OutputDirectory}");
 
             var outputFiles = export.OutputFiles.ToList();
@@ -8581,7 +8617,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var variant = variants[0];
             var rootOutput = request.OutputDirectory ??
                 Path.Combine(ExecutionEnvironment.GetDefaultOutputRoot(), request.TargetBody, "batch");
-            var resultsWithPaths = await ConvertMeshSetAsync(processableMeshFiles, variant.Request, rootOutput, processableMeshFiles.Count, progress, cancellationToken);
+            var resultsWithPaths = await ConvertMeshSetAsync(processableMeshFiles, variant.Request, sourceDirectory, rootOutput, processableMeshFiles.Count, progress, cancellationToken);
             await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, rootOutput, cancellationToken);
             if (request.OutputZip)
             {
@@ -8611,6 +8647,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var resultsWithPaths = await ConvertMeshSetAsync(
                 entry.MeshFiles,
                 variant.Request,
+                sourceDirectory,
                 variantRootOutput,
                 total,
                 progress,
@@ -8692,6 +8729,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
     private async Task<IReadOnlyList<(string MeshFile, ConversionResult Result)>> ConvertMeshSetAsync(
         IReadOnlyList<string> meshFiles,
         ConversionRequest request,
+        string sourceDirectory,
         string rootOutput,
         int total,
         IProgress<BatchProgressUpdate>? progress,
@@ -8712,6 +8750,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             .Select(group => group.Key)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2);
+        using var batchPluginExportContext = new BatchPluginExportContext
+        {
+            PluginFiles = SourceScanEnumerator.EnumerateFiles(sourceDirectory, [".esp", ".esm", ".esl"], [rootOutput], cancellationToken)
+        };
         await Parallel.ForEachAsync(
             meshFiles,
             new ParallelOptions
@@ -8746,6 +8788,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                     InputPath = meshFile,
                     OutputDirectory = perArmorOutput,
                     SharedPluginOutputDirectory = rootOutput,
+                    BatchPluginExportContext = batchPluginExportContext,
                     BatchOutputNamespace = collidingStems.Contains(StripWeightSuffix(Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty))
                         ? outputNames[meshFile] : null,
                     OutputZip = false
@@ -18238,7 +18281,7 @@ internal static class BodySlideLayoutPlanner
         var safeBaseName = SanitizeToken(baseName);
         if (armor.BodySlideProjectNamespace is not null)
         {
-            safeBaseName = $"{SanitizeToken(armor.BodySlideProjectNamespace)}_{safeBaseName}";
+            safeBaseName = SanitizeToken(armor.BodySlideProjectNamespace);
         }
         var safeTargetBody = SanitizeToken(targetBody);
 
@@ -18254,7 +18297,12 @@ internal static class BodySlideLayoutPlanner
     {
         var setFolder = $@"CalienteTools\BodySlide\ShapeData\{projectName}";
         var meshInfos = armor.MeshFiles
-            .Select(meshPath => CreateMeshInfo(armor.SourcePath, meshPath))
+            .Select(meshPath =>
+            {
+                var info = CreateMeshInfo(armor.SourcePath, meshPath);
+                return armor.BodySlideMeshOutputPaths?.TryGetValue(meshPath, out var outputPath) == true
+                    ? info with { OutputPath = outputPath } : info;
+            })
             .Where(info => !string.IsNullOrWhiteSpace(info.FileName))
             .ToList();
 
@@ -18689,7 +18737,11 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
     {
         var pluginFiles = new List<string>();
 
-        if (Directory.Exists(armor.SourcePath))
+        if (armor.BatchPluginFiles is { } batchPluginFiles)
+        {
+            pluginFiles.AddRange(batchPluginFiles);
+        }
+        else if (Directory.Exists(armor.SourcePath))
         {
             pluginFiles.AddRange(BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(armor.SourcePath, PluginExtensions));
         }
@@ -21752,6 +21804,10 @@ internal sealed class LocalExportService(
             outputDirectory,
             request.SharedPluginOutputDirectory,
             cancellationToken);
+        if (armor.BatchPluginFiles is { } batchSourcePlugins)
+        {
+            supportAssets = supportAssets with { PluginFiles = batchSourcePlugins };
+        }
         var assetOutputDirectory = outputDirectory;
         var copiedSupportAssets = await CopySupportAssetsAsync(
             armor,
@@ -22029,7 +22085,8 @@ internal sealed class LocalExportService(
 
                     // Normalise the rewrite map (lowercase / forward-slash keys) for both
                     // the full-copy rewriter and the new minimal patch generator.
-                    var normMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    var normMap = request.BatchPluginExportContext?.RewriteMappings
+                        ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var (k, v) in pluginRewriteMap)
                         normMap[k.Replace('\\', '/').ToLowerInvariant()] = v;
 
@@ -22044,7 +22101,7 @@ internal sealed class LocalExportService(
 
                     var rewriter = new BinaryPluginRewriteService();
                     var rewriteResult = await rewriter.RewriteAsync(
-                        safeSourcePluginPaths, pluginRewriteMap, espDestDirectory, cancellationToken);
+                        safeSourcePluginPaths, normMap, espDestDirectory, cancellationToken);
                     outputFiles.AddRange(rewriteResult.PatchedPluginPaths);
                     pluginPatchWarnings.AddRange(rewriteResult.Warnings);
                     patchVerificationPaths.AddRange(rewriteResult.PatchedPluginPaths);
@@ -22210,7 +22267,9 @@ internal sealed class LocalExportService(
             var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "SlideSmithArmor";
             if (request.BatchOutputNamespace is not null)
             {
-                armorName = $"{request.BatchOutputNamespace}_{armorName}";
+                armorName = request.BatchOutputNamespace
+                    + (armorName.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ? "_0"
+                        : armorName.EndsWith("_1", StringComparison.OrdinalIgnoreCase) ? "_1" : string.Empty);
             }
             var bipedSlots = pluginAnalysis.ArmorAddons
                 .Where(a => a.BipedSlots is not null)
@@ -30924,6 +30983,21 @@ internal sealed class LocalExportService(
     }
 
     // ── Plugin guidance helpers ───────────────────────────────────────────────
+
+    internal static IReadOnlyDictionary<string, string> BuildBodySlideMeshOutputPaths(
+        PluginAnalysisResult pluginAnalysis, IReadOnlyList<string> meshFiles, string targetBody)
+    {
+        var plan = BuildPluginRewritePlan(pluginAnalysis, meshFiles, targetBody);
+        return plan.SourceMeshMap
+            .Where(entry => plan.RewriteMap.ContainsKey(entry.Key))
+            .OrderBy(entry => plan.RewriteMap[entry.Key], StringComparer.Ordinal)
+            .GroupBy(entry => entry.Value, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group =>
+            {
+                var rewritten = plan.RewriteMap[group.First().Key].Replace('/', '\\');
+                return rewritten[..(rewritten.LastIndexOf('\\') + 1)];
+            }, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    }
 
     private static PluginRewritePlan BuildPluginRewritePlan(
         PluginAnalysisResult pluginAnalysis,

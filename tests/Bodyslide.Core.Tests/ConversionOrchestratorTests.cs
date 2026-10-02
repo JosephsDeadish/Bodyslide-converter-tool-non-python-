@@ -22543,15 +22543,20 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(stagedHelmet1Candidates.Any(File.Exists), "Expected converted headgear high-weight mesh to be staged.");
             Assert.True(stagedGroundCandidates.Any(File.Exists), "Expected converted headgear ground mesh to be staged.");
 
-            Assert.True(
-                File.Exists(Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_1stperson_0.nif")),
-                "Expected first-person fallback headgear mesh to be staged.");
-            Assert.True(
-                File.Exists(Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_1stperson_1.nif")),
-                "Expected first-person high-weight fallback headgear mesh to be staged.");
-            Assert.True(
-                File.Exists(Path.Combine(outputDirectory, "SlideSmith_daedric_greathelm_0.esp")),
-                "Expected scratch plugin output for the staged headgear package.");
+            foreach (var name in new[] { "HeadgearAddon" })
+            {
+                var plugin = Path.Combine(outputDirectory, $"{name}_patched.esp");
+                Assert.True(File.Exists(plugin), "Expected the pack's source plugin to be rewritten.");
+                Assert.Contains("meshes/slidesmith/cbbe/armor/daedric/daedric_greathelm",
+                    System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(plugin)).Replace('\\', '/'),
+                    StringComparison.OrdinalIgnoreCase);
+                Assert.True(File.Exists(Path.Combine(outputDirectory, $"{name}_SlidesmithPatch.esp")));
+            }
+            Assert.False(File.Exists(Path.Combine(outputDirectory, "SlideSmith_daedric_greathelm_0.esp")),
+                "Source plugins must not be replaced by an unrelated scratch armor.");
+            var patchReport = await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "plugin-patches.json"));
+            Assert.Contains("HeadgearWorld.esp", patchReport, StringComparison.Ordinal);
+            Assert.Contains("meshes/armor/daedric/daedric_greathelm_ground.nif", patchReport, StringComparison.OrdinalIgnoreCase);
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("missing-plugin-partitions", qualityJson, StringComparison.Ordinal);

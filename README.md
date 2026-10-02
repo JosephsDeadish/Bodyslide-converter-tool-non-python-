@@ -85,6 +85,10 @@ their existing output layout.
 Colliding plugin-free armor also receives distinct scratch-plugin names and
 game-relative world/first-person/ground mesh namespaces, preventing installation
 of separate packages from overwriting each other's generated plugin references.
+Their BodySlide project/ShapeData identities are distinct, and their OSP build
+paths match those namespaced plugin mesh references. Folder batches discover
+source plugins once at the pack root; shared exports are serialized and retain
+the accumulated mesh rewrites rather than overwriting earlier armor mappings.
 
 Body detection ignores GUID-shaped path components and leaf names as opaque
 workspace identifiers. Accidental body-name substrings inside those identifiers
