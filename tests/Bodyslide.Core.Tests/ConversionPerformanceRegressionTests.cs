@@ -48,19 +48,24 @@ public sealed class ConversionPerformanceRegressionTests
     [Fact]
     public void PluginVerification_AcceptsRepeatedNormalizedSourceReports()
     {
-        var plan = new PluginRewritePlan(new Dictionary<string, string>(), new Dictionary<string, string>(), [], [], 0);
+        var plan = new PluginRewritePlan(new Dictionary<string, string>(),
+            new Dictionary<string, string> { ["meshes/armor.nif"] = "meshes/Armor.nif" }, [], [], 1);
         var reports = new[]
         {
             new NifSupportReport("meshes/Armor.nif", "supported", "test", 3, []),
             new NifSupportReport("meshes\\armor.nif", "unsupported", "missing-header", null, [])
         };
 
-        var result = GetMethod("BuildPluginRewriteVerificationReport").Invoke(null,
-            [plan, new PluginAnalysisResult([], [], ""), Path.GetTempPath(),
+        var analysis = new PluginAnalysisResult(["Armor.esp"],
+            [new PluginArmorAddon("Armor.esp [ESP]", ["meshes/armor.nif"], FormId: 1, OwningPluginFileName: "Armor.esp")],
+            "", ArmorRecords:
+            [new PluginArmorRecord("Armor.esp [ESP]", [], FormId: 2, LinkedArmorAddonFormIds: [1], OwningPluginFileName: "Armor.esp")]);
+        var result = (PluginRewriteVerificationReport)GetMethod("BuildPluginRewriteVerificationReport").Invoke(null,
+            [plan, analysis, Path.GetTempPath(),
              new HashSet<string>(), Array.Empty<string>(),
-             new Dictionary<string, IReadOnlyList<string>>(), Array.Empty<string>(), reports]);
+             new Dictionary<string, IReadOnlyList<string>>(), Array.Empty<string>(), reports])!;
 
-        Assert.NotNull(result);
+        Assert.Contains("missing-header", Assert.Single(result.UnsupportedLinkedArmorAddonMeshes!));
     }
 
     [Fact]

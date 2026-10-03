@@ -20,8 +20,6 @@ internal static class Program
         WriteStartupDiagnostics(
             _startupDiagnosticsPath,
             $"desktop-startup: exe={Environment.ProcessPath ?? "(unknown)"}, cwd={Environment.CurrentDirectory}, args=[{string.Join(", ", args)}]");
-        RegisterGlobalExceptionHandlers();
-
         if (args.Any(static arg =>
             StandaloneStartupRouting.TryReadOptionName(arg, out var option) &&
             option.Equals("smoke-test", StringComparison.OrdinalIgnoreCase)))
@@ -29,6 +27,7 @@ internal static class Program
             return RunSmokeTest();
         }
 
+        RegisterGlobalExceptionHandlers();
         try
         {
             var launchOptions = DesktopWorkflowSupport.ParseLaunchOptions(args);
@@ -58,6 +57,7 @@ internal static class Program
     {
         try
         {
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
             ApplicationConfiguration.Initialize();
             using var form = new MainForm();
             form.CreateControl();

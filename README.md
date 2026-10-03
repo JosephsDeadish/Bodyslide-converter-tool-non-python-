@@ -108,6 +108,14 @@ claiming the original real-world failure has been resolved.
 Constant missing-texture fallbacks use compact 4×4 DDS maps instead of expanding
 every channel to the diffuse texture's resolution. Detail-derived maps retain
 their detail; a compact neutral fallback is not a substitute for authored textures.
+Morph diagnostics in `morphs.json` and the conversion manifest retain slider,
+weight, format, vertex-count and delta-count metadata rather than duplicating
+per-vertex source payload arrays. Full deltas remain available to BodySlide
+BSD/TRI/OSD generation. This bounds diagnostic growth by slider count, not by
+slider count multiplied by vertex count; it does not limit required mesh assets.
+Plugin verification accepts repeated normalized source paths and keeps an
+unsupported report when duplicate reports disagree, rather than throwing a
+duplicate-key exception or hiding the unsupported mesh.
 
 Body catalogs describe supported names, sliders, rig families and physics
 expectations; they are not a bundled set of real reference bodies or proven
