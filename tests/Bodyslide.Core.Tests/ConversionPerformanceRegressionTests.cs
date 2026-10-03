@@ -10,6 +10,42 @@ namespace Bodyslide.Core.Tests;
 [Collection("NonParallel")]
 public sealed class ConversionPerformanceRegressionTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void PluginVerification_ChecksDiskEvenWhenMeshIsRecordedAsStaged(bool fileExists, bool recordedAsStaged)
+    {
+        var root = CreateRoot();
+        try
+        {
+            const string rewritten = "meshes/slidesmith/cbbe/armor.nif";
+            var destination = Path.Combine(root, "meshes", "slidesmith", "cbbe", "armor.nif");
+            if (fileExists)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.WriteAllBytes(destination, new byte[64]);
+            }
+            var plan = new PluginRewritePlan(
+                new Dictionary<string, string> { ["meshes/source.nif"] = rewritten },
+                new Dictionary<string, string>(), [], [], 1);
+            var staged = new HashSet<string>();
+            if (recordedAsStaged) staged.Add(destination);
+            var result = (PluginRewriteVerificationReport)GetMethod("BuildPluginRewriteVerificationReport")
+                .Invoke(null, [plan, new PluginAnalysisResult([], [], ""), root, staged,
+                    Array.Empty<string>(), new Dictionary<string, IReadOnlyList<string>>(),
+                    Array.Empty<string>(), null])!;
+
+            Assert.NotNull(result.MissingStagedMeshes);
+            if (fileExists)
+                Assert.Empty(result.MissingStagedMeshes);
+            else
+                Assert.Equal(rewritten, Assert.Single(result.MissingStagedMeshes));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Fact]
     public void FixtureWriters_ReturnCanonicalPathsForNestedAssets()
     {

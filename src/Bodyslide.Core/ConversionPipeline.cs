@@ -32733,8 +32733,7 @@ internal sealed class LocalExportService(
 
     private static IReadOnlyList<string> BuildMissingStagedPluginMeshes(
         string outputDirectory,
-        IReadOnlyDictionary<string, string> pluginRewriteMap,
-        IReadOnlySet<string> stagedPluginMeshes)
+        IReadOnlyDictionary<string, string> pluginRewriteMap)
     {
         var missing = new List<string>();
         foreach (var rewrittenPath in pluginRewriteMap.Values.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -32748,7 +32747,7 @@ internal sealed class LocalExportService(
             var destinationPath = Path.Combine(
                 outputDirectory,
                 outputMeshPath.Replace('/', Path.DirectorySeparatorChar));
-            if (!stagedPluginMeshes.Contains(destinationPath) && !File.Exists(destinationPath))
+            if (!File.Exists(destinationPath))
             {
                 missing.Add(outputMeshPath);
             }
@@ -32787,7 +32786,7 @@ internal sealed class LocalExportService(
             .Select(NormalizePluginMeshPath)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var missingStagedMeshes = BuildMissingStagedPluginMeshes(outputDirectory, pluginRewritePlan.RewriteMap, stagedPluginMeshes);
+        var missingStagedMeshes = BuildMissingStagedPluginMeshes(outputDirectory, pluginRewritePlan.RewriteMap);
         var verifiedPluginPathCount = 0;
         var missingPatchPluginMasters = new List<string>();
         var patchPluginMasterOrderMismatches = new List<string>();
