@@ -11,6 +11,59 @@ namespace Bodyslide.Core.Tests;
 public sealed class ConversionPerformanceRegressionTests
 {
     [Fact]
+    public async Task MorphDiagnostics_DescribePayloadsWithoutDuplicatingVertexArrays()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var nif = Path.Combine(root, "armor.nif");
+            await File.WriteAllTextAsync(nif, "mesh");
+            var deltas = Enumerable.Repeat((1f, 2f, 3f), 100_000).ToArray();
+            var payload = new SourceMorphPayload("TestSlider", false, "bsd", deltas.Length, deltas);
+            var morphs = new MorphSet("low", "high", true, SliderCount: 1,
+                ReusableSourceMorphPayloads: new Dictionary<string, SourceMorphPayloadVariants>
+                {
+                    ["TestSlider"] = new(payload)
+                });
+            var output = await ExportAsync(root, new ImportedArmor(root, [nif], [], [], []),
+                new PluginAnalysisResult([], [], ""), new TextureSummary(0, [], [], []), morphs: morphs);
+
+            foreach (var name in new[] { "morphs.json", "conversion-manifest.json" })
+            {
+                var path = Path.Combine(output, name);
+                Assert.True(new FileInfo(path).Length < 30_000, name);
+                using var json = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+                var summary = name == "morphs.json" ? json.RootElement : json.RootElement.GetProperty("Morphs");
+                Assert.Equal(1, summary.GetProperty("SliderCount").GetInt32());
+                var low = summary.GetProperty("ReusableSourceMorphPayloads").GetProperty("TestSlider").GetProperty("LowWeight");
+                Assert.Equal(deltas.Length, low.GetProperty("DeltaCount").GetInt32());
+                Assert.False(low.TryGetProperty("Deltas", out _));
+            }
+            Assert.Same(deltas, payload.Deltas);
+            Assert.Equal((1f, 2f, 3f), payload.Deltas[0]);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void PluginVerification_AcceptsRepeatedNormalizedSourceReports()
+    {
+        var plan = new PluginRewritePlan(new Dictionary<string, string>(), new Dictionary<string, string>(), [], [], 0);
+        var reports = new[]
+        {
+            new NifSupportReport("meshes/Armor.nif", "supported", "test", 3, []),
+            new NifSupportReport("meshes\\armor.nif", "unsupported", "missing-header", null, [])
+        };
+
+        var result = GetMethod("BuildPluginRewriteVerificationReport").Invoke(null,
+            [plan, new PluginAnalysisResult([], [], ""), Path.GetTempPath(),
+             new HashSet<string>(), Array.Empty<string>(),
+             new Dictionary<string, IReadOnlyList<string>>(), Array.Empty<string>(), reports]);
+
+        Assert.NotNull(result);
+    }
+
+    [Fact]
     public async Task Analysis_ExcludesConflictingPluginIdentitiesAndDeduplicatesIdenticalPaths()
     {
         var root = CreateRoot();
@@ -476,14 +529,14 @@ public sealed class ConversionPerformanceRegressionTests
 
     private static async Task<string> ExportAsync(
         string root, ImportedArmor armor, PluginAnalysisResult pluginAnalysis, TextureSummary textures,
-        BatchPluginExportContext? context = null)
+        BatchPluginExportContext? context = null, MorphSet? morphs = null)
     {
         var output = Path.Combine(root, "output");
         var result = await new LocalExportService().ExportAsync(
             new ConversionRequest(root, "CBBE", output, GenerateBodySlideFiles: false) { BatchPluginExportContext = context },
             armor, new MeshAnalysis("plate", false, 1),
             new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>()),
-            new MorphSet("low", "high", true), new PhysicsConfig("none"),
+            morphs ?? new MorphSet("low", "high", true), new PhysicsConfig("none"),
             new ClippingReport(false, [], []), new CorrectionResult(false, "not-required"),
             new BodySlideProject("Armor", "CBBE", [], "<BodySlideProject/>"),
             pluginAnalysis, textures, new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0),

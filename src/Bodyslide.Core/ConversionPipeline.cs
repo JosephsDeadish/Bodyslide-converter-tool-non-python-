@@ -22026,7 +22026,7 @@ internal sealed class LocalExportService(
             Analysis = analysis,
             Converted = mesh,
             IslandRoutingExport = BuildIslandRoutingExportSummary(armor.MeshFiles, mesh.DeformationCage),
-            Morphs = morphs,
+            Morphs = BuildMorphDiagnosticSummary(morphs),
             Physics = physics,
             Clipping = clipping,
             Correction = correction,
@@ -22255,7 +22255,7 @@ internal sealed class LocalExportService(
         PluginRewriteVerificationReport? pluginRewriteVerification = null;
 
         var morphPath = Path.Combine(outputDirectory, "morphs.json");
-        await File.WriteAllTextAsync(morphPath, JsonSerializer.Serialize(morphs, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        await File.WriteAllTextAsync(morphPath, JsonSerializer.Serialize(BuildMorphDiagnosticSummary(morphs), new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         outputFiles.Add(morphPath);
 
         var physicsPath = Path.Combine(outputDirectory, "physics.json");
@@ -23704,6 +23704,36 @@ internal sealed class LocalExportService(
     internal sealed record SupportAssetDiscoveryResult(
         IReadOnlyList<string> PluginFiles,
         IReadOnlyList<string> MaterialFiles);
+
+    private static object BuildMorphDiagnosticSummary(MorphSet morphs)
+    {
+        static object? DescribePayload(SourceMorphPayload? payload) => payload is null ? null : new
+        {
+            payload.SliderName,
+            payload.IsHighWeight,
+            payload.PayloadKind,
+            payload.VertexCount,
+            DeltaCount = payload.Deltas.Count
+        };
+
+        return new
+        {
+            morphs.LowMorph,
+            morphs.HighMorph,
+            morphs.BodySlideCompatible,
+            morphs.SliderCount,
+            morphs.SourceBodyMatchRatio,
+            morphs.SourceMorphQuality,
+            ReusableSourceMorphPayloads = morphs.ReusableSourceMorphPayloads?.ToDictionary(
+                pair => pair.Key,
+                pair => new
+                {
+                    LowWeight = DescribePayload(pair.Value.LowWeight),
+                    HighWeight = DescribePayload(pair.Value.HighWeight)
+                }),
+            morphs.SourceAssetSupport
+        };
+    }
 
     private static async Task<IReadOnlyList<string>> CopySupportAssetsAsync(
         ImportedArmor armor,
@@ -32865,9 +32895,11 @@ internal sealed class LocalExportService(
             .ToDictionary(static group => group.PluginMeshPath, StringComparer.OrdinalIgnoreCase);
         var sourceSupportByMeshPath = (sourceNifSupport ?? [])
             .Where(static report => !string.IsNullOrWhiteSpace(report.MeshPath))
+            .GroupBy(static report => NormalizeComparablePath(report.MeshPath), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
-                static report => NormalizeComparablePath(report.MeshPath),
-                static report => report,
+                static group => group.Key,
+                static group => group.OrderByDescending(report =>
+                    report.Status.Equals("unsupported", StringComparison.OrdinalIgnoreCase)).First(),
                 StringComparer.OrdinalIgnoreCase);
         var addonByResolvedKey = pluginAnalysis.ArmorAddons
             .Where(static addon => addon.FormId != 0)
