@@ -145,11 +145,14 @@ public sealed class ConversionPerformanceRegressionTests
     }
 
     [Theory]
-    [InlineData("meshes")]
-    [InlineData("meshes/armor")]
-    public async Task BatchFromMeshSubfolder_PreservesSiblingMaterialPaths(string selectedFolder)
+    [InlineData("meshes", false)]
+    [InlineData("meshes/armor", false)]
+    [InlineData("meshes", true)]
+    [InlineData("meshes/armor", true)]
+    public async Task BatchFromMeshSubfolder_PreservesSiblingMaterialPaths(string selectedFolder, bool relativeInput)
     {
         var root = CreateRoot();
+        var originalDirectory = Environment.CurrentDirectory;
         try
         {
             var input = Path.Combine(root, "mod");
@@ -161,9 +164,10 @@ public sealed class ConversionPerformanceRegressionTests
             await File.WriteAllTextAsync(Path.Combine(materialDirectory, "armor.bgsm"), "material");
             await File.WriteAllTextAsync(Path.Combine(materialDirectory, "armor.bgem"), "effect");
             var output = Path.Combine(root, "output");
+            if (relativeInput) Environment.CurrentDirectory = input;
 
             var results = await new BatchConversionRunner(StandaloneConversionModules.CreateDefault())
-                .ConvertAsync(new ConversionRequest(Path.Combine(input, selectedFolder), "CBBE", output));
+                .ConvertAsync(new ConversionRequest(relativeInput ? selectedFolder : Path.Combine(input, selectedFolder), "CBBE", output));
 
             var result = Assert.Single(results);
             Assert.True(result.Success);
@@ -172,7 +176,11 @@ public sealed class ConversionPerformanceRegressionTests
             Assert.Equal("effect", await File.ReadAllTextAsync(
                 Path.Combine(result.OutputDirectory, "materials", "armor", "armor.bgem")));
         }
-        finally { Directory.Delete(root, true); }
+        finally
+        {
+            Environment.CurrentDirectory = originalDirectory;
+            Directory.Delete(root, true);
+        }
     }
 
     [Fact]
