@@ -23863,7 +23863,7 @@ internal sealed class LocalExportService(
     {
         if (Directory.Exists(sourcePath))
         {
-            return sourcePath;
+            return TryResolveModRootFromMeshesPath(sourcePath) ?? sourcePath;
         }
 
         if (File.Exists(sourcePath))

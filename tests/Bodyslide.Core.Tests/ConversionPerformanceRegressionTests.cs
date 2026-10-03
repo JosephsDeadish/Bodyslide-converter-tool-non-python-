@@ -144,6 +144,37 @@ public sealed class ConversionPerformanceRegressionTests
         finally { Directory.Delete(root, true); }
     }
 
+    [Theory]
+    [InlineData("meshes")]
+    [InlineData("meshes/armor")]
+    public async Task BatchFromMeshSubfolder_PreservesSiblingMaterialPaths(string selectedFolder)
+    {
+        var root = CreateRoot();
+        try
+        {
+            var input = Path.Combine(root, "mod");
+            var meshDirectory = Path.Combine(input, "meshes", "armor");
+            var materialDirectory = Path.Combine(input, "materials", "armor");
+            Directory.CreateDirectory(meshDirectory);
+            Directory.CreateDirectory(materialDirectory);
+            await File.WriteAllBytesAsync(Path.Combine(meshDirectory, "armor_0.nif"), new byte[64]);
+            await File.WriteAllTextAsync(Path.Combine(materialDirectory, "armor.bgsm"), "material");
+            await File.WriteAllTextAsync(Path.Combine(materialDirectory, "armor.bgem"), "effect");
+            var output = Path.Combine(root, "output");
+
+            var results = await new BatchConversionRunner(StandaloneConversionModules.CreateDefault())
+                .ConvertAsync(new ConversionRequest(Path.Combine(input, selectedFolder), "CBBE", output));
+
+            var result = Assert.Single(results);
+            Assert.True(result.Success);
+            Assert.Equal("material", await File.ReadAllTextAsync(
+                Path.Combine(result.OutputDirectory, "materials", "armor", "armor.bgsm")));
+            Assert.Equal("effect", await File.ReadAllTextAsync(
+                Path.Combine(result.OutputDirectory, "materials", "armor", "armor.bgem")));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Fact]
     public async Task SingleMeshImportsAndExports_KeepOwnSharedAndCompanionTexturesWithoutPackWideCopies()
     {
