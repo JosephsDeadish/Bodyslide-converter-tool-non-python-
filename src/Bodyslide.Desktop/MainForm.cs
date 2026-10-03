@@ -74,6 +74,7 @@ public sealed class MainForm : Form
     private readonly Button _clearLogButton;
     private readonly Button _copyCurrentViewButton;
     private readonly Button _inspectInputButton;
+    private readonly Button _inspectNowButton;
     private readonly Button _openInputButton;
     private readonly Button _openOutputButton;
     private readonly Button _openPreviewButton;
@@ -1525,6 +1526,28 @@ public sealed class MainForm : Form
         _inspectListView.Columns.Add("Property", 200);
         _inspectListView.Columns.Add("Value", -2);
         _inspectTabPage.Controls.Add(_inspectListView);
+        var inspectActions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            Padding = new Padding(6),
+        };
+        _inspectNowButton = new Button
+        {
+            Name = "inspectNowButton",
+            Text = "Inspect now",
+            AutoSize = true,
+            MinimumSize = new Size(130, 36),
+        };
+        _inspectNowButton.Click += async (_, _) => await InspectInputAsync(showDialogs: true, switchToInspectTab: true, automaticTrigger: false);
+        inspectActions.Controls.Add(_inspectNowButton);
+        inspectActions.Controls.Add(new Label
+        {
+            Text = "Check the selected input before converting. Detailed diagnostics are in Log.",
+            AutoSize = true,
+            Margin = new Padding(8, 10, 3, 3),
+        });
+        _inspectTabPage.Controls.Add(inspectActions);
         _resultsTabControl.TabPages.Add(_inspectTabPage);
         _summaryTabPage = new TabPage(DesktopSmokeTestContract.SummaryTabTitle) { Name = "summaryTabPage" };
         _summaryListView = new ListView
@@ -1618,7 +1641,7 @@ public sealed class MainForm : Form
         };
         _readinessListView.Columns.Add("Area", 180);
         _readinessListView.Columns.Add("Status", 90);
-        _readinessListView.Columns.Add("Details", -2);
+        _readinessListView.Columns.Add("What this means / what to do next", -2);
         _readinessTabPage.Controls.Add(_readinessListView);
         _resultsTabControl.TabPages.Add(_readinessTabPage);
         _artifactsTabPage = new TabPage(DesktopSmokeTestContract.FilesTabTitle) { Name = "artifactsTabPage" };
@@ -1697,7 +1720,8 @@ public sealed class MainForm : Form
         RefreshCustomProfilesList();
         UpdatePathActionStates();
         UpdateOutputHint();
-        ClearInspectionTab("Select an input, then click “Inspect input now” (next to the Input source) to preview body detection, mesh analysis, and skeleton compatibility.");
+        ClearInspectionTab("Select an input file, folder, or archive above, then click Inspect now here to check it before converting.");
+        PopulateSummaryTab(Array.Empty<DesktopWorkflowSummaryRow>());
         PopulateReportsTab(Array.Empty<DesktopWorkflowReportMetric>());
         PopulateCacheTab([], null);
         ShowPreviewStatus("Run a conversion to render preview-workbench.html in-app.");
@@ -2586,13 +2610,15 @@ public sealed class MainForm : Form
         _readinessListView.BeginUpdate();
         _readinessListView.Items.Clear();
 
-        foreach (var check in checks)
+        foreach (var check in DesktopUserPresentation.BuildReadiness(checks))
         {
             _readinessListView.Items.Add(new ListViewItem([check.Area, check.Status, check.Details]));
         }
 
         _readinessListView.EndUpdate();
         AutoSizeListViewColumns(_readinessListView, 180, 110, 420);
+        AppendLog("Readiness diagnostics:" + Environment.NewLine +
+            string.Join(Environment.NewLine, checks.Select(check => $"{check.Status}: {check.Area} — {check.Details}")));
     }
 
     private void RunSelfCheck()
@@ -3609,6 +3635,7 @@ public sealed class MainForm : Form
         }
 
         _activeConversion = CancellationTokenSource.CreateLinkedTokenSource(externalCancellationToken);
+        UpdateInspectActionState();
         try
         {
             if (!TryResolveSkeletonSupportPath(ReadOptionalPathValue(_skeletonNifTextBox.Text), out var skeletonNifPath))
@@ -3677,7 +3704,7 @@ public sealed class MainForm : Form
             }
             else
             {
-                _inspectInputButton.Enabled = InputPathExists();
+                UpdateInspectActionState();
                 _convertButton.Enabled = CanStartConversion();
             }
         }
@@ -4349,7 +4376,7 @@ public sealed class MainForm : Form
         _cancelButton.Enabled = isBusy && _activeConversion is not null;
         _clearLogButton.Enabled = !isBusy;
         _copyCurrentViewButton.Enabled = !isBusy;
-        _inspectInputButton.Enabled = !isBusy && InputPathExists();
+        UpdateInspectActionState(isBusy);
         _loadResultButton.Enabled = !isBusy;
         _inspectCacheButton.Enabled = !isBusy;
         _openInputButton.Enabled = !isBusy && InputPathExists();
@@ -4646,9 +4673,18 @@ public sealed class MainForm : Form
     private void PopulateSummaryTab(IReadOnlyList<DesktopWorkflowSummaryRow> summaryRows)
     {
         _summaryListView.Items.Clear();
-        foreach (var row in summaryRows)
+        if (summaryRows.Count == 0)
+        {
+            _summaryListView.Items.Add(new ListViewItem(["Summary", "No conversion output loaded."]));
+            _summaryListView.Items.Add(new ListViewItem(["What to do next", "Choose an input, use Inspect now in Inspect, select a TO body or preset, then start conversion."]));
+        }
+        foreach (var row in DesktopUserPresentation.BuildOverview(summaryRows))
         {
             _summaryListView.Items.Add(new ListViewItem([row.Property, row.Value]));
+        }
+        if (summaryRows.Count > 0)
+        {
+            _summaryListView.Items.Add(new ListViewItem(["Useful outputs", "Preview: check fit and clipping. Files: converted meshes, BodySlide files, and installation package. Next actions: checks to finish before installing."]));
         }
 
         AutoSizeListViewColumns(_summaryListView, 220, 420);
@@ -4665,6 +4701,8 @@ public sealed class MainForm : Form
         }
 
         var topActions = entries
+            .Where(entry => GetGuidancePriorityRank(entry.Priority) > 0 &&
+                !entry.Area.Equals("Final readiness", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(entry => GetGuidancePriorityRank(entry.Priority))
             .ThenBy(entry => entry.Area, StringComparer.OrdinalIgnoreCase)
             .ThenBy(entry => entry.Guidance, StringComparer.OrdinalIgnoreCase)
@@ -4674,7 +4712,7 @@ public sealed class MainForm : Form
         {
             var action = topActions[index];
             var label = $"Recommended action {index + 1}";
-            var value = $"{action.Area} — {action.Guidance}";
+            var value = $"{action.Area}: {action.Priority}. Open Next actions for the recommended steps and linked files.";
             _summaryListView.Items.Add(new ListViewItem([label, value]));
         }
 

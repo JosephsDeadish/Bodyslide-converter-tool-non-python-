@@ -130,6 +130,11 @@ public static class RuntimeReadinessReporter
 
         foreach (var body in BuiltInBodyMetadataCatalog.All.OrderBy(static body => body.Name, StringComparer.OrdinalIgnoreCase))
         {
+            if (!SkeletonFoundationAliasCatalog.TryResolve(body.SkeletonFoundation, out _))
+            {
+                issues.Add($"{body.Name}: skeleton foundation '{body.SkeletonFoundation}' does not resolve to a known rig family.");
+            }
+
             if (!BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
             {
                 issues.Add($"Built-in body '{body.Name}' is missing its technical profile.");

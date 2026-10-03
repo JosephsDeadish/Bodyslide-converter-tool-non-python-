@@ -7,7 +7,8 @@
       "XP32 Maximum Skeleton Special Extended",
       "XP32 Maximum Skeleton Extended",
       "XP32MSE",
-      "XP32 Skeleton"
+      "XP32 Skeleton",
+      "XPMSSE + COCO weighting"
     ]
   },
   {
@@ -15,7 +16,8 @@
     "aliases": [
       "Vanilla Skyrim",
       "Vanilla Body",
-      "Skyrim Vanilla"
+      "Skyrim Vanilla",
+      "Vanilla Skyrim skeleton"
     ]
   },
   {
@@ -30,7 +32,8 @@
     "canonical": "ube-extended",
     "aliases": [
       "UBE",
-      "Ultimate Body Enhancer"
+      "Ultimate Body Enhancer",
+      "XPMSSE + custom UBE bones"
     ]
   },
   {
@@ -49,7 +52,8 @@
       "Vanilla Beast",
       "Beast Vanilla",
       "Khajiit Vanilla",
-      "Argonian Vanilla"
+      "Argonian Vanilla",
+      "Beast-humanoid vanilla skeleton"
     ]
   },
   {
@@ -59,7 +63,8 @@
       "Goat Reborn",
       "Goatkin",
       "Goat Folk",
-      "Namira's Goat Reborn"
+      "Namira's Goat Reborn",
+      "Horned beast-humanoid skeleton"
     ]
   },
   {
@@ -70,7 +75,8 @@
       "Hagraven Humanoid",
       "Spriggan",
       "Spriggan Humanoid",
-      "Spriggan Body"
+      "Spriggan Body",
+      "Winged creature-humanoid skeleton"
     ]
   },
   {
@@ -87,14 +93,16 @@
     "canonical": "equine-humanoid",
     "aliases": [
       "Equine Humanoid",
-      "Horse Follower"
+      "Horse Follower",
+      "Equine beast-humanoid skeleton"
     ]
   },
   {
     "canonical": "avian-humanoid",
     "aliases": [
       "Avian Humanoid",
-      "Winged Follower"
+      "Winged Follower",
+      "Avian winged-humanoid skeleton"
     ]
   },
   {
@@ -104,7 +112,8 @@
       "Lamia Humanoid",
       "Naga Humanoid",
       "Serpentine Coil Skeleton",
-      "Lamia Coil Rig"
+      "Lamia Coil Rig",
+      "Serpentine beast-humanoid skeleton"
     ]
   },
   {
@@ -114,7 +123,8 @@
       "Spriggan Branch Body",
       "Verdant Spirit",
       "Branch Warden",
-      "Briar Skeleton"
+      "Briar Skeleton",
+      "Branch or vine creature-humanoid skeleton"
     ]
   },
   {
@@ -124,7 +134,8 @@
       "Dragonkin Humanoid",
       "Wyvern Humanoid",
       "Drake Humanoid",
-      "Dragonkin Wing Skeleton"
+      "Dragonkin Wing Skeleton",
+      "Draconic beast-humanoid skeleton"
     ]
   },
   {

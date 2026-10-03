@@ -5,6 +5,39 @@ namespace Bodyslide.Core.Tests;
 public sealed class CatalogIntegrityTests
 {
     [Fact]
+    public void BuiltInBodyMetadataCatalog_AllSkeletonFoundationsResolve()
+    {
+        foreach (var body in BuiltInBodyMetadataCatalog.All)
+        {
+            Assert.True(
+                SkeletonFoundationAliasCatalog.TryResolve(body.SkeletonFoundation, out var foundation),
+                $"{body.Name} has an unresolved skeleton foundation: {body.SkeletonFoundation}");
+            Assert.False(string.IsNullOrWhiteSpace(foundation));
+        }
+    }
+
+    [Theory]
+    [InlineData("COCO CBBE", "xpmsse")]
+    [InlineData("COCO UUNP", "xpmsse")]
+    [InlineData("UBE", "ube-extended")]
+    [InlineData("Vanilla", "vanilla-skyrim")]
+    [InlineData("Vanilla Beast", "beast-humanoid")]
+    [InlineData("Serpentine Humanoid", "serpentine-humanoid")]
+    [InlineData("Goat Humanoid", "horned-humanoid")]
+    [InlineData("Hagraven", "winged-humanoid")]
+    [InlineData("Spriggan", "spriggan-branch")]
+    [InlineData("Equine Humanoid", "equine-humanoid")]
+    [InlineData("Avian Humanoid", "avian-humanoid")]
+    [InlineData("Draconic Humanoid", "draconic-humanoid")]
+    public void BuiltInBodyMetadataCatalog_DescriptiveFoundationsPreserveRigFamily(
+        string bodyName, string expectedFoundation)
+    {
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet(bodyName, out var body));
+        Assert.True(SkeletonFoundationAliasCatalog.TryResolve(body.SkeletonFoundation, out var foundation));
+        Assert.Equal(expectedFoundation, foundation);
+    }
+
+    [Fact]
     public void BuiltInBodyMetadataCatalog_AliasesRoundTripAndPhysicsBonesStayDistinct()
     {
         foreach (var body in BuiltInBodyMetadataCatalog.All)
