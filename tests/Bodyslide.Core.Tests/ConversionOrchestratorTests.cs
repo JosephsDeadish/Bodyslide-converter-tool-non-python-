@@ -11263,6 +11263,77 @@ public sealed class BsdSliderDataTests
         }
     }
 
+    [Theory]
+    [InlineData(".osd", true, false)]
+    [InlineData(".xml", true, false)]
+    [InlineData(".json", true, false)]
+    [InlineData(".nif", false, false)]
+    [InlineData(".nif", true, true)]
+    public async Task BodySlideSourceSupport_RequiresAnExistingNifForReferenceEvidence(
+        string extension, bool createFile, bool expectedReferenceAssets)
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        try
+        {
+            var meshPath = Path.Combine(workingDirectory, "armor_0.nif");
+            var referencePath = Path.Combine(workingDirectory, "reference" + extension);
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            if (createFile)
+            {
+                await File.WriteAllTextAsync(referencePath, "support");
+            }
+
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [referencePath]);
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+            Assert.NotNull(resolved.SourceAssetSupport);
+            Assert.Equal(expectedReferenceAssets, resolved.SourceAssetSupport.HasReferenceAssets);
+            Assert.Equal(!expectedReferenceAssets,
+                resolved.SourceAssetSupport.MissingAssets!.Contains("reference-assets"));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BodySlideSourceSupport_UnreadableOspAndOsdRemainMissing(bool createFiles)
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        try
+        {
+            var meshPath = Path.Combine(workingDirectory, "armor_0.nif");
+            var ospPath = Path.Combine(workingDirectory, "armor.osp");
+            var osdPath = Path.Combine(workingDirectory, "armor.osd");
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            if (createFiles)
+            {
+                await File.WriteAllTextAsync(ospPath, "<SliderSet");
+                await File.WriteAllTextAsync(osdPath, "not an OSD payload");
+            }
+
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [ospPath, osdPath]);
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+            Assert.NotNull(resolved.SourceAssetSupport);
+            Assert.False(resolved.SourceAssetSupport.HasOsp);
+            Assert.False(resolved.SourceAssetSupport.HasOsdPayloads);
+            Assert.False(resolved.SourceAssetSupport.HasReferenceAssets);
+            Assert.Contains("osp", resolved.SourceAssetSupport.MissingAssets!);
+            Assert.Contains("morph-payloads", resolved.SourceAssetSupport.MissingAssets!);
+            Assert.True(resolved.SourceAssetSupport.UsedFallbackSliders);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task BodySlideSourceSupport_ReprobesUpdatedOspContents()
     {

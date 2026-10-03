@@ -249,8 +249,8 @@ internal static class BodySlideSourceProjectSupport
             var extension = Path.GetExtension(filePath);
             if (extension.Equals(".osp", StringComparison.OrdinalIgnoreCase))
             {
-                hasOsp = true;
                 var fromOsp = await TryReadOspAsync(filePath, cancellationToken);
+                hasOsp |= fromOsp.HasOsp;
                 sliders.AddRange(fromOsp.Sliders);
                 zapSliders.AddRange(fromOsp.ZapSliders);
             }
@@ -271,9 +271,9 @@ internal static class BodySlideSourceProjectSupport
             }
             else if (extension.Equals(".osd", StringComparison.OrdinalIgnoreCase))
             {
-                hasOsdPayloads = true;
                 if (TryReadOsdSliders(filePath, out var osdCandidates))
                 {
+                    hasOsdPayloads |= osdCandidates.Any(static candidate => candidate.ReusablePayload is not null);
                     foreach (var candidate in osdCandidates)
                     {
                         if (candidate.IsZap)
@@ -407,12 +407,7 @@ internal static class BodySlideSourceProjectSupport
 
     private static bool HasReferenceBodyAssets(IReadOnlyList<string> bodyReferenceFiles) =>
         bodyReferenceFiles.Any(static path =>
-        {
-            var extension = Path.GetExtension(path);
-            return !extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) &&
-                   !extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase) &&
-                   !extension.Equals(".tri", StringComparison.OrdinalIgnoreCase);
-        });
+            path.EndsWith(".nif", StringComparison.OrdinalIgnoreCase) && File.Exists(path));
 
     private static IEnumerable<SearchLocation> EnumerateLikelyBodySlideRoots(string sourceRoot, ImportedArmor armor)
     {
@@ -1124,7 +1119,7 @@ internal static class BodySlideSourceProjectSupport
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
-            return new BodySlideSourceSupport([], [], HasOsp: true, HasTriPayloads: false, HasBsdPayloads: false, HasOsdPayloads: false);
+            return new BodySlideSourceSupport([], [], HasOsp: false, HasTriPayloads: false, HasBsdPayloads: false, HasOsdPayloads: false);
         }
     }
 
