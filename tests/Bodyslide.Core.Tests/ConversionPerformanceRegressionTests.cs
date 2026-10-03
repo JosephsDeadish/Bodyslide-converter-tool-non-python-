@@ -11,6 +11,22 @@ namespace Bodyslide.Core.Tests;
 public sealed class ConversionPerformanceRegressionTests
 {
     [Fact]
+    public void FixtureWriters_ReturnCanonicalPathsForNestedAssets()
+    {
+        var root = CreateRoot();
+        try
+        {
+            Assert.Equal(Path.Combine(root, "plugins", "Armor.esp"),
+                WritePlugin(root, "plugins/Armor.esp"));
+            Assert.Equal(Path.Combine(root, "textures", "armor.dds"),
+                WriteTexture(root, "textures/armor.dds"));
+            Assert.Equal(Path.Combine(root, "meshes", "armor.nif"),
+                WriteTextureNif(root, "meshes/armor.nif", ["textures/armor.dds"]));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task MorphDiagnostics_DescribePayloadsWithoutDuplicatingVertexArrays()
     {
         var root = CreateRoot();
@@ -469,7 +485,7 @@ public sealed class ConversionPerformanceRegressionTests
 
     private static string WritePlugin(string root, string relativePath)
     {
-        var path = Path.Combine(root, relativePath);
+        var path = Path.GetFullPath(Path.Combine(root, relativePath));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var meshPath = Encoding.ASCII.GetBytes("meshes/armor_0.nif\0");
         var bytes = new byte[24 + 24 + 6 + meshPath.Length];
@@ -486,7 +502,7 @@ public sealed class ConversionPerformanceRegressionTests
 
     private static string WriteTexture(string root, string relativePath)
     {
-        var path = Path.Combine(root, relativePath);
+        var path = Path.GetFullPath(Path.Combine(root, relativePath));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllBytes(path, LocalExportService.BuildSolidColorDds(0, 0, 0, 255));
         return path;
@@ -507,7 +523,7 @@ public sealed class ConversionPerformanceRegressionTests
                 writer.Write(bytes);
             }
         }
-        var path = Path.Combine(root, relativePath);
+        var path = Path.GetFullPath(Path.Combine(root, relativePath));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using var stream = File.Create(path);
         using var header = new BinaryWriter(stream, Encoding.UTF8);
