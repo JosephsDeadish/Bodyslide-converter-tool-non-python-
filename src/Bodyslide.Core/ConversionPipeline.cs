@@ -38,6 +38,7 @@ public sealed record ConversionRequest(
     internal string? BatchOutputNamespace { get; init; }
     internal string? BatchBodySlideProjectName { get; init; }
     internal BatchPluginExportContext? BatchPluginExportContext { get; init; }
+    internal bool DeferZipCreation { get; init; }
 }
 
 internal sealed class BatchPluginExportContext : IDisposable
@@ -46,6 +47,27 @@ internal sealed class BatchPluginExportContext : IDisposable
     internal Dictionary<string, string> RewriteMappings { get; } = new(StringComparer.OrdinalIgnoreCase);
     internal IReadOnlyList<string> PluginFiles { get; init; } = [];
     internal IReadOnlyList<string> MeshFiles { get; init; } = [];
+    internal LocalExportService.SupportAssetDiscoveryResult? SupportAssets { get; init; }
+    internal IReadOnlyList<string>? ImportExcludedDirectories { get; init; }
+    private readonly ConcurrentDictionary<string, Lazy<IReadOnlyList<string>>> importSupportSnapshots = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Lazy<bool>> pluginTextureSwapEvidence = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+    internal bool HasPluginTextureSwaps(string plugin, Func<bool> scan) =>
+        pluginTextureSwapEvidence.GetOrAdd(Path.GetFullPath(plugin), _ => new Lazy<bool>(scan)).Value;
+
+    internal IReadOnlyList<string> GetImportSupportFiles(
+        string root, IReadOnlyList<string>? excludedDirectories, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var exclusions = ImportExcludedDirectories ?? excludedDirectories;
+        var key = Path.GetFullPath(root) + "\0" + string.Join("\0",
+            (exclusions ?? []).Select(Path.GetFullPath).OrderBy(path => path, StringComparer.Ordinal));
+        return importSupportSnapshots.GetOrAdd(key, _ => new Lazy<IReadOnlyList<string>>(() =>
+            BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
+                root, exclusions, cancellationToken, maxTraversalDepth: 16, includeBodySlideSupport: true))).Value;
+    }
 
     internal async Task<T> ExecuteAsync<T>(Func<Task<T>> export, CancellationToken cancellationToken)
     {
@@ -7421,7 +7443,8 @@ public sealed class ConversionOrchestrator(
                         "voxel-collision",
                         "pose-simulation",
                         "physics-build",
-                        "bodyslide-project")
+                        "bodyslide-project"),
+                    ["export"] = GetStageDuration("export")
                 };
 
                 foreach (var phase in phaseDurationsMs
@@ -7476,7 +7499,8 @@ public sealed class ConversionOrchestrator(
                         "voxel-collision",
                         "pose-simulation",
                         "physics-build",
-                        "bodyslide-project")
+                        "bodyslide-project"),
+                    ["export"] = GetStageDuration("export")
                 };
 
                 var topStages = stageDurationsMs
@@ -7508,7 +7532,10 @@ public sealed class ConversionOrchestrator(
 
             var excludedScanDirectories = BuildExcludedScanDirectories(normalized.Request);
             ReportStage("Importing input", 1);
-            armor = await ProfileStageAsync("import", () => importer.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories));
+            armor = await ProfileStageAsync("import", () => importer is LocalArmorImportService localImporter
+                ? localImporter.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories,
+                    normalized.Request.BatchPluginExportContext)
+                : importer.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories));
             if (normalized.Request.BatchPluginExportContext is { } batchPluginContext)
             {
                 armor = armor with { BatchPluginFiles = batchPluginContext.PluginFiles, BatchMeshFiles = batchPluginContext.MeshFiles };
@@ -8018,13 +8045,45 @@ public sealed class ConversionOrchestrator(
                 JsonSerializer.Serialize(BuildTimingReport(totalStopwatch.ElapsedMilliseconds), new JsonSerializerOptions { WriteIndented = true }),
                 cancellationToken);
             steps.Add("timings:conversion-timings.json");
-            Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync() => exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, raceCompatibility, voxelResult, cancellationToken);
+            var exportStopwatch = Stopwatch.StartNew();
+            Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync() => exporter.ExportAsync(normalized.Request with { DeferZipCreation = normalized.Request.OutputZip }, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, raceCompatibility, voxelResult, cancellationToken);
             var export = normalized.Request.BatchPluginExportContext is { PluginFiles.Count: > 0 } batchExport
                 ? await batchExport.ExecuteAsync(ExportAsync, cancellationToken)
                 : await ExportAsync();
+            void FinalizeTimings()
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                stageDurationsMs["export"] = exportStopwatch.ElapsedMilliseconds;
+                var totalDurationMs = totalStopwatch.ElapsedMilliseconds;
+                steps.RemoveAll(step => step.StartsWith("stage-ms:", StringComparison.Ordinal) ||
+                    step.StartsWith("stage-top:", StringComparison.Ordinal) ||
+                    step.StartsWith("phase-ms:", StringComparison.Ordinal) ||
+                    step.StartsWith("phase-top:", StringComparison.Ordinal) ||
+                    step.StartsWith("pipeline-total-ms:", StringComparison.Ordinal));
+                AppendPipelineTimingSteps(totalDurationMs);
+                var finalTimingJson = JsonSerializer.Serialize(
+                    BuildTimingReport(totalDurationMs), new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(timingPath, finalTimingJson);
+                if (normalized.Request.OutputZip)
+                    // Install archives omit diagnostic JSON; retain the identical final report as a log.
+                    File.WriteAllText(Path.Combine(export.OutputDirectory, "conversion-timings.log"), finalTimingJson);
+                var diagnosticsDirectory = export.OutputDirectory.TrimEnd(
+                    Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".reports";
+                if (Directory.Exists(diagnosticsDirectory))
+                    File.WriteAllText(Path.Combine(diagnosticsDirectory, "conversion-timings.json"), finalTimingJson);
+            }
             steps.Add($"exported:{export.OutputDirectory}");
 
             var outputFiles = export.OutputFiles.ToList();
+            if (normalized.Request.OutputZip)
+            {
+                outputFiles.Add(BatchConversionRunner.CreateCombinedBatchZip(export.OutputDirectory, FinalizeTimings));
+                outputFiles.Add(Path.Combine(export.OutputDirectory, "conversion-timings.log"));
+            }
+            else
+            {
+                FinalizeTimings();
+            }
             outputFiles.Add(timingPath);
             return new ConversionResult(true, export.OutputDirectory, steps, outputFiles);
         }
@@ -8759,9 +8818,18 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             .Select(group => group.Key)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2);
+        var batchSupportAssets = LocalExportService.DiscoverSupportAssets(
+            sourceDirectory, rootOutput, request.SharedPluginOutputDirectory, cancellationToken);
         using var batchPluginExportContext = new BatchPluginExportContext
         {
-            PluginFiles = SourceScanEnumerator.EnumerateFiles(sourceDirectory, [".esp", ".esm", ".esl"], [rootOutput], cancellationToken),
+            PluginFiles = batchSupportAssets.PluginFiles,
+            SupportAssets = batchSupportAssets,
+            ImportExcludedDirectories = new[]
+            {
+                Path.GetFullPath(rootOutput),
+                Path.GetFullPath(ExecutionEnvironment.GetDefaultOutputRoot())
+            }.Concat(string.IsNullOrWhiteSpace(request.SharedPluginOutputDirectory)
+                ? [] : new[] { Path.GetFullPath(request.SharedPluginOutputDirectory) }).ToArray(),
             MeshFiles = meshFiles.SelectMany(path =>
             {
                 var stem = Path.GetFileNameWithoutExtension(path);
@@ -8855,14 +8923,14 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         return names;
     }
 
-    internal static string CreateCombinedBatchZip(string rootOutput)
+    internal static string CreateCombinedBatchZip(string rootOutput, Action? finalizeTimings = null)
     {
         var zipPath = rootOutput.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
-        CreatePackageZip(rootOutput, zipPath);
+        CreatePackageZip(rootOutput, zipPath, finalizeTimings);
         return zipPath;
     }
 
-    private static void CreatePackageZip(string rootOutput, string zipPath)
+    private static void CreatePackageZip(string rootOutput, string zipPath, Action? finalizeTimings = null)
     {
         if (File.Exists(zipPath))
         {
@@ -8874,12 +8942,19 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         {
             var relativePath = Path.GetRelativePath(rootOutput, file).Replace('\\', '/');
             if (Path.GetExtension(file).Equals(".json", StringComparison.OrdinalIgnoreCase) ||
+                (finalizeTimings is not null && relativePath.Equals("conversion-timings.log", StringComparison.OrdinalIgnoreCase)) ||
                 relativePath.StartsWith(".reports/", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
             archive.CreateEntryFromFile(file, relativePath, CompressionLevel.Optimal);
+        }
+        if (finalizeTimings is not null)
+        {
+            finalizeTimings();
+            archive.CreateEntryFromFile(Path.Combine(rootOutput, "conversion-timings.log"),
+                "conversion-timings.log", CompressionLevel.Optimal);
         }
     }
 
@@ -11038,6 +11113,11 @@ internal sealed class LocalArmorImportService : IArmorImportService
         PluginFileExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 
     public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken, IReadOnlyList<string>? excludedDirectories = null)
+        => ImportAsync(inputPath, cancellationToken, excludedDirectories, null);
+
+    internal Task<ImportedArmor> ImportAsync(
+        string inputPath, CancellationToken cancellationToken, IReadOnlyList<string>? excludedDirectories,
+        BatchPluginExportContext? batchContext)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var fullInputPath = Path.GetFullPath(inputPath);
@@ -11071,8 +11151,9 @@ internal sealed class LocalArmorImportService : IArmorImportService
         else
         {
             meshFiles = EnumerateFiles(sourcePath, [".nif"], excludedDirectories, cancellationToken);
-            supportFiles = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
-                supportScanRoot, excludedDirectories, cancellationToken, maxTraversalDepth: 16, includeBodySlideSupport: true);
+            supportFiles = batchContext?.GetImportSupportFiles(supportScanRoot, excludedDirectories, cancellationToken)
+                ?? BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
+                    supportScanRoot, excludedDirectories, cancellationToken, maxTraversalDepth: 16, includeBodySlideSupport: true);
         }
         IReadOnlyList<string> SelectSupportFiles(params string[] extensions) =>
             supportFiles
@@ -11121,6 +11202,13 @@ internal sealed class LocalArmorImportService : IArmorImportService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         cancellationToken.ThrowIfCancellationRequested();
+        if (File.Exists(sourcePath) && Path.GetExtension(sourcePath).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            textureFiles = SelectReferencedTextures(
+                supportScanRoot, meshFiles.Concat(bodyReferenceFiles.Where(path =>
+                    Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))),
+                textureFiles, supportFiles, batchContext, cancellationToken);
+        }
         var customBodyProfiles = CustomBodyProfileSupport.LoadProfiles(
             SelectSupportFiles(".json")
                 .Where(CustomBodyProfileSupport.IsProfileFile)
@@ -11136,6 +11224,162 @@ internal sealed class LocalArmorImportService : IArmorImportService
             temporaryWorkspace,
             DetectWeightVariantPairs(meshFiles),
             customBodyProfiles));
+    }
+
+    private static IReadOnlyList<string> SelectReferencedTextures(
+        string root, IEnumerable<string> meshes, IReadOnlyList<string> textures,
+        IReadOnlyList<string> supportFiles, BatchPluginExportContext? batchContext, CancellationToken cancellationToken)
+    {
+        if (textures.Count == 0) return textures;
+        // These sources can redirect textures outside the NIF's shader sets.
+        if (supportFiles.Any(path => new[] { ".bgsm", ".bgem", ".pex", ".osp", ".osd" }
+                .Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)))
+            return textures;
+
+        foreach (var plugin in supportFiles.Where(IsPluginFile).Concat(batchContext?.PluginFiles ?? []).Distinct())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                bool Scan() => File.ReadAllBytes(plugin).AsSpan().IndexOf("TXST"u8) >= 0;
+                if (batchContext?.HasPluginTextureSwaps(plugin, Scan) ?? Scan()) return textures;
+            }
+            catch (IOException) { return textures; }
+        }
+
+        var referencedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var mesh in meshes.Distinct(OperatingSystem.IsWindows()
+                     ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (new FileInfo(mesh).Length > 64 * 1024 * 1024 ||
+                    !TryReadCompleteTexturePaths(File.ReadAllBytes(mesh), referencedPaths))
+                    return textures;
+            }
+            catch (IOException) { return textures; }
+        }
+
+        var textureLookup = textures.GroupBy(path => Path.GetRelativePath(root, path).Replace('\\', '/'),
+                StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+        if (referencedPaths.Count == 0 || referencedPaths.Any(path => !textureLookup.ContainsKey(path)))
+            return textures;
+
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var companionFamilies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var reference in referencedPaths)
+        {
+            selected.UnionWith(textureLookup[reference]);
+            var stem = Path.GetFileNameWithoutExtension(reference);
+            foreach (var suffix in new[] { "_d", "_n", "_s", "_sk", "_p", "_g", "_r", "_m" })
+            {
+                if (!stem.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) continue;
+                stem = stem[..^suffix.Length];
+                break;
+            }
+            companionFamilies.Add((Path.GetDirectoryName(reference)?.Replace('\\', '/') ?? "") + "/" + stem);
+        }
+
+        foreach (var (relative, files) in textureLookup)
+        {
+            var family = (Path.GetDirectoryName(relative)?.Replace('\\', '/') ?? "") + "/" +
+                Path.GetFileNameWithoutExtension(relative);
+            if (companionFamilies.Any(stem => family.Equals(stem, StringComparison.OrdinalIgnoreCase) ||
+                    family.StartsWith(stem + "_", StringComparison.OrdinalIgnoreCase)))
+                selected.UnionWith(files);
+        }
+
+        return textures.Where(selected.Contains).ToArray();
+    }
+
+    private static bool TryReadCompleteTexturePaths(byte[] bytes, ISet<string> paths)
+    {
+        var allowedTypes = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "NiNode", "BSFadeNode", "NiTriShape", "NiTriShapeData", "BSTriShape", "BSDynamicTriShape",
+            "NiSkinInstance", "BSDismemberSkinInstance", "NiSkinData", "NiSkinPartition",
+            "BSLightingShaderProperty", "BSShaderTextureSet", "NiAlphaProperty", "BSXFlags"
+        };
+        try
+        {
+            using var stream = new MemoryStream(bytes, writable: false);
+            using var reader = new BinaryReader(stream, Encoding.UTF8);
+            var lineEnd = Array.IndexOf(bytes, (byte)'\n');
+            if (lineEnd < 0 || !Encoding.ASCII.GetString(bytes, 0, lineEnd)
+                    .StartsWith("Gamebryo File Format, Version 20.2.0.7", StringComparison.Ordinal))
+                return false;
+            stream.Position = lineEnd + 1;
+            if (reader.ReadUInt32() != 0x14020007 || reader.ReadByte() != 1 || reader.ReadUInt32() != 12)
+                return false;
+            var blockCount = reader.ReadUInt32();
+            var bethesdaVersion = reader.ReadUInt32();
+            if (blockCount == 0 || blockCount > 100_000 || bethesdaVersion is not (83 or 100)) return false;
+            for (var i = 0; i < 3; i++)
+            {
+                var length = reader.ReadByte();
+                if (reader.ReadBytes(length).Length != length) return false;
+            }
+            string ReadString()
+            {
+                var length = reader.ReadUInt32();
+                if (length > 4096 || length > stream.Length - stream.Position) throw new InvalidDataException();
+                return Encoding.UTF8.GetString(reader.ReadBytes((int)length));
+            }
+            var typeCount = reader.ReadUInt16();
+            var types = new string[typeCount];
+            for (var i = 0; i < typeCount; i++)
+            {
+                types[i] = ReadString();
+                if (!allowedTypes.Contains(types[i])) return false;
+            }
+            var indices = new ushort[blockCount];
+            for (var i = 0; i < indices.Length; i++)
+            {
+                indices[i] = reader.ReadUInt16();
+                if (indices[i] >= typeCount) return false;
+            }
+            var sizes = new uint[blockCount];
+            for (var i = 0; i < sizes.Length; i++) sizes[i] = reader.ReadUInt32();
+            var stringCount = reader.ReadUInt32();
+            reader.ReadUInt32();
+            if (stringCount > 100_000) return false;
+            for (var i = 0; i < stringCount; i++) ReadString();
+            var groupCount = reader.ReadUInt32();
+            if (groupCount > blockCount) return false;
+            for (var i = 0; i < groupCount; i++) reader.ReadUInt32();
+            var hasTextureSet = false;
+            for (var i = 0; i < sizes.Length; i++)
+            {
+                var end = stream.Position + sizes[i];
+                if (end > stream.Length) return false;
+                if (types[indices[i]] == "BSShaderTextureSet")
+                {
+                    hasTextureSet = true;
+                    var textureCount = reader.ReadUInt32();
+                    if (textureCount > 64) return false;
+                    for (var slot = 0; slot < textureCount; slot++)
+                    {
+                        var path = ReadString().Replace('\\', '/').Trim();
+                        if (path.Length == 0) continue;
+                        if (path.StartsWith('/') || path.Contains(':') ||
+                            path.Split('/').Any(part => part is "." or "..") ||
+                            !new[] { ".dds", ".png", ".tga" }.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+                            return false;
+                        paths.Add(path.StartsWith("textures/", StringComparison.OrdinalIgnoreCase)
+                            ? path : "textures/" + path);
+                    }
+                    if (stream.Position != end) return false;
+                }
+                stream.Position = end;
+            }
+            return hasTextureSet;
+        }
+        catch (Exception exception) when (exception is IOException or ArgumentException or OverflowException)
+        {
+            return false;
+        }
     }
 
     private static IReadOnlyList<string> EnumerateEmbeddedBodySlideSupportFiles(
@@ -18737,6 +18981,39 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
     }
 }
 
+internal static class PluginSourceIdentity
+{
+    internal sealed record Resolution(
+        IReadOnlyList<string> SafePaths,
+        IReadOnlyList<string> AmbiguousNames,
+        IReadOnlyList<string> Warnings);
+
+    internal static Resolution Resolve(IEnumerable<string> paths)
+    {
+        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var groups = paths.Select(Path.GetFullPath).Distinct(pathComparer)
+            .GroupBy(path => Path.GetFileName(path).Trim(), StringComparer.OrdinalIgnoreCase);
+        var safePaths = new List<string>();
+        var ambiguousNames = new List<string>();
+        var warnings = new List<string>();
+        foreach (var group in groups)
+        {
+            var alternatives = group.ToArray();
+            if (alternatives.Length == 1)
+            {
+                safePaths.Add(alternatives[0]);
+                continue;
+            }
+
+            ambiguousNames.Add(group.Key!);
+            warnings.Add($"Ambiguous plugin identity '{group.Key}': different source paths [{string.Join("; ", alternatives)}]. "
+                + "Copying and automated rewriting are disabled. Select one compatible plugin variant, remove the alternatives from the input, and review its master chain in xEdit before converting again.");
+        }
+
+        return new Resolution(safePaths, ambiguousNames, warnings);
+    }
+}
+
 /// <summary>
 /// Scans .esp/.esm/.esl plugin files for NIF mesh path references and generates guidance
 /// on which ArmorAddon records need to be updated to point at the converted meshes.
@@ -18777,10 +19054,12 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         var scannedPluginLabels = new List<string>();
         var armorAddons         = new List<PluginArmorAddon>();
         var armorRecords        = new List<PluginArmorRecord>();
-        var ambiguousPlugins    = new List<string>();
+        var identities = PluginSourceIdentity.Resolve(pluginFiles);
+        var ambiguousPlugins    = identities.AmbiguousNames.ToList();
         var scannedPlugins      = new List<ScannedPluginContext>();
+        scannedPluginLabels.AddRange(identities.AmbiguousNames.Select(name => $"{name} [AMBIGUOUS; conflicting source paths]"));
 
-        foreach (var pluginFile in pluginFiles)
+        foreach (var pluginFile in identities.SafePaths)
         {
             scannedPlugins.Add(await ScanPluginAsync(pluginFile, cancellationToken));
         }
@@ -18813,7 +19092,8 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             }
         }
 
-        var guidance = BuildPatchGuidance(armorAddons, targetBody, pluginFiles.Count, ambiguousPlugins);
+        var guidance = BuildPatchGuidance(armorAddons, targetBody, identities.SafePaths.Count + identities.AmbiguousNames.Count, ambiguousPlugins)
+            + Environment.NewLine + string.Join(Environment.NewLine, identities.Warnings);
         return new PluginAnalysisResult(
             scannedPluginLabels,
             armorAddons,
@@ -21709,6 +21989,24 @@ internal sealed class LocalExportService(
             Path.GetFileNameWithoutExtension(armor.MeshFiles[0]));
         var outputDirectory = Path.GetFullPath(request.OutputDirectory ?? defaultOutput);
         Directory.CreateDirectory(outputDirectory);
+        var supportAssets = request.BatchPluginExportContext?.SupportAssets ?? DiscoverSupportAssets(
+            armor.SourcePath, outputDirectory, request.SharedPluginOutputDirectory, cancellationToken);
+        var sourcePluginIdentities = PluginSourceIdentity.Resolve(armor.BatchPluginFiles ?? supportAssets.PluginFiles);
+        supportAssets = supportAssets with { PluginFiles = sourcePluginIdentities.SafePaths };
+        if (sourcePluginIdentities.AmbiguousNames.Count > 0)
+        {
+            var conflictingNames = sourcePluginIdentities.AmbiguousNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            bool IsConflictingRecord(string label) => conflictingNames.Contains(label.Split(" [", 2)[0].Trim());
+            pluginAnalysis = pluginAnalysis with
+            {
+                ArmorAddons = pluginAnalysis.ArmorAddons.Where(addon => !IsConflictingRecord(addon.RecordType)).ToList(),
+                ArmorRecords = pluginAnalysis.ArmorRecords?.Where(record => !IsConflictingRecord(record.RecordType)).ToList(),
+                AmbiguousPlugins = (pluginAnalysis.AmbiguousPlugins ?? []).Concat(conflictingNames)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                PatchGuidance = pluginAnalysis.PatchGuidance + Environment.NewLine
+                    + string.Join(Environment.NewLine, sourcePluginIdentities.Warnings)
+            };
+        }
         mesh = mesh with { DeformationCage = BuildExportDeformationCage(armor.MeshFiles, mesh.DeformationCage) };
 
         var outputFiles = new List<string>();
@@ -21822,15 +22120,6 @@ internal sealed class LocalExportService(
 
         // Carry source support assets (textures, material configs, physics configs, plugins, body refs)
         // into the output package so converted outputs stay mod-ready.
-        var supportAssets = DiscoverSupportAssets(
-            armor.SourcePath,
-            outputDirectory,
-            request.SharedPluginOutputDirectory,
-            cancellationToken);
-        if (armor.BatchPluginFiles is { } batchSourcePlugins)
-        {
-            supportAssets = supportAssets with { PluginFiles = batchSourcePlugins };
-        }
         var assetOutputDirectory = outputDirectory;
         var copiedSupportAssets = await CopySupportAssetsAsync(
             armor,
@@ -21953,10 +22242,16 @@ internal sealed class LocalExportService(
                 voxelResult.HasPenetrations,
                 poseSimulation.TotalPosesAtRisk);
         qualityWarnings = [.. qualityWarnings, .. BuildNifSupportWarnings(sourceNifSupport, "source"), .. BuildNifSupportWarnings(convertedNifSupport, "converted")];
-        var pluginPatchWarnings = new List<string>();
+        var pluginPatchWarnings = sourcePluginIdentities.Warnings.ToList();
         var patchVerificationPaths = new List<string>();
         var patchMasterValidationExpectations = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var pluginInstallHints = new List<PluginInstallHint>();
+        foreach (var ambiguousName in sourcePluginIdentities.AmbiguousNames)
+        {
+            pluginInstallHints.Add(BuildPluginInstallHint(
+                ambiguousName, [], null, manualReviewRequired: true,
+                manualReviewReason: "Different source paths use this plugin filename. Select one compatible variant, remove the alternatives, and review the master chain in xEdit before converting again."));
+        }
         PluginRewriteVerificationReport? pluginRewriteVerification = null;
 
         var morphPath = Path.Combine(outputDirectory, "morphs.json");
@@ -22189,7 +22484,7 @@ internal sealed class LocalExportService(
                             [],
                             null,
                             manualReviewRequired: true,
-                            manualReviewReason: "Automated rewrite was skipped because the plugin uses an ambiguous ESL/ESPFE layout and should be reviewed in xEdit before installing any override patch."));
+                            manualReviewReason: "Automated rewrite was skipped because the plugin identity or ESL/ESPFE layout is ambiguous. Resolve the source alternatives and review in xEdit before installing any override patch."));
                     }
 
                 }
@@ -22891,7 +23186,7 @@ internal sealed class LocalExportService(
 
         await BatchConversionRunner.CopyRootJsonReportsToDiagnosticsDirectoryAsync(outputDirectory, outputFiles, cancellationToken);
 
-        if (request.OutputZip)
+        if (request.OutputZip && !request.DeferZipCreation)
         {
             var zipPath = BatchConversionRunner.CreateCombinedBatchZip(outputDirectory);
             outputFiles.Add(zipPath);
@@ -23070,20 +23365,8 @@ internal sealed class LocalExportService(
 
             if (File.Exists(normalStubPath)) continue;
 
-            // Match the stub dimensions to the source diffuse so normal-map resolution
-            // aligns with the diffuse sheet rather than defaulting to 4×4.
-            byte[] stubBytes;
-            try
-            {
-                var sourceBytes = await File.ReadAllBytesAsync(texturePath, cancellationToken);
-                stubBytes = DdsTextureDerivation.TryReadDimensions(sourceBytes, out var sw, out var sh)
-                    ? BuildFlatNormalMapDds(sw, sh)
-                    : BuildFlatNormalMapDds();
-            }
-            catch (IOException)
-            {
-                stubBytes = BuildFlatNormalMapDds();
-            }
+            // Constant fallback maps have no detail to gain from matching diffuse resolution.
+            var stubBytes = BuildFlatNormalMapDds();
 
             var dir = Path.GetDirectoryName(normalStubPath);
             if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
@@ -23280,25 +23563,13 @@ internal sealed class LocalExportService(
             var destDir  = Path.GetDirectoryName(destDiffuse) ?? outputDirectory;
             var stemName = Path.GetFileNameWithoutExtension(destDiffuse);
 
-            // Read source dimensions once per diffuse texture so all stubs match it.
-            var w = 4; var h = 4;
-            if (File.Exists(texturePath))
-            {
-                try
-                {
-                    var srcBytes = await File.ReadAllBytesAsync(texturePath, cancellationToken);
-                    DdsTextureDerivation.TryReadDimensions(srcBytes, out w, out h);
-                }
-                catch (IOException) { w = 4; h = 4; }
-            }
-
             if (missingSpecularSet.Contains(fileName))
             {
                 var stubPath = Path.Combine(destDir, stemName + "_s.dds");
                 if (!File.Exists(stubPath))
                 {
                     Directory.CreateDirectory(destDir);
-                    await File.WriteAllBytesAsync(stubPath, BuildSpecularMapDds(w, h), cancellationToken);
+                    await File.WriteAllBytesAsync(stubPath, BuildSpecularMapDds(), cancellationToken);
                     specGenerated.Add(stubPath);
                 }
             }
@@ -23318,12 +23589,13 @@ internal sealed class LocalExportService(
                     {
                         try
                         {
-                            var normalBytes = await File.ReadAllBytesAsync(normalPath, cancellationToken);
-                            DdsTextureDerivation.TryDeriveHeightFromNormal(normalBytes, out derivedParallax);
+                            var normalBytes = await ReadDerivableDdsAsync(normalPath, cancellationToken);
+                            if (normalBytes is not null)
+                                DdsTextureDerivation.TryDeriveHeightFromNormal(normalBytes, out derivedParallax);
                         }
                         catch (IOException) { derivedParallax = null; }
                     }
-                    await File.WriteAllBytesAsync(stubPath, derivedParallax ?? BuildParallaxMapDds(w, h), cancellationToken);
+                    await File.WriteAllBytesAsync(stubPath, CompactConstantDds(derivedParallax) ?? BuildParallaxMapDds(), cancellationToken);
                     parallaxGenerated.Add(stubPath);
                 }
             }
@@ -23342,12 +23614,13 @@ internal sealed class LocalExportService(
                     {
                         try
                         {
-                            var diffuseBytes = await File.ReadAllBytesAsync(texturePath, cancellationToken);
-                            DdsTextureDerivation.TryDeriveGlowFromDiffuse(diffuseBytes, out derivedGlow);
+                            var diffuseBytes = await ReadDerivableDdsAsync(texturePath, cancellationToken);
+                            if (diffuseBytes is not null)
+                                DdsTextureDerivation.TryDeriveGlowFromDiffuse(diffuseBytes, out derivedGlow);
                         }
                         catch (IOException) { derivedGlow = null; }
                     }
-                    await File.WriteAllBytesAsync(stubPath, derivedGlow ?? BuildGlowMapDds(w, h), cancellationToken);
+                    await File.WriteAllBytesAsync(stubPath, CompactConstantDds(derivedGlow) ?? BuildGlowMapDds(), cancellationToken);
                     glowGenerated.Add(stubPath);
                 }
             }
@@ -23367,12 +23640,13 @@ internal sealed class LocalExportService(
                     {
                         try
                         {
-                            var specBytes = await File.ReadAllBytesAsync(specularPath, cancellationToken);
-                            DdsTextureDerivation.TryDeriveRoughnessFromSpecular(specBytes, out derivedRoughness);
+                            var specBytes = await ReadDerivableDdsAsync(specularPath, cancellationToken);
+                            if (specBytes is not null)
+                                DdsTextureDerivation.TryDeriveRoughnessFromSpecular(specBytes, out derivedRoughness);
                         }
                         catch (IOException) { derivedRoughness = null; }
                     }
-                    await File.WriteAllBytesAsync(stubPath, derivedRoughness ?? BuildRoughnessMapDds(w, h), cancellationToken);
+                    await File.WriteAllBytesAsync(stubPath, CompactConstantDds(derivedRoughness) ?? BuildRoughnessMapDds(), cancellationToken);
                     roughnessGenerated.Add(stubPath);
                 }
             }
@@ -23383,13 +23657,47 @@ internal sealed class LocalExportService(
                 if (!File.Exists(stubPath))
                 {
                     Directory.CreateDirectory(destDir);
-                    await File.WriteAllBytesAsync(stubPath, BuildSubsurfaceMapDds(w, h), cancellationToken);
+                    await File.WriteAllBytesAsync(stubPath, BuildSubsurfaceMapDds(), cancellationToken);
                     subsurfaceGenerated.Add(stubPath);
                 }
             }
         }
 
         return (specGenerated, parallaxGenerated, glowGenerated, roughnessGenerated, subsurfaceGenerated);
+    }
+
+    private static async Task<byte[]?> ReadDerivableDdsAsync(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = File.OpenRead(path);
+        var header = new byte[128];
+        var read = await stream.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, cancellationToken);
+        if (read < header.Length ||
+            !DdsTextureDerivation.TryReadDimensions(header, out var width, out var height) ||
+            BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(84, 4)) != 0 ||
+            BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(88, 4)) != 32)
+        {
+            return null;
+        }
+
+        var length = 128L + (long)width * height * 4;
+        if (length > stream.Length || length > int.MaxValue) return null;
+        var bytes = new byte[(int)length];
+        header.CopyTo(bytes, 0);
+        await stream.ReadExactlyAsync(bytes.AsMemory(128), cancellationToken);
+        return bytes;
+    }
+
+    private static byte[]? CompactConstantDds(byte[]? bytes)
+    {
+        if (bytes is null || bytes.Length < 132) return bytes;
+        var pixel = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(128, 4));
+        for (var offset = 132; offset + 4 <= bytes.Length; offset += 4)
+        {
+            if (BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset, 4)) != pixel)
+                return bytes;
+        }
+
+        return BuildSolidColorDds(bytes[128], bytes[129], bytes[130], bytes[131]);
     }
 
 

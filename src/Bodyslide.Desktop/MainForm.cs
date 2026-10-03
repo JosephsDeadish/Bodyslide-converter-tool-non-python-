@@ -3475,7 +3475,7 @@ public sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            AppendLog($"Conversion failed: {ex.Message}");
+            AppendLog($"Conversion failed: {ex}");
             _statusLabel.Text = "Conversion failed.";
             runtimeStressOutcome = "failed";
             MessageBox.Show(this, $"Conversion failed:\n{ex.Message}", "SlideSmith", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -3685,13 +3685,10 @@ public sealed class MainForm : Form
         {
             ClearInspectionTab($"Inspection failed: {ex.Message}");
             _statusLabel.Text = "Inspection failed.";
+            AppendLog($"Input inspection failed: {ex}");
             if (showDialogs)
             {
                 MessageBox.Show(this, $"Failed to inspect input:\n{ex.Message}", "Inspect input", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            else
-            {
-                AppendLog($"Input auto-inspection failed: {ex.Message}");
             }
         }
         finally
@@ -6032,6 +6029,13 @@ public sealed class MainForm : Form
         return Directory.Exists(userSelectedOutput) ? userSelectedOutput : null;
     }
 
+    private void UpdateInspectActionState(bool isBusy = false)
+    {
+        var enabled = !isBusy && _activeConversion is null && InputPathExists();
+        _inspectInputButton.Enabled = enabled;
+        _inspectNowButton.Enabled = enabled;
+    }
+
     private void UpdatePathActionStates()
     {
         if (_activeConversion is not null)
@@ -6039,7 +6043,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        _inspectInputButton.Enabled = InputPathExists();
+        UpdateInspectActionState();
         _openInputButton.Enabled = InputPathExists();
         _openOutputButton.Enabled = GetPreferredOutputDirectoryForOpen() is not null;
         _openPreviewButton.Enabled = File.Exists(_lastPreviewPath);

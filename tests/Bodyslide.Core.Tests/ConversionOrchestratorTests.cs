@@ -35047,14 +35047,14 @@ public sealed class CustomBodyProfileSupportTests
     }
 
     [Fact]
-    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_SlugifiesBodyNamesWithSpaces()
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_UsesCanonicalCocoFoundation()
     {
         var service = new BasicSkeletonMappingService();
         var armor = new ImportedArmor("input", [], [], [], []);
 
         var result = await service.MapAsync(armor, "COCO CBBE", CancellationToken.None);
 
-        Assert.Equal("xpmsse-coco-weighting-physics", result.TargetSkeleton);
+        Assert.Equal("xpmsse-physics", result.TargetSkeleton);
     }
 
     [Fact]

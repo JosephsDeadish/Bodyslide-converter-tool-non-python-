@@ -93,6 +93,33 @@ Plugin references are resolved against the complete batch mesh set before each
 item stages only its owned mappings. BodySlide names are allocated after
 sanitization and body qualification, including natural body-suffixed names.
 
+Both desktop and CLI startup preserve a valid caller working directory, including
+the game/Data directory selected by a mod manager. Relative input and launch paths
+are no longer silently rebased to the executable directory. Explicit CLI options
+still take precedence over desktop handoff.
+
+For duplicate-key or unexpectedly slow/large conversions, retain the complete
+exception and `conversion-timings.json`, and record the source/output byte sizes,
+mesh count, target body, and whether the input is an installed mod or an uninstalled
+FOMOD archive. Alternative installer folders may contain conflicting versions of
+the same plugin; select the intended installed variant rather than combining those
+plugins. Supply a minimal permitted reproduction and launcher diagnostics before
+claiming the original real-world failure has been resolved.
+Constant missing-texture fallbacks use compact 4×4 DDS maps instead of expanding
+every channel to the diffuse texture's resolution. Detail-derived maps retain
+their detail; a compact neutral fallback is not a substitute for authored textures.
+
+Body catalogs describe supported names, sliders, rig families and physics
+expectations; they are not a bundled set of real reference bodies or proven
+deformation data for every armor. Missing readable references or matching morph
+payloads still require review. Adding aliases or inferred bone names cannot prove
+fit, functioning zaps, valid weights, or in-game physics. These need actual
+BodySlide builds and game validation using permitted source assets.
+`CatalogIntegrityTests` checks every declared body alias, skeleton-foundation
+resolution and physics-bone uniqueness. These checks validate metadata consistency,
+not real-world compatibility. Custom-profile fields and built-in catalog fields
+are separate supported schemas, not interchangeable copies of one another.
+
 Body detection ignores GUID-shaped path components and leaf names as opaque
 workspace identifiers. Accidental body-name substrings inside those identifiers
 cannot outweigh BodySlide metadata; meaningful body-named folders remain signals.

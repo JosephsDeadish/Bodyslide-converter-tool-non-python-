@@ -10,7 +10,8 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(
+        Environment.CurrentDirectory = ExecutionEnvironment.GetStartupWorkingDirectory(
+            Environment.CurrentDirectory,
             Environment.ProcessPath,
             AppContext.BaseDirectory);
         _startupDiagnosticsPath = ShouldEnableStartupDiagnostics(args)

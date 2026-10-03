@@ -3,7 +3,8 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 
-ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(
+Environment.CurrentDirectory = ExecutionEnvironment.GetStartupWorkingDirectory(
+    Environment.CurrentDirectory,
     Environment.ProcessPath,
     AppContext.BaseDirectory);
 

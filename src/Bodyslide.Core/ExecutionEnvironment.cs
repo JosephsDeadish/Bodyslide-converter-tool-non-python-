@@ -5,6 +5,16 @@ public static class ExecutionEnvironment
     private static readonly StringComparison FileSystemPathComparison =
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
+    public static string GetStartupWorkingDirectory(
+        string? currentDirectory,
+        string? processPath = null,
+        string? appContextBaseDirectory = null)
+    {
+        return !string.IsNullOrWhiteSpace(currentDirectory) && Directory.Exists(currentDirectory)
+            ? Path.GetFullPath(currentDirectory)
+            : GetExecutionRoot(processPath, appContextBaseDirectory);
+    }
+
     public static string GetExecutionRoot(
         string? processPath = null,
         string? appContextBaseDirectory = null,

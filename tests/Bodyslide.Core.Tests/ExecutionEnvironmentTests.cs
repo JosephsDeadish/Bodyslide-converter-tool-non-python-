@@ -3,6 +3,39 @@ namespace Bodyslide.Core.Tests;
 public sealed class ExecutionEnvironmentTests
 {
     [Fact]
+    public void GetStartupWorkingDirectory_PreservesManagerAndCliRelativePathContext()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var dataDirectory = Path.Combine(root, "game", "Data");
+        var executableDirectory = Path.Combine(root, "tools", "desktop");
+        Directory.CreateDirectory(dataDirectory);
+        Directory.CreateDirectory(executableDirectory);
+        try
+        {
+            var resolved = ExecutionEnvironment.GetStartupWorkingDirectory(
+                dataDirectory, Path.Combine(executableDirectory, "SlideSmith.exe"));
+
+            Assert.Equal(Path.GetFullPath(dataDirectory), resolved);
+            Assert.Equal(Path.Combine(dataDirectory, "meshes", "armor.nif"),
+                Path.GetFullPath(Path.Combine("meshes", "armor.nif"), resolved));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void GetStartupWorkingDirectory_FallsBackWhenCallerDirectoryDoesNotExist()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var processPath = Path.Combine(root, "desktop", "SlideSmith.exe");
+
+        Assert.Equal(Path.GetDirectoryName(processPath),
+            ExecutionEnvironment.GetStartupWorkingDirectory(Path.Combine(root, "missing"), processPath));
+    }
+
+    [Fact]
     public void GetExecutionRoot_PrefersProcessDirectory()
     {
         var processPath = Path.Combine(Path.GetTempPath(), "slidesmith-process", "SlideSmith.exe");
