@@ -9,7 +9,7 @@ public sealed class BatchRunMeasurementsTests
     [Fact]
     public async Task InterruptedSingleInputReportsItsImplicitOutputRoot()
     {
-        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Environment.CurrentDirectory, $"implicit-output-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         try
         {
@@ -19,10 +19,21 @@ public sealed class BatchRunMeasurementsTests
             Directory.CreateDirectory(output);
             await File.WriteAllBytesAsync(Path.Combine(output, "partial.nif"), new byte[12]);
             using var cancelled = new CancellationTokenSource();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                new BatchConversionRunner(StandaloneConversionModules.CreateDefault())
+            var previousContext = SynchronizationContext.Current;
+            Task<IReadOnlyList<ConversionResult>> conversion;
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(new SynchronousProgressContext());
+                conversion = new BatchConversionRunner(StandaloneConversionModules.CreateDefault())
                     .ConvertAsync(new ConversionRequest(input, "CBBE"),
-                        cancellationToken: cancelled.Token, progress: new CancellingProgress(cancelled)));
+                        cancellationToken: cancelled.Token, progress: new CancellingProgress(cancelled));
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previousContext);
+            }
+            Assert.True(cancelled.IsCancellationRequested);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => conversion);
             using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(output, "batch-performance.json")));
             Assert.Equal("cancelled", report.RootElement.GetProperty("Status").GetString());
             Assert.Equal(12, report.RootElement.GetProperty("OutputBytesByCategory").GetProperty("meshes").GetInt64());
@@ -118,5 +129,10 @@ public sealed class BatchRunMeasurementsTests
     private sealed class CancellingProgress(CancellationTokenSource cancellation) : IProgress<BatchProgressUpdate>
     {
         public void Report(BatchProgressUpdate value) => cancellation.Cancel();
+    }
+
+    private sealed class SynchronousProgressContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state) => callback(state);
     }
 }
