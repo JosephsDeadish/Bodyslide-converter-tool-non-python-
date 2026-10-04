@@ -336,6 +336,95 @@ public sealed class ConversionPerformanceRegressionTests
         finally { Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task ReadableBodySlideProjectDoesNotForceLargeUnrelatedTexturesIntoEveryExport()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var nif = WriteTextureNif(root, "meshes/armor.nif", ["textures/armor/main.dds"]);
+            WriteTextureNif(root, "CalienteTools/BodySlide/ShapeData/SourceAssets/source.nif",
+                ["textures/shared/body.dds"]);
+            var own = WriteTexture(root, "textures/armor/main.dds");
+            var companion = WriteTexture(root, "textures/armor/main_layer_extra_n.dds");
+            var shared = WriteTexture(root, "textures/shared/body.dds");
+            var unrelated = WriteTexture(root, "textures/unrelated/large.dds");
+            using (var file = File.OpenWrite(unrelated)) file.SetLength(8 * 1024 * 1024);
+            var project = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets", "armor.osp");
+            Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+            File.WriteAllText(project, """
+                <SliderSetInfo><SliderSet name="ArmorProject">
+                  <OutputPath>meshes</OutputPath><OutputFile>armor</OutputFile>
+                  <DataFolder>SourceAssets</DataFolder><InputFile>source.nif</InputFile>
+                </SliderSet></SliderSetInfo>
+                """);
+            File.WriteAllText(Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "SourceAssets", "morphs.osd"), "morph data");
+            using var context = new BatchPluginExportContext();
+            var armor = await new LocalArmorImportService().ImportAsync(nif, CancellationToken.None, null, context);
+
+            Assert.Equal(new[] { own, companion, shared }.OrderBy(path => path),
+                armor.TextureFiles.OrderBy(path => path));
+            var output = await ExportAsync(Path.Combine(root, "converted"), armor,
+                new PluginAnalysisResult([], [], ""), new TextureSummary(0, [], [], []), context);
+            Assert.False(File.Exists(Path.Combine(output, "textures", "unrelated", "large.dds")));
+            var exportedTextures = Directory.GetFiles(Path.Combine(output, "textures"), "*", SearchOption.AllDirectories);
+            Assert.Equal(3, exportedTextures.Length);
+            Assert.Equal(armor.TextureFiles.Sum(path => new FileInfo(path).Length),
+                exportedTextures.Sum(path => new FileInfo(path).Length));
+            Assert.True(exportedTextures.Sum(path => new FileInfo(path).Length) < 1024);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("malformed")]
+    [InlineData("unsupported")]
+    [InlineData("multiple-folders")]
+    public async Task UnprovenBodySlideInputsRetainConservativeTextureCoverage(string uncertainty)
+    {
+        var root = CreateRoot();
+        try
+        {
+            var nif = WriteTextureNif(root, "meshes/armor.nif", ["textures/a.dds"]);
+            var first = WriteTexture(root, "textures/a.dds");
+            var second = WriteTexture(root, "textures/b.dds");
+            var linkedMesh = WriteTextureNif(root, "source.nif", ["textures/a.dds"]);
+            var project = Path.Combine(root, "armor.osp");
+            File.WriteAllText(project, uncertainty == "multiple-folders"
+                ? "<SliderSetInfo><SliderSet><DataFolder>A</DataFolder><InputFile>source.nif</InputFile></SliderSet><SliderSet><DataFolder>B</DataFolder><InputFile>source.nif</InputFile></SliderSet></SliderSetInfo>"
+                : "<SliderSetInfo><SliderSet><InputFile>source.nif</InputFile></SliderSet></SliderSetInfo>");
+            if (uncertainty == "missing") File.Delete(linkedMesh);
+            if (uncertainty == "malformed") File.WriteAllText(project, "<SliderSetInfo>");
+            if (uncertainty == "unsupported") File.WriteAllText(linkedMesh, "unsupported NIF");
+
+            var armor = await new LocalArmorImportService().ImportAsync(nif, CancellationToken.None);
+            Assert.Contains(first, armor.TextureFiles);
+            Assert.Contains(second, armor.TextureFiles);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task TextureCompanionMatchingPreservesUnderscorePrefixesWithoutCrossingDirectories()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var nif = WriteTextureNif(root, "meshes/armor.nif", ["textures/armor_set/main_layer_d.dds"]);
+            var own = WriteTexture(root, "textures/armor_set/main_layer_d.dds");
+            var companion = WriteTexture(root, "textures/armor_set/main_layer_extra_n.dds");
+            var shorter = WriteTexture(root, "textures/armor_set/main_n.dds");
+            var otherDirectory = WriteTexture(root, "textures/armor_set_extra/main_layer_n.dds");
+            var armor = await new LocalArmorImportService().ImportAsync(nif, CancellationToken.None);
+
+            Assert.Equal(new[] { own, companion }.OrderBy(path => path), armor.TextureFiles.OrderBy(path => path));
+            Assert.DoesNotContain(shorter, armor.TextureFiles);
+            Assert.DoesNotContain(otherDirectory, armor.TextureFiles);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Theory]
     [InlineData("malformed")]
     [InlineData("effect-shader")]

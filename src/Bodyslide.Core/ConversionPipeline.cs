@@ -11232,9 +11232,22 @@ internal sealed class LocalArmorImportService : IArmorImportService
     {
         if (textures.Count == 0) return textures;
         // These sources can redirect textures outside the NIF's shader sets.
-        if (supportFiles.Any(path => new[] { ".bgsm", ".bgem", ".pex", ".osp", ".osd" }
+        if (supportFiles.Any(path => new[] { ".bgsm", ".bgem", ".pex" }
                 .Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)))
             return textures;
+
+        IReadOnlyList<string> projectMeshes;
+        try
+        {
+            if (!BodySlideSourceProjectSupport.TryResolveTextureReferenceMeshes(
+                    supportFiles.Where(path => Path.GetExtension(path).Equals(".osp", StringComparison.OrdinalIgnoreCase)),
+                    cancellationToken, out projectMeshes))
+                return textures;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return textures;
+        }
 
         foreach (var plugin in supportFiles.Where(IsPluginFile).Concat(batchContext?.PluginFiles ?? []).Distinct())
         {
@@ -11248,7 +11261,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
         }
 
         var referencedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var mesh in meshes.Distinct(OperatingSystem.IsWindows()
+        foreach (var mesh in meshes.Concat(projectMeshes).Distinct(OperatingSystem.IsWindows()
                      ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -11286,8 +11299,14 @@ internal sealed class LocalArmorImportService : IArmorImportService
         {
             var family = (Path.GetDirectoryName(relative)?.Replace('\\', '/') ?? "") + "/" +
                 Path.GetFileNameWithoutExtension(relative);
-            if (companionFamilies.Any(stem => family.Equals(stem, StringComparison.OrdinalIgnoreCase) ||
-                    family.StartsWith(stem + "_", StringComparison.OrdinalIgnoreCase)))
+            var matchesFamily = companionFamilies.Contains(family);
+            var directoryEnd = family.LastIndexOf('/');
+            for (var separator = family.LastIndexOf('_'); !matchesFamily && separator > directoryEnd;
+                 separator = family.LastIndexOf('_', separator - 1))
+            {
+                matchesFamily = companionFamilies.Contains(family[..separator]);
+            }
+            if (matchesFamily)
                 selected.UnionWith(files);
         }
 

@@ -5,7 +5,7 @@ This bundle is intended for SkyrimSE Mod Organizer 2 / Vortex managed installs.
 
 Included:
 - CalienteTools/SlideSmith/SlideSmith.exe (desktop launcher after install)
-- CalienteTools/SlideSmith/desktop/SlideSmith.exe
+- Desktop runtime DLLs alongside CalienteTools/SlideSmith/SlideSmith.exe
 - CalienteTools/SlideSmith/cli/SlideSmith-CLI.exe
 - CalienteTools/SlideSmith/meta/slidesmith-bundle.json
 - CalienteTools/SlideSmith/meta.ini
@@ -16,10 +16,18 @@ Quick start:
 2) In MO2, add an executable that points to:
    - Binary: <MO2 mods folder>\SlideSmith Windows Bundle\CalienteTools\SlideSmith\SlideSmith.exe
    - Start in: <MO2 mods folder>\SlideSmith Windows Bundle\CalienteTools\SlideSmith
-   - MO2 note: the VFS/USVFS hook needs that exact folder so it can inject mods before startup
-   - Arguments: --mo2-launcher
-3) If needed, you can directly launch CalienteTools/SlideSmith/desktop/SlideSmith.exe (GUI) or CalienteTools/SlideSmith/cli/SlideSmith-CLI.exe (CLI).
+   - Arguments: leave empty for a normal GUI launch; --mo2-launcher is optional context information
+3) Keep the complete desktop folder together. This bundle's desktop is self-contained
+   without single-file extraction; copying only its EXE will not work.
+   You can directly launch CalienteTools/SlideSmith/SlideSmith.exe (GUI) or CalienteTools/SlideSmith/cli/SlideSmith-CLI.exe (CLI).
 4) Keep this package enabled as a separate managed entry.
+
+Startup diagnostics are recorded automatically in
+%LOCALAPPDATA%\SlideSmith\startup-launch-diagnostics.log. The log distinguishes
+process entry, window construction, and window display. If no new entry appears,
+failure occurred before managed startup (or the log directory was unwritable).
+This packaging removes the native self-extraction step, but live MO2/USVFS
+compatibility must still be checked on Windows.
 
 Acceptance checks before trusting a converted pack
 -------------------------------------------------

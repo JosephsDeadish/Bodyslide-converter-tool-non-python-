@@ -66,7 +66,8 @@ internal static class BodySlideSourceProjectSupport
         IReadOnlyList<string> ProjectNames,
         IReadOnlyList<string> OutputPaths,
         IReadOnlyList<string> OutputFiles,
-        IReadOnlyList<string> ReferencedPaths);
+        IReadOnlyList<string> ReferencedPaths,
+        IReadOnlyList<string>? DataFolders = null);
 
     public static async Task<ResolvedBodySlideSliders> ResolveAsync(
         ImportedArmor armor,
@@ -403,6 +404,41 @@ internal static class BodySlideSourceProjectSupport
             .ToArray();
 
         return new BodySlideDiscoveryResult(files, hasReferenceAssets);
+    }
+
+    internal static bool TryResolveTextureReferenceMeshes(
+        IEnumerable<string> projectFiles, CancellationToken cancellationToken, out IReadOnlyList<string> meshes)
+    {
+        var resolvedMeshes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        meshes = [];
+        foreach (var projectFile in projectFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (new FileInfo(projectFile).Length > 4 * 1024 * 1024 ||
+                !TryProbeOspProject(projectFile, out var probe) ||
+                (probe.DataFolders?.Count ?? 0) > 1)
+            {
+                return false;
+            }
+            var references = probe.ReferencedPaths.Where(static path =>
+                Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (references.Length == 0)
+            {
+                return false;
+            }
+            foreach (var reference in references)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var candidates = ResolveLinkedPathCandidates(probe, reference).Where(File.Exists).ToArray();
+                if (candidates.Length == 0)
+                {
+                    return false;
+                }
+                resolvedMeshes.UnionWith(candidates);
+            }
+        }
+        meshes = resolvedMeshes.ToArray();
+        return true;
     }
 
     private static bool HasReferenceBodyAssets(IReadOnlyList<string> bodyReferenceFiles) =>
@@ -863,6 +899,12 @@ internal static class BodySlideSourceProjectSupport
         if (!string.IsNullOrWhiteSpace(probe.BodySlideRoot))
         {
             yield return Path.Combine(probe.BodySlideRoot, normalized);
+            yield return Path.Combine(probe.BodySlideRoot, "ShapeData", normalized);
+            foreach (var dataFolder in probe.DataFolders ?? [])
+            {
+                var folder = dataFolder.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+                yield return Path.Combine(probe.BodySlideRoot, "ShapeData", folder, normalized);
+            }
 
             var bodySlidePrefix = $"CalienteTools{Path.DirectorySeparatorChar}BodySlide{Path.DirectorySeparatorChar}";
             if (normalized.StartsWith(bodySlidePrefix, StringComparison.OrdinalIgnoreCase))
@@ -940,7 +982,8 @@ internal static class BodySlideSourceProjectSupport
                 .ToArray();
             var referencedPaths = document
                 .Descendants()
-                .SelectMany(static element => element.Attributes().Select(attr => attr.Value).Append(element.Value))
+                .SelectMany(static element => element.Attributes().Select(attr => attr.Value)
+                    .Append(element.HasElements ? string.Empty : element.Value))
                 .Select(static value => value.Trim())
                 .Where(IsSupportedBodySlideReferencePath)
                 .Select(static value => value)
@@ -957,7 +1000,13 @@ internal static class BodySlideSourceProjectSupport
                     projectNames,
                     outputPaths,
                     outputFiles,
-                    referencedPaths));
+                    referencedPaths,
+                    document.Descendants()
+                        .Where(static element => element.Name.LocalName.Equals("DataFolder", StringComparison.OrdinalIgnoreCase))
+                        .Select(static element => element.Value.Trim())
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray()));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {

@@ -6,6 +6,24 @@ namespace Bodyslide.Core.Tests;
 
 public sealed class PackageArtifactRegressionTests
 {
+    [Fact]
+    public void WindowsBundleInstallerDeploysAllDesktopDependenciesBesideExecutableWithoutDuplicateRuntime()
+    {
+        var repository = new DirectoryInfo(AppContext.BaseDirectory);
+        while (repository is not null && !File.Exists(Path.Combine(repository.FullName, "BodyslideConverter.slnx")))
+        {
+            repository = repository.Parent;
+        }
+        Assert.NotNull(repository);
+        var config = System.Xml.Linq.XDocument.Load(Path.Combine(repository.FullName,
+            "packaging", "windows-bundle", "fomod", "ModuleConfig.xml"));
+        var desktopFolder = Assert.Single(config.Descendants("folder").Where(element =>
+            string.Equals(element.Attribute("source")?.Value, "desktop", StringComparison.Ordinal)));
+        Assert.Equal("CalienteTools/SlideSmith", desktopFolder.Attribute("destination")?.Value);
+        Assert.DoesNotContain(config.Descendants("file"), element =>
+            string.Equals(element.Attribute("source")?.Value, "desktop/SlideSmith.exe", StringComparison.Ordinal));
+    }
+
     public static IEnumerable<object[]> InvalidRuntimePhysicsArtifacts()
     {
         foreach (var root in new[] { "CBPCConfig", "system" })

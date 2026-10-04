@@ -10,16 +10,6 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        Environment.CurrentDirectory = ExecutionEnvironment.GetStartupWorkingDirectory(
-            Environment.CurrentDirectory,
-            Environment.ProcessPath,
-            AppContext.BaseDirectory);
-        _startupDiagnosticsPath = ShouldEnableStartupDiagnostics(args)
-            ? ResolveStartupDiagnosticsPath(args)
-            : null;
-        WriteStartupDiagnostics(
-            _startupDiagnosticsPath,
-            $"desktop-startup: exe={Environment.ProcessPath ?? "(unknown)"}, cwd={Environment.CurrentDirectory}, args=[{string.Join(", ", args)}]");
         if (args.Any(static arg =>
             StandaloneStartupRouting.TryReadOptionName(arg, out var option) &&
             option.Equals("smoke-test", StringComparison.OrdinalIgnoreCase)))
@@ -27,15 +17,26 @@ internal static class Program
             return RunSmokeTest();
         }
 
-        RegisterGlobalExceptionHandlers();
         try
         {
+            _startupDiagnosticsPath = ResolveStartupDiagnosticsPath(args);
+            WriteStartupDiagnostics(
+                _startupDiagnosticsPath,
+                $"desktop-startup: exe={Environment.ProcessPath ?? "(unknown)"}, cwd={Environment.CurrentDirectory}, args=[{string.Join(", ", args)}]");
+            Environment.CurrentDirectory = ExecutionEnvironment.GetStartupWorkingDirectory(
+                Environment.CurrentDirectory,
+                Environment.ProcessPath,
+                AppContext.BaseDirectory);
+            RegisterGlobalExceptionHandlers();
             var launchOptions = DesktopWorkflowSupport.ParseLaunchOptions(args);
             WriteStartupDiagnostics(
                 _startupDiagnosticsPath,
                 $"desktop-startup: launcher={launchOptions.FromModOrganizerLauncher}, startup-output={launchOptions.StartupOutputDirectory ?? "(none)"}, startup-input={launchOptions.StartupInputPath ?? "(none)"}");
             ApplicationConfiguration.Initialize();
-            Application.Run(new MainForm(launchOptions));
+            using var form = new MainForm(launchOptions);
+            WriteStartupDiagnostics(_startupDiagnosticsPath, "desktop-startup: window constructed");
+            form.Shown += (_, _) => WriteStartupDiagnostics(_startupDiagnosticsPath, "desktop-startup: window shown");
+            Application.Run(form);
             WriteStartupDiagnostics(_startupDiagnosticsPath, "desktop-startup: ui exited normally");
             return 0;
         }
@@ -60,8 +61,18 @@ internal static class Program
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
             ApplicationConfiguration.Initialize();
             using var form = new MainForm();
-            form.CreateControl();
-            var summary = form.GetSmokeTestSummary();
+            DesktopSmokeTestSummary? summary = null;
+            form.Shown += (_, _) =>
+            {
+                summary = form.GetSmokeTestSummary();
+                form.BeginInvoke(new Action(form.Close));
+            };
+            Application.Run(form);
+            if (summary is null)
+            {
+                Console.Error.WriteLine("SlideSmith desktop smoke test failed: the window was not shown.");
+                return 1;
+            }
             Console.WriteLine(DesktopSmokeTestContract.Serialize(summary));
             return summary.Status == DesktopSmokeTestContract.ReadyStatus ? 0 : 1;
         }
@@ -256,34 +267,6 @@ internal static class Program
         return Path.Combine(Path.GetTempPath(), "SlideSmith", "startup-launch-diagnostics.log");
     }
 
-    private static bool ShouldEnableStartupDiagnostics(IReadOnlyList<string> args)
-    {
-        if (IsDesktopDiagnosticsEnabledByEnvironment())
-        {
-            return true;
-        }
-
-        foreach (var arg in args)
-        {
-            if (TryReadOptionToken(arg, out var optionName, out _) &&
-                optionName.Equals("startup-diagnostics", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool IsDesktopDiagnosticsEnabledByEnvironment()
-    {
-        var flag = Environment.GetEnvironmentVariable("SLIDESMITH_STARTUP_DIAGNOSTICS");
-        return string.Equals(flag, "1", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(flag, "yes", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(flag, "on", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static string? NormalizeDiagnosticsPath(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -314,6 +297,10 @@ internal static class Program
                 Directory.CreateDirectory(directory);
             }
 
+            if (File.Exists(path) && new FileInfo(path).Length > 1024 * 1024)
+            {
+                File.WriteAllText(path, string.Empty);
+            }
             File.AppendAllText(
                 path,
                 $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");

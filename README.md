@@ -97,6 +97,11 @@ Both desktop and CLI startup preserve a valid caller working directory, includin
 the game/Data directory selected by a mod manager. Relative input and launch paths
 are no longer silently rebased to the executable directory. Explicit CLI options
 still take precedence over desktop handoff.
+Desktop readiness/proof scans now run in the background after the window opens,
+not in its constructor. Ordinary GUI launches automatically record startup phases
+in `%LOCALAPPDATA%\SlideSmith\startup-launch-diagnostics.log` (bounded to roughly
+1 MB); `--startup-diagnostics <path>` selects another location. Windows smoke
+checks show the window and run the message loop before closing.
 
 For duplicate-key or unexpectedly slow/large conversions, retain the complete
 exception and `conversion-timings.json`, and record the source/output byte sizes,
@@ -113,6 +118,13 @@ weight, format, vertex-count and delta-count metadata rather than duplicating
 per-vertex source payload arrays. Full deltas remain available to BodySlide
 BSD/TRI/OSD generation. This bounds diagnostic growth by slider count, not by
 slider count multiplied by vertex count; it does not limit required mesh assets.
+Readable BodySlide projects no longer automatically force every pack texture into
+each armor export: their resolved input NIFs participate in shader dependency
+checks, including `ShapeData`/`DataFolder` references. Morph-only OSD files do not
+redirect textures. Missing, unreadable, ambiguous multi-folder project inputs,
+unknown NIF layouts, materials, scripts, and plugin texture swaps still retain the
+conservative full texture set. Companion selection uses hashed filename prefixes
+instead of comparing every texture against every referenced family.
 Plugin verification accepts repeated normalized source paths and keeps an
 unsupported report when duplicate reports disagree, rather than throwing a
 duplicate-key exception or hiding the unsupported mesh.
@@ -316,7 +328,11 @@ What it does:
 - **Push to `main`/`master` (post-merge):** publish clean single-file Windows executables (Desktop GUI + CLI), create/update a Windows bundle zip with FOMOD + `meta.ini` metadata for MO2/Vortex installs, create or update the rolling **"SlideSmith — latest build"** GitHub Release entry, and attach all three Windows artifacts.
 - **Pull requests:** publish both Windows executables, package them as one MO2/Vortex-friendly bundle zip artifact, and upload it for startup/packaging verification.
 
-All published executables are self-contained single files — no installer, no extra DLLs, no debug symbols.
+Standalone executable downloads remain self-contained single files. The Windows
+mod-manager bundle uses a self-contained folder-based desktop build without native
+self-extraction; its installer puts the EXE and all runtime DLLs together in
+`CalienteTools/SlideSmith`. Do not copy only the bundle's desktop EXE. Windows CI
+checks dependencies and smoke-tests the extracted, installed desktop layout.
 
 If the app seems to "do nothing", run it from a terminal with `--help` first. The CLI expects arguments (`--input`, `--target`/`--preset`, optional `--output`) and prints usage when required arguments are missing.
 

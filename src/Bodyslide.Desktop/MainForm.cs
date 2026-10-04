@@ -1713,7 +1713,8 @@ public sealed class MainForm : Form
         UpdateSourceDetails();
         UpdateBodySelectionSummary();
         PopulateCatalogTab();
-        PopulateReadinessTab(CreateDesktopReadinessReport());
+        PopulateReadinessTab([new RuntimeReadinessCheck(
+            "Startup readiness", "Info", "Readiness checks will run after the window opens.")]);
         ResetPipelineTimeline();
         PopulateGuidanceTab(Array.Empty<string>(), null);
         LoadUiSettings();
@@ -1740,6 +1741,7 @@ public sealed class MainForm : Form
             UpdateListViewColumnLayouts();
         };
         FormClosing += (_, _) => SaveUiSettings(flush: true);
+        Shown += async (_, _) => await RefreshStartupReadinessAsync();
         Shown += async (_, _) =>
         {
             _allowUserMainSplitOverride = true;
@@ -2434,10 +2436,15 @@ public sealed class MainForm : Form
 
     private IReadOnlyList<RuntimeReadinessCheck> CreateDesktopReadinessReport()
     {
-        var checks = RuntimeReadinessReporter.CreateDesktopReport(Environment.ProcessPath).ToList();
+        var checks = CreateRuntimeReadinessReport(Environment.ProcessPath);
         AppendModOrganizerHealthChecks(checks);
         AppendLatestOutputVerificationChecks(checks);
+        return checks;
+    }
 
+    private static List<RuntimeReadinessCheck> CreateRuntimeReadinessReport(string? executablePath)
+    {
+        var checks = RuntimeReadinessReporter.CreateDesktopReport(executablePath).ToList();
         try
         {
             var version = CoreWebView2Environment.GetAvailableBrowserVersionString();
@@ -2453,6 +2460,29 @@ public sealed class MainForm : Form
         }
 
         return checks;
+    }
+
+    private async Task RefreshStartupReadinessAsync()
+    {
+        var executablePath = Environment.ProcessPath;
+        try
+        {
+            var checks = await Task.Run(() => CreateRuntimeReadinessReport(executablePath));
+            if (IsDisposed || Disposing || !string.IsNullOrWhiteSpace(_lastOutputDirectory))
+            {
+                return;
+            }
+            AppendModOrganizerHealthChecks(checks);
+            AppendLatestOutputVerificationChecks(checks);
+            PopulateReadinessTab(checks);
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed && !Disposing)
+            {
+                AppendLog($"Startup readiness checks failed: {ex.Message}. The converter remains available; use Self-check to retry.");
+            }
+        }
     }
 
     private void AppendLatestOutputVerificationChecks(List<RuntimeReadinessCheck> checks)
@@ -2558,14 +2588,14 @@ public sealed class MainForm : Form
             checks.Add(new RuntimeReadinessCheck(
                 "Mod manager health check",
                 "Info",
-                "Mod manager context was not detected in this session. If launching from MO2 or Vortex, use 'Copy Mod Manager setup' and include --mo2-launcher (MO2) or --vortex-launcher (Vortex)."));
+                "Mod manager context was not detected in this session. Direct desktop launches require no arguments; --mo2-launcher (MO2) or --vortex-launcher (Vortex) optionally identify the manager context."));
             return;
         }
 
         checks.Add(new RuntimeReadinessCheck(
             "Mod manager health check",
             "OK",
-            "Mod manager context detected. Verify the launcher targets the desktop executable, keeps Start in on the same folder, and passes a launcher flag so MO2's VFS can hook before startup."));
+            "Mod manager context detected. Verify the launcher targets the desktop executable and that all desktop runtime dependencies are installed beside it. Launcher flags identify context; they do not enable MO2's VFS."));
 
         var executablePath = Environment.ProcessPath ?? Application.ExecutablePath;
         var executableName = Path.GetFileName(executablePath);
@@ -2581,7 +2611,7 @@ public sealed class MainForm : Form
             checks.Add(new RuntimeReadinessCheck(
                 "Mod manager executable target",
                 "Warning",
-                $"Current launch path looks like CLI ({executableName}). MO2's VFS/USVFS hook needs the desktop executable as Binary and the same folder as Start in so it can inject mods before startup. Set launcher Binary to {suggestedDesktopPath}, Start In to {Path.GetDirectoryName(suggestedDesktopPath) ?? "desktop folder"}, and use --mo2-launcher (MO2) or --vortex-launcher (Vortex). Use 'Copy Mod Manager setup' for a ready-to-paste fix."));
+                $"Current launch path looks like CLI ({executableName}). For the GUI, set launcher Binary to {suggestedDesktopPath} and Start In to {Path.GetDirectoryName(suggestedDesktopPath) ?? "desktop folder"}. Launcher flags are optional context information. Use 'Copy Mod Manager setup' for a ready-to-paste configuration."));
         }
         else
         {
@@ -2598,10 +2628,10 @@ public sealed class MainForm : Form
                 !string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory);
             checks.Add(new RuntimeReadinessCheck(
                 "Mod manager launcher arguments",
-                launcherInputDetected ? "OK" : "Warning",
+                launcherInputDetected ? "OK" : "Info",
                 launcherInputDetected
-                    ? "Launcher startup arguments were detected from mod manager context even without an explicit launcher flag. Keep Binary and Start in on the desktop executable folder so MO2's VFS can inject correctly."
-                    : "Mod manager environment variables were detected but a launcher flag was not present. Add --mo2-launcher (MO2) or --vortex-launcher (Vortex), and keep Binary + Start in on the desktop executable folder so MO2's VFS can hook before startup."));
+                    ? "Launcher startup arguments were detected from mod manager context even without an explicit launcher flag."
+                    : "Mod manager environment variables were detected. No launcher flag is required to open the desktop; --mo2-launcher (MO2) or --vortex-launcher (Vortex) optionally identify context."));
         }
     }
 
