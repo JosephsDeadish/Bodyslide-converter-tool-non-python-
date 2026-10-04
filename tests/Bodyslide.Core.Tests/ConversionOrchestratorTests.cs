@@ -22805,10 +22805,16 @@ public sealed class RealisticModPackFixtureTests
 
     private static void AssertZipMatchesDirectory(ZipArchive archive, string directory)
     {
+        var excludedFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "conversion-timings.json", "output-size-inventory.json", "batch-performance.json",
+            ".conversion-learning-cache.json"
+        };
         var expectedFiles = Directory
             .GetFiles(directory, "*", SearchOption.AllDirectories)
-            .Where(path => !Path.GetExtension(path).Equals(".json", StringComparison.OrdinalIgnoreCase))
+            .Where(path => !excludedFileNames.Contains(Path.GetFileName(path)))
             .Select(path => Path.GetRelativePath(directory, path).Replace('\\', '/'))
+            .Where(path => !path.Split('/').Contains(".reports", StringComparer.OrdinalIgnoreCase))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

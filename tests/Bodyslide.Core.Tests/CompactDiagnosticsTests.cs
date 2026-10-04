@@ -100,6 +100,7 @@ public sealed class CompactDiagnosticsTests
             Assert.Equal(fullIssues.Select(issue => issue.Code).Order(), compactIssues.Select(issue => issue.Code).Order());
             Assert.DoesNotContain(compactIssues, issue =>
                 issue.Code.StartsWith("missing-", StringComparison.Ordinal) ||
+                issue.Code.StartsWith("zip-missing-", StringComparison.Ordinal) ||
                 issue.Code == "invalid-package-artifact");
 
             if (zip)
@@ -125,6 +126,44 @@ public sealed class CompactDiagnosticsTests
         finally
         {
             Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PackageZipKeepsEvidenceAndInstallJsonButExcludesLateMeasurementsAndPrivateCaches()
+    {
+        var root = Path.Combine(Environment.CurrentDirectory, $"package-json-{Guid.NewGuid():N}");
+        var retained = new[]
+        {
+            "conversion-manifest.json", "conversion-manifest-2.json", "dependency-map.json",
+            "conversion-quality.json", "skeleton-compatibility.json", "race-compatibility.json",
+            "physics.json", "world-physics.json", "pose-simulation-report.json", "plugin-patches.json",
+            "target-body-template.slidesmith-body.json", "runtime-validation-plan.json",
+            "conversion-matrix-proof.json", "armor/conversion-quality.json", "armor/custom-profile.json"
+        };
+        var excluded = new[]
+        {
+            "conversion-timings.json", "output-size-inventory.json", "batch-performance.json",
+            ".conversion-learning-cache.json", ".reports/proof.json", ".reports/note.txt",
+            "armor/CONVERSION-TIMINGS.JSON", "armor/output-size-inventory.json",
+            "armor/batch-performance.json", "armor/.conversion-learning-cache.json",
+            "armor/.reports/proof.json"
+        };
+        try
+        {
+            foreach (var relative in retained.Concat(excluded))
+            {
+                var path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                await File.WriteAllTextAsync(path, "{}");
+            }
+            using var archive = ZipFile.OpenRead(BatchConversionRunner.CreateCombinedBatchZip(root));
+            Assert.Equal(retained.Order(), archive.Entries.Select(entry => entry.FullName).Order());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+            File.Delete(root + ".zip");
         }
     }
 

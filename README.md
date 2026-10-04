@@ -201,6 +201,10 @@ Issue #8 reporting/performance corrections:
 - Root reports remain the authoritative diagnostics; exports no longer copy them
   into a sibling `.reports` folder. Existing folders from older runs are not removed.
   Required OSP/OSD/BSD/TRI/ShapeData files are unaffected.
+- ZIPs retain required diagnostic/install JSON, including dependency, quality,
+  skeleton, physics and plugin evidence. Completed-after-packaging timing and
+  inventory JSON, learning-cache state and legacy `.reports` copies stay outside
+  the distributable archive; compact mode does not remove required evidence.
 - Final timing JSON, pipeline profile and conversion log use the same completed
   measurement (including export queue wait and ZIP preparation). The final ZIP
   includes the corrected log, not the pre-export snapshot. Final report writing and

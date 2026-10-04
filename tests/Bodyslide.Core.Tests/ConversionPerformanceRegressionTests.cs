@@ -616,6 +616,10 @@ public sealed class ConversionPerformanceRegressionTests
             Assert.Equal(json, await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion-timings.log")));
             using var zip = ZipFile.OpenRead(result.OutputDirectory + ".zip");
             Assert.Null(zip.GetEntry("conversion-timings.json"));
+            Assert.Null(zip.GetEntry("output-size-inventory.json"));
+            using var profileReader = new StreamReader(zip.GetEntry("conversion-pipeline-profile.json")!.Open());
+            Assert.Equal(await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion-pipeline-profile.json")),
+                await profileReader.ReadToEndAsync());
             Assert.Single(zip.Entries, entry => entry.FullName == "conversion-timings.log");
             using var reader = new StreamReader(zip.GetEntry("conversion-timings.log")!.Open());
             Assert.Equal(json, await reader.ReadToEndAsync());

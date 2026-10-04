@@ -8070,7 +8070,7 @@ public sealed class ConversionOrchestrator(
                     BuildTimingReport(totalDurationMs), new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(timingPath, finalTimingJson);
                 if (normalized.Request.OutputZip)
-                    // Install archives omit diagnostic JSON; retain the identical final report as a log.
+                    // Timing JSON stays local; retain the identical final report in the archive as a log.
                     File.WriteAllText(Path.Combine(export.OutputDirectory, "conversion-timings.log"), finalTimingJson);
                 File.WriteAllText(Path.Combine(export.OutputDirectory, "conversion-pipeline-profile.json"),
                     JsonSerializer.Serialize(LocalExportService.BuildConversionPipelineProfileReport(
@@ -9038,10 +9038,15 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         foreach (var file in Directory.EnumerateFiles(rootOutput, "*", SearchOption.AllDirectories))
         {
             var relativePath = Path.GetRelativePath(rootOutput, file).Replace('\\', '/');
-            if (Path.GetExtension(file).Equals(".json", StringComparison.OrdinalIgnoreCase) ||
+            var fileName = Path.GetFileName(file);
+            if (fileName.Equals("conversion-timings.json", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("output-size-inventory.json", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("batch-performance.json", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals(".conversion-learning-cache.json", StringComparison.OrdinalIgnoreCase) ||
                 (finalizeTimings is not null && (relativePath.Equals("conversion-timings.log", StringComparison.OrdinalIgnoreCase) ||
-                    relativePath.Equals("conversion.log", StringComparison.OrdinalIgnoreCase))) ||
-                relativePath.StartsWith(".reports/", StringComparison.OrdinalIgnoreCase))
+                    relativePath.Equals("conversion.log", StringComparison.OrdinalIgnoreCase) ||
+                    relativePath.Equals("conversion-pipeline-profile.json", StringComparison.OrdinalIgnoreCase))) ||
+                relativePath.Split('/').Contains(".reports", StringComparer.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -9056,6 +9061,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var logPath = Path.Combine(rootOutput, "conversion.log");
             if (File.Exists(logPath))
                 archive.CreateEntryFromFile(logPath, "conversion.log", CompressionLevel.Optimal);
+            var profilePath = Path.Combine(rootOutput, "conversion-pipeline-profile.json");
+            if (File.Exists(profilePath))
+                archive.CreateEntryFromFile(profilePath, "conversion-pipeline-profile.json", CompressionLevel.Optimal);
         }
     }
 

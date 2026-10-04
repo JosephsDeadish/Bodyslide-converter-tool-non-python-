@@ -113,10 +113,10 @@ public sealed class BatchRunMeasurementsTests
             Directory.Delete(root, true);
             File.Delete(root + ".zip");
         }
+    }
 
-        private sealed class CancellingProgress(CancellationTokenSource cancellation) : IProgress<BatchProgressUpdate>
-        {
-            public void Report(BatchProgressUpdate value) => cancellation.Cancel();
-        }
+    private sealed class CancellingProgress(CancellationTokenSource cancellation) : IProgress<BatchProgressUpdate>
+    {
+        public void Report(BatchProgressUpdate value) => cancellation.Cancel();
     }
 }
