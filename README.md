@@ -137,6 +137,9 @@ and 250,000 vertices. Oversized/unreadable sources stay on the existing missing
 source-data/review path rather than allocating gigabytes or claiming reusable
 morph support. OSD parsing tries exact 16/32-bit layouts before padded layouts,
 preventing 32-bit indexes and deltas from being silently read as 16-bit data.
+BodySlide TRI files may include an optional UV morph section; its structure is
+validated without treating UV offsets as position displacements. Legacy files
+ending after position morphs remain supported.
 Plugin verification accepts repeated normalized source paths and keeps an
 unsupported report when duplicate reports disagree, rather than throwing a
 duplicate-key exception or hiding the unsupported mesh.

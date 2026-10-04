@@ -78,6 +78,21 @@ public sealed class MorphPayloadSafetyTests
         Assert.False(TriMorphReader.TryRead("PIRT\0\0extra"u8, out _));
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void BodyTriAcceptsValidatedOptionalUvSection(bool hasPositionMorph, bool hasUvMorph)
+    {
+        var bytes = BodyTriWithUv(hasPositionMorph, hasUvMorph);
+        Assert.True(TriMorphReader.TryRead(bytes, out var payload));
+        Assert.Equal(hasPositionMorph ? 1 : 0, payload!.Morphs.Count);
+        if (hasPositionMorph) Assert.Equal((1f, 0f, 0f), Assert.Single(payload.Morphs).Deltas[0]);
+        Assert.False(TriMorphReader.TryRead(bytes[..^1], out _));
+        Assert.False(TriMorphReader.TryRead(bytes.Concat(new byte[] { 1 }).ToArray(), out _));
+    }
+
     [Fact]
     public void ValidFiniteOsdRemainsReadable()
     {
@@ -132,6 +147,30 @@ public sealed class MorphPayloadSafetyTests
         writer.Write(value);
         writer.Write(0f);
         writer.Write(0f);
+        return stream.ToArray();
+    }
+
+    private static byte[] BodyTriWithUv(bool positions, bool uvs)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write("PIRT"u8);
+        foreach (var (included, uv) in new[] { (positions, false), (uvs, true) })
+        {
+            writer.Write((ushort)(included ? 1 : 0));
+            if (!included) continue;
+            writer.Write((byte)1);
+            writer.Write((byte)'S');
+            writer.Write((ushort)1);
+            writer.Write((byte)1);
+            writer.Write((byte)'A');
+            writer.Write(1f);
+            writer.Write((ushort)1);
+            writer.Write((ushort)0);
+            writer.Write((short)1);
+            writer.Write((short)0);
+            if (!uv) writer.Write((short)0);
+        }
         return stream.ToArray();
     }
 }

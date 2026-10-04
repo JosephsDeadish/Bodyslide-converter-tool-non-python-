@@ -364,7 +364,8 @@ internal static class TriMorphReader
 
         if (shapeCount == 0)
         {
-            if (bytes.Length != 6) return false;
+            var emptyOffset = 6;
+            if (!TryConsumeBodyTriUvSection(bytes, ref emptyOffset)) return false;
             payload = new TriMorphPayload(0, []);
             return true;
         }
@@ -486,13 +487,54 @@ internal static class TriMorphReader
             }
         }
 
-        if (firstShapeMorphs is null || offset != bytes.Length)
+        if (firstShapeMorphs is null || !TryConsumeBodyTriUvSection(bytes, ref offset))
         {
             return false;
         }
 
         payload = new TriMorphPayload(firstShapeVertexCount, firstShapeMorphs);
         return true;
+    }
+
+    private static bool TryConsumeBodyTriUvSection(ReadOnlySpan<byte> bytes, ref int offset)
+    {
+        if (offset == bytes.Length) return true;
+        if (bytes.Length - offset < 2) return false;
+        var shapeCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..]);
+        offset += 2;
+        if (shapeCount > 10_000) return false;
+        for (var shape = 0; shape < shapeCount; shape++)
+        {
+            if (bytes.Length - offset < 3) return false;
+            var nameLength = bytes[offset++];
+            if (bytes.Length - offset < nameLength + 2) return false;
+            offset += nameLength;
+            var morphCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..]);
+            offset += 2;
+            for (var morph = 0; morph < morphCount; morph++)
+            {
+                if (bytes.Length - offset < 7) return false;
+                var morphNameLength = bytes[offset++];
+                if (bytes.Length - offset < morphNameLength + 6) return false;
+                offset += morphNameLength;
+                var multiplier = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..]));
+                offset += 4;
+                if (!float.IsFinite(multiplier)) return false;
+                var deltaCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..]);
+                offset += 2;
+                if (bytes.Length - offset < deltaCount * 6) return false;
+                for (var delta = 0; delta < deltaCount; delta++)
+                {
+                    offset += 2;
+                    var x = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..]) * multiplier;
+                    offset += 2;
+                    var y = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..]) * multiplier;
+                    offset += 2;
+                    if (!MorphPayloadLimits.IsFinite(x, y, 0f)) return false;
+                }
+            }
+        }
+        return offset == bytes.Length;
     }
 }
 
