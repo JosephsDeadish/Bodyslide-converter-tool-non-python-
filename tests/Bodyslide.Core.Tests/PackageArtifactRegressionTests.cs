@@ -24,8 +24,10 @@ public sealed class PackageArtifactRegressionTests
             string.Equals(element.Attribute("source")?.Value, "desktop/SlideSmith.exe", StringComparison.Ordinal));
     }
 
-    [Fact]
-    public void BothWindowsPackagingJobsValidateCurrentInstallerMappings()
+    [Theory]
+    [InlineData("build.yml", 2)]
+    [InlineData("release.yml", 1)]
+    public void WindowsPackagingJobsValidateCurrentInstallerMappings(string workflowName, int jobCount)
     {
         var repository = new DirectoryInfo(AppContext.BaseDirectory);
         while (repository is not null && !File.Exists(Path.Combine(repository.FullName, "BodyslideConverter.slnx")))
@@ -33,22 +35,28 @@ public sealed class PackageArtifactRegressionTests
             repository = repository.Parent;
         }
         Assert.NotNull(repository);
-        var workflow = File.ReadAllText(Path.Combine(repository.FullName, ".github", "workflows", "build.yml"));
+        var workflow = File.ReadAllText(Path.Combine(repository.FullName, ".github", "workflows", workflowName));
         var config = new System.Xml.XmlDocument();
         config.Load(Path.Combine(repository.FullName, "packaging", "windows-bundle", "fomod", "ModuleConfig.xml"));
         var mappings = System.Text.RegularExpressions.Regex.Matches(workflow,
             @"'(?:folder|file)\[@source=""[^""]+"" and @destination=""[^""]+""\]'");
         var entries = config.SelectNodes("/config/requiredInstallFiles/*")!;
-        Assert.Equal(entries.Count * 2, mappings.Count);
+        Assert.Equal(entries.Count * jobCount, mappings.Count);
         foreach (System.Xml.XmlElement entry in entries)
         {
             var mapping = $"{entry.Name}[@source=\"{entry.GetAttribute("source")}\" and @destination=\"{entry.GetAttribute("destination")}\"]";
-            Assert.Equal(2, mappings.Count(match => match.Value == $"'{mapping}'"));
+            Assert.Equal(jobCount, mappings.Count(match => match.Value == $"'{mapping}'"));
             Assert.NotNull(config.SelectSingleNode($"/config/requiredInstallFiles/{mapping}"));
         }
         Assert.DoesNotContain("'source=\"desktop/SlideSmith.exe\"'", workflow);
-        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(workflow,
+        Assert.Equal(jobCount, System.Text.RegularExpressions.Regex.Matches(workflow,
             @"SelectSingleNode\(""/config/requiredInstallFiles/\$mapping""\)").Count);
+        Assert.Equal(jobCount, System.Text.RegularExpressions.Regex.Matches(workflow,
+            @"Copy-Item artifacts/win-x64-manager/\* \$desktopBundle").Count);
+        Assert.Equal(jobCount, System.Text.RegularExpressions.Regex.Matches(workflow,
+            @"sourceDesktopPublish = ""artifacts/win-x64-manager""").Count);
+        Assert.Equal(jobCount, System.Text.RegularExpressions.Regex.Matches(workflow,
+            @"foreach \(\$dependency in @\(""SlideSmith.dll"", ""SlideSmith.runtimeconfig.json"", ""hostfxr.dll"", ""coreclr.dll""\)\)").Count);
     }
 
     public static IEnumerable<object[]> InvalidRuntimePhysicsArtifacts()

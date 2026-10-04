@@ -42,6 +42,17 @@ jobs:
           -p:DebugSymbols=false
           --output artifacts/win-x64
 
+      - name: Publish Windows mod-manager desktop (no self-extraction)
+        run: >
+          dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=false
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --output artifacts/win-x64-manager
+
       - name: Publish Windows standalone CLI (single file)
         run: >
           dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj
@@ -69,7 +80,7 @@ jobs:
           New-Item -ItemType Directory -Path $desktopBundle -Force | Out-Null
           New-Item -ItemType Directory -Path $cliBundle -Force | Out-Null
           New-Item -ItemType Directory -Path $metaBundle -Force | Out-Null
-          Copy-Item artifacts/win-x64/* $desktopBundle -Recurse -Force
+          Copy-Item artifacts/win-x64-manager/* $desktopBundle -Recurse -Force
           Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
           Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
           $bundleMetadata = [ordered]@{
@@ -79,7 +90,7 @@ jobs:
             fomodModuleConfig = "fomod/ModuleConfig.xml"
             fomodInfo = "fomod/info.xml"
             modOrganizerMetadata = "meta.ini"
-            sourceDesktopPublish = "artifacts/win-x64"
+            sourceDesktopPublish = "artifacts/win-x64-manager"
             sourceCliPublish = "artifacts/win-x64-cli"
           } | ConvertTo-Json
           Set-Content -Path (Join-Path $metaBundle "slidesmith-bundle.json") -Value $bundleMetadata -Encoding UTF8
@@ -117,11 +128,35 @@ jobs:
             throw "Missing meta.ini in bundle zip."
           }
 
-          $moduleConfig = Get-Content (Join-Path $extractPath "fomod/ModuleConfig.xml") -Raw
-          foreach ($requiredEntry in @('source="desktop"', 'source="cli"', 'source="meta"', 'source="desktop/SlideSmith.exe"', 'source="cli/SlideSmith-CLI.exe"', 'source="README.txt"', 'source="meta.ini"')) {
-            if ($moduleConfig -notmatch [regex]::Escape($requiredEntry)) {
-              throw "Bundle FOMOD metadata is missing installer entry $requiredEntry."
+          [xml]$moduleConfig = Get-Content (Join-Path $extractPath "fomod/ModuleConfig.xml") -Raw
+          $requiredMappings = @(
+            'folder[@source="desktop" and @destination="CalienteTools/SlideSmith"]',
+            'folder[@source="cli" and @destination="CalienteTools/SlideSmith/cli"]',
+            'folder[@source="meta" and @destination="CalienteTools/SlideSmith/meta"]',
+            'file[@source="cli/SlideSmith-CLI.exe" and @destination="CalienteTools/SlideSmith/SlideSmith-CLI.exe"]',
+            'file[@source="README.txt" and @destination="CalienteTools/SlideSmith/README.txt"]',
+            'file[@source="meta.ini" and @destination="CalienteTools/SlideSmith/meta.ini"]'
+          )
+          foreach ($mapping in $requiredMappings) {
+            if (!$moduleConfig.SelectSingleNode("/config/requiredInstallFiles/$mapping")) {
+              throw "Bundle FOMOD metadata is missing installer mapping $mapping."
             }
+          }
+          $installPath = Join-Path $extractPath "installed/CalienteTools/SlideSmith"
+          New-Item -ItemType Directory -Path $installPath -Force | Out-Null
+          Copy-Item (Join-Path $extractPath "desktop/*") $installPath -Recurse -Force
+          foreach ($dependency in @("SlideSmith.dll", "SlideSmith.runtimeconfig.json", "hostfxr.dll", "coreclr.dll")) {
+            if (!(Test-Path (Join-Path $installPath $dependency))) {
+              throw "Missing desktop dependency $dependency in installed bundle."
+            }
+          }
+          $desktopProcess = Start-Process -FilePath (Join-Path $installPath "SlideSmith.exe") -WorkingDirectory $installPath -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($desktopProcess.ExitCode -ne 0) {
+            throw "Installed Windows bundle desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
+          }
+          & (Join-Path $extractPath "cli/SlideSmith-CLI.exe") --self-check
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged Windows CLI self-check failed with exit code $LASTEXITCODE."
           }
 
       - name: Create GitHub Release and upload executables

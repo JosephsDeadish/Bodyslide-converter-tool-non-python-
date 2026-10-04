@@ -12,6 +12,25 @@ internal static class DesktopLaunchPathResolver
             : Path.GetDirectoryName(Path.GetFullPath(desktopPath))!;
     }
 
+    internal static string? FindCliExecutable(string desktopDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(desktopDirectory))
+        {
+            return null;
+        }
+
+        var nestedCliDirectory = Path.Combine(desktopDirectory, "cli");
+        var siblingCliDirectory = Path.GetFullPath(Path.Combine(desktopDirectory, "..", "cli"));
+        return new[]
+        {
+            Path.Combine(desktopDirectory, "SlideSmith-CLI.exe"),
+            Path.Combine(nestedCliDirectory, "SlideSmith-CLI.exe"),
+            Path.Combine(siblingCliDirectory, "SlideSmith-CLI.exe"),
+            Path.Combine(nestedCliDirectory, "SlideSmith.exe"),
+            Path.Combine(siblingCliDirectory, "SlideSmith.exe")
+        }.FirstOrDefault(File.Exists);
+    }
+
     internal static IReadOnlyList<string> GetLikelyDesktopCandidateDirectories(string executableDirectory)
     {
         if (string.IsNullOrWhiteSpace(executableDirectory))

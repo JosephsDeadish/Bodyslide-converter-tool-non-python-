@@ -5828,7 +5828,7 @@ public sealed class MainForm : Form
             ? FindSiblingDesktopExecutable(processDirectory) ?? processPath
             : processPath;
         var workingDirectory = Path.GetDirectoryName(desktopPath) ?? processDirectory;
-        var cliPath = FindSiblingCliExecutable(workingDirectory);
+        var cliPath = DesktopLaunchPathResolver.FindCliExecutable(workingDirectory);
 
         var guidance = DesktopWorkflowSupport.BuildMo2SetupGuidance(
             processPath,
@@ -5863,36 +5863,6 @@ public sealed class MainForm : Form
 
     private static bool HasEnvironmentVariable(string name) =>
         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
-
-    private static string? FindSiblingCliExecutable(string desktopDirectory)
-    {
-        var sameDirectory = Path.Combine(desktopDirectory, "SlideSmith-CLI.exe");
-        if (File.Exists(sameDirectory))
-        {
-            return sameDirectory;
-        }
-
-        var sameDirectoryStandaloneName = Path.Combine(desktopDirectory, "SlideSmith.exe");
-        if (File.Exists(sameDirectoryStandaloneName))
-        {
-            return sameDirectoryStandaloneName;
-        }
-
-        var siblingCliDirectory = Path.GetFullPath(Path.Combine(desktopDirectory, "..", "cli"));
-        foreach (var candidate in new[]
-                 {
-                     Path.Combine(siblingCliDirectory, "SlideSmith-CLI.exe"),
-                     Path.Combine(siblingCliDirectory, "SlideSmith.exe")
-                 })
-        {
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
-    }
 
     private static string? FindSiblingDesktopExecutable(string executableDirectory)
     {

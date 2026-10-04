@@ -3,6 +3,48 @@ namespace Bodyslide.Core.Tests;
 public sealed class DesktopLaunchPathResolverTests
 {
     [Theory]
+    [InlineData("installed", "cli/SlideSmith-CLI.exe")]
+    [InlineData("desktop", "../cli/SlideSmith-CLI.exe")]
+    [InlineData("installed", "SlideSmith-CLI.exe")]
+    [InlineData("installed", "cli/SlideSmith.exe")]
+    [InlineData("desktop", "../cli/SlideSmith.exe")]
+    public void FindCliExecutableDoesNotMistakeDesktopForBundledCli(string desktopFolder, string cliRelativePath)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "slidesmith-cli-guidance", Guid.NewGuid().ToString("N"));
+        var desktopDirectory = Path.Combine(root, desktopFolder);
+        var cliPath = Path.GetFullPath(Path.Combine(desktopDirectory, cliRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+        Directory.CreateDirectory(desktopDirectory);
+        Directory.CreateDirectory(Path.GetDirectoryName(cliPath)!);
+        try
+        {
+            File.WriteAllText(Path.Combine(desktopDirectory, "SlideSmith.exe"), "desktop");
+            File.WriteAllText(cliPath, "cli");
+            Assert.Equal(cliPath, DesktopLaunchPathResolver.FindCliExecutable(desktopDirectory));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void FindCliExecutableReturnsNullWhenOnlyDesktopExists()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var desktopDirectory = Path.Combine(root, "desktop");
+        Directory.CreateDirectory(desktopDirectory);
+        try
+        {
+            File.WriteAllText(Path.Combine(desktopDirectory, "SlideSmith.exe"), "desktop");
+            Assert.Null(DesktopLaunchPathResolver.FindCliExecutable(desktopDirectory));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
     [InlineData("SlideSmith.exe")]
     [InlineData("SlideSmith.dll")]
     public void HandoffPreservesCallerWorkingDirectoryForRelativeResultPaths(string desktopFile)
