@@ -125,6 +125,11 @@ redirect textures. Missing, unreadable, ambiguous multi-folder project inputs,
 unknown NIF layouts, materials, scripts, and plugin texture swaps still retain the
 conservative full texture set. Companion selection uses hashed filename prefixes
 instead of comparing every texture against every referenced family.
+Source morph discovery also respects authored `DataFolder` paths: a missing
+reference NIF or morph file must not be replaced by a same-named file in
+`SliderSets`, the BodySlide root, or a folder named after the project. Discovery
+and cache invalidation use the authored ShapeData folder, even when its name
+differs from the SliderSet name.
 Plugin verification accepts repeated normalized source paths and keeps an
 unsupported report when duplicate reports disagree, rather than throwing a
 duplicate-key exception or hiding the unsupported mesh.

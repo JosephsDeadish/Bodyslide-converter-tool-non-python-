@@ -429,25 +429,7 @@ internal static class BodySlideSourceProjectSupport
             foreach (var reference in references)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                IEnumerable<string> candidatePaths = ResolveLinkedPathCandidates(probe, reference);
-                if (probe.DataFolders is { Count: 1 })
-                {
-                    if (string.IsNullOrWhiteSpace(probe.BodySlideRoot))
-                    {
-                        return false;
-                    }
-                    var normalized = reference.Replace('\\', '/');
-                    const string bodySlidePrefix = "CalienteTools/BodySlide/";
-                    if (normalized.StartsWith(bodySlidePrefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        normalized = normalized[bodySlidePrefix.Length..];
-                    }
-                    var relative = normalized.StartsWith("ShapeData/", StringComparison.OrdinalIgnoreCase)
-                        ? normalized
-                        : "ShapeData/" + probe.DataFolders[0].Replace('\\', '/') + "/" + normalized;
-                    candidatePaths = [Path.Combine(probe.BodySlideRoot, relative.Replace('/', Path.DirectorySeparatorChar))];
-                }
-                var candidates = candidatePaths.Where(File.Exists).ToArray();
+                var candidates = ResolveLinkedPathCandidates(probe, reference).Where(File.Exists).ToArray();
                 if (candidates.Length == 0)
                 {
                     return false;
@@ -828,7 +810,7 @@ internal static class BodySlideSourceProjectSupport
             }
         }
 
-        foreach (var projectName in probe.ProjectNames)
+        foreach (var projectName in GetShapeDataFolderNames(probe))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(probe.BodySlideRoot))
@@ -872,7 +854,7 @@ internal static class BodySlideSourceProjectSupport
         if (!string.IsNullOrWhiteSpace(probe.BodySlideRoot))
         {
             stamps.Add(GetDirectoryStamp(Path.Combine(probe.BodySlideRoot, "ShapeData")));
-            foreach (var projectName in probe.ProjectNames)
+            foreach (var projectName in GetShapeDataFolderNames(probe))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var shapeDataFolder = Path.Combine(probe.BodySlideRoot, "ShapeData", projectName);
@@ -913,16 +895,37 @@ internal static class BodySlideSourceProjectSupport
             yield break;
         }
 
+        if (probe.DataFolders is { Count: > 0 })
+        {
+            if (string.IsNullOrWhiteSpace(probe.BodySlideRoot))
+            {
+                yield break;
+            }
+            var bodySlidePrefix = $"CalienteTools{Path.DirectorySeparatorChar}BodySlide{Path.DirectorySeparatorChar}";
+            if (normalized.StartsWith(bodySlidePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized[bodySlidePrefix.Length..];
+            }
+            if (normalized.StartsWith($"ShapeData{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return Path.Combine(probe.BodySlideRoot, normalized);
+            }
+            else
+            {
+                foreach (var dataFolder in probe.DataFolders)
+                {
+                    var folder = dataFolder.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+                    yield return Path.Combine(probe.BodySlideRoot, "ShapeData", folder, normalized);
+                }
+            }
+            yield break;
+        }
+
         yield return Path.Combine(probe.OspDirectory, normalized);
         if (!string.IsNullOrWhiteSpace(probe.BodySlideRoot))
         {
             yield return Path.Combine(probe.BodySlideRoot, normalized);
             yield return Path.Combine(probe.BodySlideRoot, "ShapeData", normalized);
-            foreach (var dataFolder in probe.DataFolders ?? [])
-            {
-                var folder = dataFolder.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
-                yield return Path.Combine(probe.BodySlideRoot, "ShapeData", folder, normalized);
-            }
 
             var bodySlidePrefix = $"CalienteTools{Path.DirectorySeparatorChar}BodySlide{Path.DirectorySeparatorChar}";
             if (normalized.StartsWith(bodySlidePrefix, StringComparison.OrdinalIgnoreCase))
@@ -931,6 +934,11 @@ internal static class BodySlideSourceProjectSupport
             }
         }
     }
+
+    private static IReadOnlyList<string> GetShapeDataFolderNames(BodySlideProjectProbe probe) =>
+        (probe.DataFolders is { Count: > 0 } ? probe.DataFolders : probe.ProjectNames)
+            .Select(static folder => folder.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar))
+            .ToArray();
 
     private static bool TryProbeOspProject(string ospPath, out BodySlideProjectProbe probe)
     {

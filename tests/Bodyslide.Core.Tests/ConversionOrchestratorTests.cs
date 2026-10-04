@@ -11442,6 +11442,60 @@ public sealed class BsdSliderDataTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BodySlideSourceSupport_UsesAuthoredDataFolderInsteadOfSameNamedShadowAssets(bool includeAuthoredPayload)
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(root, "meshes", "armor");
+        var bodySlide = Path.Combine(root, "CalienteTools", "BodySlide");
+        var sliderSets = Path.Combine(bodySlide, "SliderSets");
+        var authoredFolder = Path.Combine(bodySlide, "ShapeData", "AuthoredAssets");
+        var nameFolder = Path.Combine(bodySlide, "ShapeData", "UnrelatedProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(sliderSets);
+        Directory.CreateDirectory(authoredFolder);
+        Directory.CreateDirectory(nameFolder);
+        var meshPath = Path.Combine(meshDirectory, "traveler_0.nif");
+        await File.WriteAllTextAsync(meshPath, "mesh");
+        await File.WriteAllTextAsync(Path.Combine(sliderSets, "traveler.osp"), """
+            <SliderSetInfo><SliderSet name="UnrelatedProject">
+              <OutputFile>traveler</OutputFile><DataFolder>AuthoredAssets</DataFolder>
+              <InputFile>source.nif</InputFile>
+              <Slider name="TravelerWaist"><DataFile>morphs.osd</DataFile></Slider>
+            </SliderSet></SliderSetInfo>
+            """);
+        await File.WriteAllTextAsync(Path.Combine(sliderSets, "source.nif"), "wrong reference");
+        await File.WriteAllBytesAsync(Path.Combine(sliderSets, "morphs.osd"),
+            BuildOutfitStudioOsdPayload(version: 1, ("ShadowMorph", [(0, 0.8f, 0f, 0f)])));
+        await File.WriteAllBytesAsync(Path.Combine(nameFolder, "unrelated.osd"),
+            BuildOutfitStudioOsdPayload(version: 1, ("WrongProjectMorph", [(0, 0.6f, 0f, 0f)])));
+        if (includeAuthoredPayload)
+        {
+            await File.WriteAllBytesAsync(Path.Combine(authoredFolder, "morphs.osd"),
+                BuildOutfitStudioOsdPayload(version: 1, ("AuthoredMorph", [(0, 0.2f, 0f, 0f)])));
+        }
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+            Assert.Contains("TravelerWaist", resolved.Sliders);
+            Assert.DoesNotContain("ShadowMorph", resolved.Sliders);
+            Assert.DoesNotContain("WrongProjectMorph", resolved.Sliders);
+            Assert.Equal(includeAuthoredPayload, resolved.Sliders.Contains("AuthoredMorph"));
+            Assert.NotNull(resolved.SourceAssetSupport);
+            Assert.False(resolved.SourceAssetSupport.HasReferenceAssets);
+            await File.WriteAllBytesAsync(Path.Combine(authoredFolder, "additional.osd"),
+                BuildOutfitStudioOsdPayload(version: 1, ("AddedAuthoredMorph", [(0, 0.3f, 0f, 0f)])));
+            var updated = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+            Assert.Contains("AddedAuthoredMorph", updated.Sliders);
+            Assert.DoesNotContain("ShadowMorph", updated.Sliders);
+            Assert.DoesNotContain("WrongProjectMorph", updated.Sliders);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     [Fact]
     public async Task BodySlideSourceSupport_ReprobesAddedShapeDataAssets()
     {
