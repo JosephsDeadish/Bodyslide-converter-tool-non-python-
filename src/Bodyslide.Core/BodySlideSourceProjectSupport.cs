@@ -1189,7 +1189,6 @@ internal static class BodySlideSourceProjectSupport
             var sliders = new List<SourceSliderCandidate>();
             var zapSliders = new List<SourceSliderCandidate>();
 
-            var meshTokens = meshFiles.Select(NormalizeMeshToken).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var sets = document.Descendants("SliderSet").Where(set =>
             {
                 var output = set.Elements().FirstOrDefault(element =>
@@ -1199,7 +1198,10 @@ internal static class BodySlideSourceProjectSupport
                 if (stem.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)) stem = stem[..^4];
                 if (stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
                     stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase)) stem = stem[..^2];
-                return meshTokens.Contains(stem);
+                var outputPath = set.Elements().FirstOrDefault(element =>
+                    element.Name.LocalName.Equals("OutputPath", StringComparison.OrdinalIgnoreCase))?.Value;
+                return meshFiles.Any(mesh => NormalizeMeshToken(mesh).Equals(stem, StringComparison.OrdinalIgnoreCase) &&
+                    MatchesOutputDirectory(mesh, outputPath));
             }).ToArray();
             var sliderElements = document.Descendants("SliderSet").Any()
                 ? sets.SelectMany(static set => set.Descendants("Slider"))
@@ -1243,6 +1245,19 @@ internal static class BodySlideSourceProjectSupport
         return token.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || token.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
             ? token[..^2]
             : token;
+    }
+
+    private static bool MatchesOutputDirectory(string meshPath, string? outputPath)
+    {
+        if (string.IsNullOrWhiteSpace(outputPath)) return true;
+        var declared = outputPath.Trim().Replace('\\', '/').Trim('/');
+        if (declared.Equals("meshes", StringComparison.OrdinalIgnoreCase)) declared = string.Empty;
+        else if (declared.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase)) declared = declared[7..];
+        var parts = Path.GetFullPath(meshPath).Replace('\\', '/').Split('/');
+        var meshesIndex = Array.FindLastIndex(parts, part => part.Equals("meshes", StringComparison.OrdinalIgnoreCase));
+        if (meshesIndex < 0) return true;
+        var actual = string.Join("/", parts.Skip(meshesIndex + 1).Take(parts.Length - meshesIndex - 2));
+        return actual.Equals(declared, StringComparison.OrdinalIgnoreCase);
     }
 
     private static IReadOnlyList<string> MergeSliderLists(IReadOnlyList<string> primary, IReadOnlyList<SourceSliderCandidate> secondary)

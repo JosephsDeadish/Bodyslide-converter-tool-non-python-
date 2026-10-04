@@ -5,6 +5,42 @@ namespace Bodyslide.Core.Tests;
 public sealed class BodySlideSourceAssociationTests
 {
     [Theory]
+    [InlineData(@"meshes\armor\first\", @"meshes\armor\second\")]
+    [InlineData("armor/first", "armor/second")]
+    [InlineData("meshes/armor/first/", "meshes/armor/first_extra/")]
+    public async Task SameNamedMeshesUseDeclaredOutputDirectory(string ownPath, string otherPath)
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            var meshDirectory = Path.Combine(root, "meshes", "armor", "first");
+            var projects = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(meshDirectory);
+            Directory.CreateDirectory(projects);
+            var mesh = Path.Combine(meshDirectory, "jacket_0.nif");
+            var project = Path.Combine(projects, "pack.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllTextAsync(project, $"""
+                <SliderSetInfo>
+                  <SliderSet name="First"><OutputPath>{ownPath}</OutputPath><OutputFile>jacket</OutputFile>
+                    <Slider name="FirstFit"/><Slider name="HideFirst" zap="true"/>
+                  </SliderSet>
+                  <SliderSet name="Second"><OutputPath>{otherPath}</OutputPath><OutputFile>jacket</OutputFile>
+                    <Slider name="SecondFit"/><Slider name="HideSecond" zap="true"/>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+            Assert.Contains("FirstFit", result.Sliders);
+            Assert.Contains("HideFirst", result.ZapSliders);
+            Assert.DoesNotContain("SecondFit", result.Sliders);
+            Assert.DoesNotContain("HideSecond", result.ZapSliders);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ImportedPackProjectsDoNotAddUnrelatedArmorSliders(bool singleProjectFile)

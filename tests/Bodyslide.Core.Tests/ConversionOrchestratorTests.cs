@@ -38,6 +38,11 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains(result.Steps, s => s.StartsWith("pipeline-total-ms:", StringComparison.Ordinal));
             var timingsPath = Path.Combine(outputDirectory, "conversion-timings.json");
             Assert.True(File.Exists(timingsPath));
+            var inventoryPath = Path.Combine(outputDirectory, "output-size-inventory.json");
+            Assert.Contains(inventoryPath, result.OutputFiles);
+            using var inventory = JsonDocument.Parse(await File.ReadAllTextAsync(inventoryPath));
+            Assert.True(inventory.RootElement.GetProperty("Complete").GetBoolean());
+            Assert.True(inventory.RootElement.GetProperty("TotalBytes").GetInt64() > 0);
 
             using var timings = JsonDocument.Parse(await File.ReadAllTextAsync(timingsPath));
             var phaseMilliseconds = timings.RootElement.GetProperty("PhaseMilliseconds");

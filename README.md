@@ -139,8 +139,11 @@ differs from the SliderSet name.
 OSP slider and zap names are selected per SliderSet using its declared output
 mesh stem (including `_0`/`_1` normalization), so unrelated armor projects imported
 from the same pack do not add their sliders. Legacy sets without output metadata
-retain their existing behavior. This does not yet prove shape-specific OSD/TRI
-payload ownership, nor distinguish same-named outputs in different directories.
+retain their existing behavior. When a source mesh is under a `meshes` root,
+declared `OutputPath` must match its game-relative directory, distinguishing
+same-named armor in different folders. This does not yet prove shape-specific
+OSD/TRI payload ownership; loose files without a known `meshes` root retain
+filename-only compatibility.
 Morph import rejects non-finite displacements, out-of-range vertex indexes,
 overflowing counts and malformed trailing TRI bytes. Reads are capped at 64 MiB
 per BSD/TRI/OSD file; dense expansion is capped at 8,388,608 deltas per payload
@@ -151,6 +154,15 @@ preventing 32-bit indexes and deltas from being silently read as 16-bit data.
 BodySlide TRI files may include an optional UV morph section; its structure is
 validated without treating UV offsets as position displacements. Legacy files
 ending after position morphs remain supported.
+
+Completed per-item conversions write `output-size-inventory.json` beside their
+timing reports. This metadata-only inventory separates physical mesh, texture,
+morph, plugin, report, archive and other bytes; a sibling ZIP is counted in
+addition to unpacked files, not as a duplicate-free install size. The scan checks
+cancellation, skips links and stops after 100,000 entries. `Complete=false` and
+warnings identify partial inventories. The inventory excludes itself and is
+written after ZIP closure, so it is not included in that ZIP or completed pipeline
+timing. Batch totals and peak-memory profiling still require separate measurement.
 
 Issue #8 reporting/performance corrections:
 - Morph generation and BodySlide preparation share one immutable source-resolution

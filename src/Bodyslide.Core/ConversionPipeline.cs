@@ -8106,6 +8106,14 @@ public sealed class ConversionOrchestrator(
                 FinalizeTimings();
             }
             outputFiles.Add(timingPath);
+            var inventoryPath = Path.Combine(export.OutputDirectory, "output-size-inventory.json");
+            var inventory = OutputSizeInventory.Create(export.OutputDirectory,
+                normalized.Request.OutputZip ? outputFiles.LastOrDefault(path =>
+                    Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase)) : null,
+                cancellationToken);
+            await File.WriteAllTextAsync(inventoryPath,
+                JsonSerializer.Serialize(inventory, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+            outputFiles.Add(inventoryPath);
             return new ConversionResult(true, export.OutputDirectory, steps, outputFiles);
         }
         finally
