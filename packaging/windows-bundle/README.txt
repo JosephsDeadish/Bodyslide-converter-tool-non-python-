@@ -26,6 +26,9 @@ Startup diagnostics are recorded automatically in
 %LOCALAPPDATA%\SlideSmith\startup-launch-diagnostics.log. The log distinguishes
 process entry, window construction, and window display. If no new entry appears,
 failure occurred before managed startup (or the log directory was unwritable).
+CLI-to-desktop startup also logs its candidate search and immediate process
+failures automatically. The nested cli/ executable can find the installed
+desktop in its parent folder using the desktop runtime configuration.
 This packaging removes the native self-extraction step, but live MO2/USVFS
 compatibility must still be checked on Windows.
 

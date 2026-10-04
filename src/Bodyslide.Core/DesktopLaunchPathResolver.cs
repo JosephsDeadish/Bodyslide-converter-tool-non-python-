@@ -1,9 +1,76 @@
+using System.Text.Json;
+
 namespace Bodyslide.Core;
 
 internal static class DesktopLaunchPathResolver
 {
     private const string DesktopTargetFramework = "net10.0-windows";
     private static readonly string[] DesktopConfigurations = ["Debug", "Release"];
+
+    internal static IReadOnlyList<string> GetDesktopCandidates(
+        IReadOnlyList<string> directories, bool useDll)
+    {
+        var names = useDll
+            ? new[] { "SlideSmith.Desktop.dll", "Bodyslide.Desktop.dll", "SlideSmith.dll" }
+            : new[] { "SlideSmith.exe", "SlideSmith.Desktop.exe", "Bodyslide.Desktop.exe", "SlideSmith-Desktop.exe" };
+        var candidates = new List<string>();
+        for (var index = 0; index < directories.Count; index++)
+        {
+            var directory = directories[index];
+            var acceptsSharedName = index == 0 ||
+                Path.GetFileName(Path.TrimEndingDirectorySeparator(directory))
+                    .Equals("desktop", StringComparison.OrdinalIgnoreCase) ||
+                HasDesktopRuntimeConfiguration(directory);
+            foreach (var name in names)
+            {
+                if (name.Equals(useDll ? "SlideSmith.dll" : "SlideSmith.exe", StringComparison.OrdinalIgnoreCase) &&
+                    !acceptsSharedName)
+                {
+                    continue;
+                }
+                candidates.Add(Path.Combine(directory, name));
+            }
+        }
+        return candidates.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static bool HasDesktopRuntimeConfiguration(string directory)
+    {
+        try
+        {
+            var path = Path.Combine(directory, "SlideSmith.runtimeconfig.json");
+            if (!File.Exists(path) || new FileInfo(path).Length > 64 * 1024)
+            {
+                return false;
+            }
+            using var stream = File.OpenRead(path);
+            using var document = JsonDocument.Parse(stream);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("runtimeOptions", out var options) ||
+                options.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+            return (options.TryGetProperty("framework", out var framework) && IsDesktopFramework(framework)) ||
+                HasDesktopFrameworkArray(options, "frameworks") ||
+                HasDesktopFrameworkArray(options, "includedFrameworks");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasDesktopFrameworkArray(JsonElement options, string property) =>
+        options.TryGetProperty(property, out var frameworks) &&
+        frameworks.ValueKind == JsonValueKind.Array &&
+        frameworks.EnumerateArray().Any(IsDesktopFramework);
+
+    private static bool IsDesktopFramework(JsonElement framework) =>
+        framework.ValueKind == JsonValueKind.Object &&
+        framework.TryGetProperty("name", out var name) &&
+        name.ValueKind == JsonValueKind.String &&
+        name.GetString() == "Microsoft.WindowsDesktop.App";
 
     internal static string ResolveWorkingDirectory(string launchWorkingDirectory, string desktopPath)
     {

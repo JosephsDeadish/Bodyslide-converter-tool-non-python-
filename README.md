@@ -100,7 +100,9 @@ still take precedence over desktop handoff.
 Desktop readiness/proof scans now run in the background after the window opens,
 not in its constructor. Ordinary GUI launches automatically record startup phases
 in `%LOCALAPPDATA%\SlideSmith\startup-launch-diagnostics.log` (bounded to roughly
-1 MB); `--startup-diagnostics <path>` selects another location. Windows smoke
+1 MB); Windows CLI-to-desktop handoffs now record these diagnostics automatically
+too, including candidate discovery and immediate process failures.
+`--startup-diagnostics <path>` selects another location. Windows smoke
 checks show the window and run the message loop before closing.
 
 For duplicate-key or unexpectedly slow/large conversions, retain the complete
@@ -461,14 +463,24 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 |---|---|---|
 | `SlideSmith.exe` | Windows | Desktop GUI — double-click to open, drag-and-drop armor |
 | `SlideSmith-CLI.exe` | Windows | Command-line tool — run from a terminal with `--help` |
-| `slidesmith-win-x64-bundle.zip` | Windows | MO2/Vortex-installable SkyrimSE bundle that installs under `CalienteTools/SlideSmith` with `SlideSmith.exe`, `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.txt`, `meta/slidesmith-bundle.json`, `meta.ini`, and `fomod/` installer metadata |
+| `slidesmith-win-x64-bundle.zip` | Windows | MO2/Vortex-installable SkyrimSE bundle; installs the desktop EXE and runtime files under `CalienteTools/SlideSmith`, with `cli/SlideSmith-CLI.exe`, `README.txt`, `meta/slidesmith-bundle.json` and `meta.ini`; archive also contains FOMOD metadata |
 | `slidesmith-linux-x64.zip` | Linux | Single CLI binary |
 
 Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.
 
-For Mod Organizer 2, set the executable to `<mod>\CalienteTools\SlideSmith\SlideSmith.exe` with `--mo2-launcher` and keep the Start In folder on the same `CalienteTools\SlideSmith` path so MO2's VFS/USVFS hook can inject mods before startup.
+For Mod Organizer 2, set Binary to the installed physical path
+`<mod>\CalienteTools\SlideSmith\SlideSmith.exe` and Start in to its containing
+folder. Leave Arguments empty for a normal GUI launch; `--mo2-launcher` only adds
+context information and does not enable or repair MO2's VFS/USVFS hook.
+Keep every desktop runtime file alongside the EXE, and launch from MO2 when
+testing managed asset visibility.
 
-If `SlideSmith-CLI.exe` is launched with **no arguments**, the CLI now auto-opens the desktop GUI when `SlideSmith.exe` is available either in the same folder or in a sibling `desktop/` folder (bundle layout), instead of just printing usage and exiting.
+If `SlideSmith-CLI.exe` is launched with **no arguments**, it can auto-open the
+desktop in the same folder, a sibling `desktop/` folder (unpacked bundle), or
+the installed parent folder above `cli/`. The parent-folder shared
+`SlideSmith.exe` name is accepted only when its runtime configuration identifies
+Windows Desktop, so unrelated CLI builds are not treated as a GUI. Explicit
+CLI conversion/list/help switches still bypass GUI handoff.
 
 ## GitHub Actions (CI)
 

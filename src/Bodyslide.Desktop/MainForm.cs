@@ -205,7 +205,7 @@ public sealed class MainForm : Form
 
     private const int MainSplitPreferredDistance = 560;
     private const int MainSplitPanel1Minimum = 360;
-    private const int MainSplitPanel2Minimum = 220;
+    private const int MainSplitPanel2Minimum = 340;
     private const int MaxLogCharacters = 120000;
     private const int TrimmedLogCharacters = 90000;
     private const int MaxLoggedStepsPerResult = 80;
@@ -432,13 +432,12 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Top,
             ColumnCount = 1,
-            RowCount = 8,
+            RowCount = 7,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Padding = new Padding(12),
         };
         _topLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -1301,8 +1300,8 @@ public sealed class MainForm : Form
         {
             Name = "convertButton",
             Text = "Start conversion",
-            Width = 220,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(220, 34),
             Margin = new Padding(0, 0, 12, 0),
             Font = new Font(Font, FontStyle.Bold),
         };
@@ -1311,8 +1310,8 @@ public sealed class MainForm : Form
         {
             Name = "cancelButton",
             Text = "Cancel",
-            Width = 90,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(90, 34),
             Enabled = false,
             Margin = new Padding(0, 0, 8, 0),
         };
@@ -1321,8 +1320,8 @@ public sealed class MainForm : Form
         {
             Name = "clearLogButton",
             Text = "Clear log",
-            Width = 90,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(90, 34),
             Margin = new Padding(0, 0, 8, 0),
         };
         _clearLogButton.Click += (_, _) => ClearLog();
@@ -1330,8 +1329,8 @@ public sealed class MainForm : Form
         {
             Name = "copyCurrentViewButton",
             Text = "Copy view",
-            Width = 100,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(100, 34),
             Margin = new Padding(0, 0, 8, 0),
         };
         _copyCurrentViewButton.Click += (_, _) => CopyCurrentViewToClipboard();
@@ -1339,8 +1338,8 @@ public sealed class MainForm : Form
         {
             Name = "openOutputButton",
             Text = "Open output",
-            Width = 110,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(110, 34),
             Enabled = false,
             Margin = new Padding(0, 0, 8, 0),
         };
@@ -1349,8 +1348,8 @@ public sealed class MainForm : Form
         {
             Name = "showPreviewButton",
             Text = "Show preview",
-            Width = 110,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(110, 34),
             Enabled = false,
             Margin = new Padding(0, 0, 8, 0),
         };
@@ -1358,9 +1357,9 @@ public sealed class MainForm : Form
         _loadResultButton = new Button
         {
             Name = "loadResultButton",
-            Text = "Load result...",
-            Width = 110,
-            Height = 34,
+            Text = "Load previous result...",
+            AutoSize = true,
+            MinimumSize = new Size(110, 34),
             Margin = new Padding(0, 0, 8, 0),
         };
         _loadResultButton.Click += async (_, _) => await LoadPreviousResultAsync();
@@ -1368,8 +1367,8 @@ public sealed class MainForm : Form
         {
             Name = "openBatchReportButton",
             Text = "Batch report",
-            Width = 110,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(110, 34),
             Enabled = false,
         };
         _openBatchReportButton.Click += (_, _) => OpenBatchReport();
@@ -1377,8 +1376,8 @@ public sealed class MainForm : Form
         {
             Name = "openReportButton",
             Text = "Open report",
-            Width = 110,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(110, 34),
             Enabled = false,
             Margin = new Padding(0, 0, 8, 0),
         };
@@ -1387,8 +1386,8 @@ public sealed class MainForm : Form
         {
             Name = "openGuidanceTargetButton",
             Text = "Open next action",
-            Width = 125,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(125, 34),
             Enabled = false,
             Margin = new Padding(0, 0, 8, 0),
         };
@@ -1397,8 +1396,8 @@ public sealed class MainForm : Form
         {
             Name = "openArtifactButton",
             Text = "Open file",
-            Width = 110,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(110, 34),
             Enabled = false,
             Margin = new Padding(8, 0, 8, 0),
         };
@@ -1407,8 +1406,8 @@ public sealed class MainForm : Form
         {
             Name = "loadCustomProfileButton",
             Text = "Load custom profile...",
-            Width = 140,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(140, 34),
             Margin = new Padding(0, 0, 8, 0),
         };
         _loadCustomProfileButton.Click += (_, _) => LoadCustomProfileFile();
@@ -1416,8 +1415,8 @@ public sealed class MainForm : Form
         {
             Name = "saveProfileButton",
             Text = "Save profile...",
-            Width = 110,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(110, 34),
             Margin = new Padding(0, 0, 8, 0),
         };
         _saveProfileButton.Click += (_, _) => SaveCurrentProfile();
@@ -1425,16 +1424,16 @@ public sealed class MainForm : Form
         {
             Name = "inspectCacheButton",
             Text = "Inspect cache",
-            Width = 110,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(110, 34),
         };
         _inspectCacheButton.Click += async (_, _) => await InspectLearningCacheAsync(showDialogs: true, switchToTab: true);
         _runSelfCheckButton = new Button
         {
             Name = "runSelfCheckButton",
             Text = "Run self-check",
-            Width = 120,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(120, 34),
             Margin = new Padding(8, 0, 0, 0),
         };
         _runSelfCheckButton.Click += (_, _) => RunSelfCheck();
@@ -1442,12 +1441,12 @@ public sealed class MainForm : Form
         {
             Name = "copyMo2SetupButton",
             Text = "Copy Mod Manager setup",
-            Width = 200,
-            Height = 34,
+            AutoSize = true,
+            MinimumSize = new Size(200, 34),
             Margin = new Padding(8, 0, 0, 0),
         };
         _copyMo2SetupButton.Click += (_, _) => CopyMo2SetupGuidance();
-        var secondaryActionRow = new FlowLayoutPanel
+        var conversionOptionsRow = new FlowLayoutPanel
         {
             AutoSize = true,
             Dock = DockStyle.Top,
@@ -1457,24 +1456,14 @@ public sealed class MainForm : Form
         };
         primaryActionRow.Controls.Add(_convertButton);
         primaryActionRow.Controls.Add(_cancelButton);
-        primaryActionRow.Controls.Add(_outputZipCheckBox);
-        primaryActionRow.Controls.Add(_buildSlidersCheckBox);
-        primaryActionRow.Controls.Add(_compactDiagnosticsCheckBox);
-        secondaryActionRow.Controls.Add(_clearLogButton);
-        secondaryActionRow.Controls.Add(_copyCurrentViewButton);
-        secondaryActionRow.Controls.Add(_openOutputButton);
-        secondaryActionRow.Controls.Add(_openPreviewButton);
-        secondaryActionRow.Controls.Add(_loadResultButton);
-        secondaryActionRow.Controls.Add(_openBatchReportButton);
-        secondaryActionRow.Controls.Add(_openReportButton);
-        secondaryActionRow.Controls.Add(_openGuidanceTargetButton);
-        secondaryActionRow.Controls.Add(_openArtifactButton);
-        secondaryActionRow.Controls.Add(_loadCustomProfileButton);
-        secondaryActionRow.Controls.Add(_saveProfileButton);
-        secondaryActionRow.Controls.Add(_inspectCacheButton);
-        secondaryActionRow.Controls.Add(_runSelfCheckButton);
-        secondaryActionRow.Controls.Add(_copyMo2SetupButton);
-        _advancedOptionControls.AddRange([_loadCustomProfileButton, _saveProfileButton, _inspectCacheButton, _runSelfCheckButton]);
+        primaryActionRow.Controls.Add(_loadResultButton);
+        conversionOptionsRow.Controls.Add(_outputZipCheckBox);
+        conversionOptionsRow.Controls.Add(_buildSlidersCheckBox);
+        conversionOptionsRow.Controls.Add(_compactDiagnosticsCheckBox);
+        customProfileActions.Controls.Add(_loadCustomProfileButton);
+        customProfileActions.Controls.Add(_saveProfileButton);
+        customProfileActions.Controls.SetChildIndex(_loadCustomProfileButton, 0);
+        customProfileActions.Controls.SetChildIndex(_saveProfileButton, 1);
         var actionLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -1485,23 +1474,17 @@ public sealed class MainForm : Form
         actionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         actionLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         actionLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        actionLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        actionLayout.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Margin = new Padding(0, 0, 0, 6),
-            Text = "3. Review the source → destination summary, then start conversion."
-        }, 0, 0);
-        actionLayout.Controls.Add(primaryActionRow, 0, 1);
-        actionLayout.Controls.Add(secondaryActionRow, 0, 2);
-        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Convert and review", actionLayout), 0, 7);
+        actionLayout.Controls.Add(primaryActionRow, 0, 0);
+        actionLayout.Controls.Add(conversionOptionsRow, 0, 1);
 
         var bottomPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
         };
+        bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        bottomPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         bottomPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         bottomPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         bottomPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -1537,10 +1520,11 @@ public sealed class MainForm : Form
         {
             Name = "resultsTabControl",
             Dock = DockStyle.Fill,
-            Multiline = false,
+            Multiline = true,
         };
         var logTabPage = new TabPage(DesktopSmokeTestContract.LogTabTitle) { Name = "logTabPage" };
         logTabPage.Controls.Add(_logTextBox);
+        AddResultActions(logTabPage, _clearLogButton, _copyCurrentViewButton);
         _previewTabPage = new TabPage(DesktopSmokeTestContract.PreviewTabTitle) { Name = "previewTabPage" };
         _previewPanel = new Panel
         {
@@ -1553,6 +1537,7 @@ public sealed class MainForm : Form
         };
         _previewPanel.Controls.Add(_previewStatusLabel);
         _previewTabPage.Controls.Add(_previewPanel);
+        AddResultActions(_previewTabPage, _openPreviewButton);
         _resultsTabControl.TabPages.Add(logTabPage);
         _resultsTabControl.TabPages.Add(_previewTabPage);
         _inspectTabPage = new TabPage(DesktopSmokeTestContract.InspectTabTitle) { Name = "inspectTabPage" };
@@ -1639,6 +1624,7 @@ public sealed class MainForm : Form
         _guidanceListView.SelectedIndexChanged += (_, _) => UpdatePathActionStates();
         _guidanceListView.DoubleClick += async (_, _) => await OpenSelectedGuidanceTargetAsync();
         _guidanceTabPage.Controls.Add(_guidanceListView);
+        AddResultActions(_guidanceTabPage, _openGuidanceTargetButton);
         _reportsTabPage = new TabPage(DesktopSmokeTestContract.ReportsTabTitle) { Name = "reportsTabPage" };
         _reportsListView = new ListView
         {
@@ -1655,6 +1641,7 @@ public sealed class MainForm : Form
         _reportsListView.SelectedIndexChanged += (_, _) => UpdatePathActionStates();
         _reportsListView.DoubleClick += (_, _) => OpenSelectedReport();
         _reportsTabPage.Controls.Add(_reportsListView);
+        AddResultActions(_reportsTabPage, _openReportButton, _openBatchReportButton);
         _resultsTabControl.TabPages.Add(_reportsTabPage);
         _catalogTabPage = new TabPage(DesktopSmokeTestContract.CatalogTabTitle) { Name = "catalogTabPage" };
         _catalogListView = new ListView
@@ -1670,6 +1657,7 @@ public sealed class MainForm : Form
         _catalogListView.Columns.Add("Name", 180);
         _catalogListView.Columns.Add("Details", -2);
         _catalogTabPage.Controls.Add(_catalogListView);
+        AddResultActions(_catalogTabPage, _runSelfCheckButton, _copyMo2SetupButton);
         _resultsTabControl.TabPages.Add(_catalogTabPage);
         _readinessTabPage = new TabPage(DesktopSmokeTestContract.ReadinessTabTitle) { Name = "readinessTabPage" };
         _readinessListView = new ListView
@@ -1701,6 +1689,7 @@ public sealed class MainForm : Form
         _artifactsListView.SelectedIndexChanged += (_, _) => UpdatePathActionStates();
         _artifactsListView.DoubleClick += (_, _) => OpenSelectedArtifact();
         _artifactsTabPage.Controls.Add(_artifactsListView);
+        AddResultActions(_artifactsTabPage, _openOutputButton, _openArtifactButton);
         _resultsTabControl.TabPages.Add(_artifactsTabPage);
         _cacheTabPage = new TabPage(DesktopSmokeTestContract.CacheTabTitle) { Name = "cacheTabPage" };
         _cacheListView = new ListView
@@ -1721,6 +1710,7 @@ public sealed class MainForm : Form
         _cacheListView.Columns.Add("Cached at (UTC)", 150);
         _cacheListView.Columns.Add("Regions", -2);
         _cacheTabPage.Controls.Add(_cacheListView);
+        AddResultActions(_cacheTabPage, _inspectCacheButton);
         _resultsTabControl.TabPages.Add(_cacheTabPage);
         _resultsTabControl.SelectedIndexChanged += async (_, _) =>
         {
@@ -1742,11 +1732,15 @@ public sealed class MainForm : Form
         AttachListViewCopySupport(_artifactsListView);
         AttachListViewCopySupport(_cacheListView);
         AttachTextCopySupport(_logTextBox);
-        bottomPanel.Controls.Add(_statusLabel, 0, 0);
-        bottomPanel.Controls.Add(_progressBar, 0, 1);
-        bottomPanel.Controls.Add(_progressDetailsLabel, 0, 2);
-        bottomPanel.Controls.Add(_resultsTabControl, 0, 3);
-        _mainSplitContainer.Panel2.Controls.Add(CreateSection("Results and diagnostics", bottomPanel));
+        bottomPanel.Controls.Add(actionLayout, 0, 0);
+        bottomPanel.Controls.Add(_statusLabel, 0, 1);
+        bottomPanel.Controls.Add(_progressBar, 0, 2);
+        bottomPanel.Controls.Add(_progressDetailsLabel, 0, 3);
+        bottomPanel.Controls.Add(_resultsTabControl, 0, 4);
+        _mainSplitContainer.Panel2.Controls.Add(CreateSection("Convert, results and diagnostics", bottomPanel));
+        ConfigureResponsiveControls(this);
+        _mainSplitContainer.Panel1.SizeChanged += (_, _) => UpdateSetupWidth();
+        UpdateSetupWidth();
 
         RefreshModeState();
         ApplyAdvancedOptionsVisibility();
@@ -1873,15 +1867,25 @@ public sealed class MainForm : Form
         var originalSize = Size;
         var showAdvanced = _showAdvancedOptionsCheckBox.Checked;
         var usingPreset = _usePresetRadio.Checked;
+        var selectedTab = _resultsTabControl.SelectedTab;
+        var setupScrollPosition = _mainSplitContainer.Panel1.AutoScrollPosition;
+        var guidanceWasPresent = _resultsTabControl.TabPages.Contains(_guidanceTabPage);
+        var userAdjustedSplit = _userAdjustedMainSplit;
+        var userPreferredSplit = _userPreferredMainSplitDistance;
+        var cacheInspectionInitialized = _cacheInspectionInitialized;
         try
         {
+            _userAdjustedMainSplit = false;
+            _cacheInspectionInitialized = true;
             _showAdvancedOptionsCheckBox.Checked = false;
             if (!_sourceComboBox.Visible || _profileComboBox.Visible || _cachePathTextBox.Visible)
             {
                 throw new InvalidOperationException("Basic layout must show the source body and hide advanced settings.");
             }
             _showAdvancedOptionsCheckBox.Checked = true;
-            if (!_profileComboBox.Visible || !_cachePathTextBox.Visible || !_skeletonNifTextBox.Visible)
+            if (!_profileComboBox.Visible || !_cachePathTextBox.Visible || !_skeletonNifTextBox.Visible ||
+                !_loadCustomProfileButton.Visible || !_loadCustomProfileButton.Enabled ||
+                !_saveProfileButton.Visible)
             {
                 throw new InvalidOperationException("Advanced settings did not become visible.");
             }
@@ -1897,28 +1901,211 @@ public sealed class MainForm : Form
             {
                 throw new InvalidOperationException("Manual mode must show an editable destination body.");
             }
-            foreach (var size in new[] { MinimumSize, originalSize })
+            foreach (var size in new[]
+                     {
+                         MinimumSize,
+                         new Size(ScaleLayoutValue(1240), ScaleLayoutValue(920)),
+                         originalSize,
+                     }.Distinct())
             {
                 Size = size;
-                PerformLayout();
-                UpdateResponsiveLayout();
-                foreach (var pathBox in new[] { _inputTextBox, _outputTextBox })
+                foreach (var advanced in new[] { false, true })
                 {
-                    if (pathBox.Width < 200 || pathBox.Right > pathBox.Parent!.ClientSize.Width)
+                    _showAdvancedOptionsCheckBox.Checked = advanced;
+                    foreach (var preset in new[] { true, false })
                     {
-                        throw new InvalidOperationException("Input/output path fields are clipped or too narrow.");
+                        _usePresetRadio.Checked = preset;
+                        _useCustomTargetRadio.Checked = !preset;
+                        UpdateSetupWidth();
+                        UpdateResponsiveLayout();
+                        UpdateMainSplitLayout();
+                        PerformLayout();
+                        foreach (var pathBox in new[] { _inputTextBox, _outputTextBox })
+                        {
+                            if (pathBox.Width < ScaleLayoutValue(200) || pathBox.Right > pathBox.Parent!.ClientSize.Width)
+                            {
+                                throw new InvalidOperationException("Input/output path fields are clipped or too narrow.");
+                            }
+                        }
+                        foreach (var scrollToBottom in new[] { false, true })
+                        {
+                            _mainSplitContainer.Panel1.AutoScrollPosition = scrollToBottom
+                                ? new Point(0, _topLayoutPanel.Height)
+                                : Point.Empty;
+                            foreach (var control in new Control[]
+                                     {
+                                         _convertButton, _cancelButton, _loadResultButton,
+                                         _outputZipCheckBox, _buildSlidersCheckBox, _compactDiagnosticsCheckBox,
+                                     })
+                            {
+                                VerifyVisibleClientBounds(control, _mainSplitContainer.Panel2);
+                            }
+                        }
+                        if (_mainSplitContainer.Panel1.HorizontalScroll.Visible)
+                        {
+                            throw new InvalidOperationException("Setup must wrap instead of requiring horizontal scrolling.");
+                        }
+                        if (!_resultsTabControl.Multiline || _resultsTabControl.TabCount != (guidanceWasPresent ? 11 : 10))
+                        {
+                            throw new InvalidOperationException("Result tabs must retain the ten-tab contract and visible multiline headers.");
+                        }
+                        VerifyTabAccess();
                     }
                 }
             }
+            foreach (var (button, tab) in new[]
+                     {
+                         (_clearLogButton, _logTextBox.Parent!),
+                         (_copyCurrentViewButton, _logTextBox.Parent!),
+                         (_openPreviewButton, _previewTabPage),
+                         (_openReportButton, _reportsTabPage),
+                         (_openBatchReportButton, _reportsTabPage),
+                         (_openOutputButton, _artifactsTabPage),
+                         (_openArtifactButton, _artifactsTabPage),
+                         (_openGuidanceTargetButton, _guidanceTabPage),
+                         (_inspectCacheButton, _cacheTabPage),
+                         (_runSelfCheckButton, _catalogTabPage),
+                         (_copyMo2SetupButton, _catalogTabPage),
+                     })
+            {
+                if (button.Parent?.Parent != tab)
+                {
+                    throw new InvalidOperationException($"{button.Name} must be grouped in its contextual result tab.");
+                }
+            }
+            if (!_customProfilesGroupBox.Contains(_loadCustomProfileButton) ||
+                !_customProfilesGroupBox.Contains(_saveProfileButton))
+            {
+                throw new InvalidOperationException("Load/save profile actions must be beside custom profiles.");
+            }
+            if (!guidanceWasPresent)
+            {
+                _resultsTabControl.TabPages.Add(_guidanceTabPage);
+            }
+            VerifyTabAccess();
         }
         finally
         {
+            if (!guidanceWasPresent)
+            {
+                _resultsTabControl.TabPages.Remove(_guidanceTabPage);
+            }
+            _resultsTabControl.SelectedTab = selectedTab;
             Size = originalSize;
             _usePresetRadio.Checked = usingPreset;
             _useCustomTargetRadio.Checked = !usingPreset;
             _showAdvancedOptionsCheckBox.Checked = showAdvanced;
+            _userAdjustedMainSplit = userAdjustedSplit;
+            _userPreferredMainSplitDistance = userPreferredSplit;
+            _cacheInspectionInitialized = cacheInspectionInitialized;
+            UpdateMainSplitLayout();
+            _mainSplitContainer.Panel1.AutoScrollPosition = new Point(-setupScrollPosition.X, -setupScrollPosition.Y);
         }
     }
+
+    private void VerifyTabAccess()
+    {
+        foreach (TabPage tab in _resultsTabControl.TabPages)
+        {
+            _resultsTabControl.SelectedTab = tab;
+            _resultsTabControl.PerformLayout();
+            var header = _resultsTabControl.GetTabRect(_resultsTabControl.TabPages.IndexOf(tab));
+            if (!tab.Visible || header.Width <= 0 || header.Height <= 0 ||
+                !_resultsTabControl.ClientRectangle.Contains(header))
+            {
+                throw new InvalidOperationException($"Result tab '{tab.Text}' is not accessible.");
+            }
+        }
+    }
+
+    private static void VerifyVisibleClientBounds(Control control, Control container)
+    {
+        if (!control.Visible || !container.Contains(control))
+        {
+            throw new InvalidOperationException($"{control.Name} must remain outside the scrolling setup.");
+        }
+        for (var parent = control.Parent; parent is not null; parent = parent.Parent)
+        {
+            var bounds = parent.RectangleToClient(control.RectangleToScreen(control.ClientRectangle));
+            if (!parent.ClientRectangle.Contains(bounds))
+            {
+                throw new InvalidOperationException($"{control.Name} is clipped by {parent.GetType().Name}.");
+            }
+            if (parent == container)
+            {
+                break;
+            }
+        }
+    }
+
+    private static void AddResultActions(TabPage tab, params Button[] buttons)
+    {
+        var actions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = true,
+            Padding = new Padding(3),
+        };
+        actions.Controls.AddRange(buttons);
+        tab.Controls.Add(actions);
+    }
+
+    private void ConfigureResponsiveControls(Control root)
+    {
+        foreach (Control control in root.Controls)
+        {
+            if (control is Button button)
+            {
+                button.AutoSize = true;
+                button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+                button.MinimumSize = new Size(button.MinimumSize.Width, Math.Max(button.MinimumSize.Height, ScaleLayoutValue(34)));
+            }
+            if (control is Label { AutoSize: true } label)
+            {
+                var parent = root;
+                void UpdateWrapping()
+                {
+                    var width = parent.ClientSize.Width - parent.Padding.Horizontal;
+                    if (parent is TableLayoutPanel table)
+                    {
+                        var columns = table.GetColumnWidths();
+                        var column = table.GetColumn(label);
+                        if (column >= 0 && column < columns.Length)
+                        {
+                            width = columns.Skip(column).Take(table.GetColumnSpan(label)).Sum();
+                        }
+                    }
+                    if (width <= label.Margin.Horizontal)
+                    {
+                        return;
+                    }
+                    var maximum = new Size(Math.Max(1, width - label.Margin.Horizontal), 0);
+                    if (label.MaximumSize != maximum)
+                    {
+                        label.MaximumSize = maximum;
+                    }
+                }
+                parent.Layout += (_, _) => UpdateWrapping();
+                UpdateWrapping();
+            }
+            ConfigureResponsiveControls(control);
+        }
+    }
+
+    private void UpdateSetupWidth()
+    {
+        if (_topLayoutPanel is null || _topLayoutPanel.IsDisposed)
+        {
+            return;
+        }
+        var width = Math.Max(1, _mainSplitContainer.Panel1.ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
+        _topLayoutPanel.MaximumSize = new Size(width, 0);
+        _topLayoutPanel.Width = width;
+    }
+
+    private int ScaleLayoutValue(int value) => (int)Math.Round(value * DeviceDpi / 96f);
 
     private static GroupBox CreateSection(string title, Control content)
     {
@@ -1955,8 +2142,8 @@ public sealed class MainForm : Form
             return;
         }
 
-        var useSingleColumn = ClientSize.Width < 1500 ||
-                              _conversionOptionsPanel.DisplayRectangle.Width < 1100;
+        var useSingleColumn = ClientSize.Width < ScaleLayoutValue(1500) ||
+                              _conversionOptionsPanel.DisplayRectangle.Width < ScaleLayoutValue(1100);
         if (_usesSingleColumnConversionLayout == useSingleColumn)
         {
             return;
@@ -2009,10 +2196,10 @@ public sealed class MainForm : Form
             return;
         }
 
-        var panel1Minimum = Math.Min(MainSplitPanel1Minimum, Math.Max(0, availableHeight - 1));
-        var panel2Minimum = Math.Min(MainSplitPanel2Minimum, Math.Max(0, availableHeight - panel1Minimum));
+        var panel2Minimum = Math.Min(ScaleLayoutValue(MainSplitPanel2Minimum), Math.Max(0, availableHeight - 1));
+        var panel1Minimum = Math.Min(ScaleLayoutValue(MainSplitPanel1Minimum), Math.Max(0, availableHeight - panel2Minimum));
         var maxSplitterDistance = Math.Max(panel1Minimum, availableHeight - panel2Minimum);
-        var preferredPanel1Height = MainSplitPreferredDistance;
+        var preferredPanel1Height = ScaleLayoutValue(MainSplitPreferredDistance);
         if (_topLayoutPanel is not null && !_topLayoutPanel.IsDisposed)
         {
             var widthBudget = Math.Max(0, _mainSplitContainer.Panel1.ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
