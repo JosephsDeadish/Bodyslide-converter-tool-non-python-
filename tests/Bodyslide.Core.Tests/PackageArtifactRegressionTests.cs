@@ -24,6 +24,33 @@ public sealed class PackageArtifactRegressionTests
             string.Equals(element.Attribute("source")?.Value, "desktop/SlideSmith.exe", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void BothWindowsPackagingJobsValidateCurrentInstallerMappings()
+    {
+        var repository = new DirectoryInfo(AppContext.BaseDirectory);
+        while (repository is not null && !File.Exists(Path.Combine(repository.FullName, "BodyslideConverter.slnx")))
+        {
+            repository = repository.Parent;
+        }
+        Assert.NotNull(repository);
+        var workflow = File.ReadAllText(Path.Combine(repository.FullName, ".github", "workflows", "build.yml"));
+        var config = new System.Xml.XmlDocument();
+        config.Load(Path.Combine(repository.FullName, "packaging", "windows-bundle", "fomod", "ModuleConfig.xml"));
+        var mappings = System.Text.RegularExpressions.Regex.Matches(workflow,
+            @"'(?:folder|file)\[@source=""[^""]+"" and @destination=""[^""]+""\]'");
+        var entries = config.SelectNodes("/config/requiredInstallFiles/*")!;
+        Assert.Equal(entries.Count * 2, mappings.Count);
+        foreach (System.Xml.XmlElement entry in entries)
+        {
+            var mapping = $"{entry.Name}[@source=\"{entry.GetAttribute("source")}\" and @destination=\"{entry.GetAttribute("destination")}\"]";
+            Assert.Equal(2, mappings.Count(match => match.Value == $"'{mapping}'"));
+            Assert.NotNull(config.SelectSingleNode($"/config/requiredInstallFiles/{mapping}"));
+        }
+        Assert.DoesNotContain("'source=\"desktop/SlideSmith.exe\"'", workflow);
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(workflow,
+            @"SelectSingleNode\(""/config/requiredInstallFiles/\$mapping""\)").Count);
+    }
+
     public static IEnumerable<object[]> InvalidRuntimePhysicsArtifacts()
     {
         foreach (var root in new[] { "CBPCConfig", "system" })
