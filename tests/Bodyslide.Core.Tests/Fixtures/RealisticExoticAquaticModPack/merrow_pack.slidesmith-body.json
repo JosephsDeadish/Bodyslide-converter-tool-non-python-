@@ -1,0 +1,36 @@
+{
+  "name": "Merrow Pack Reference",
+  "aliases": [
+    "Sea Siren",
+    "Finfolk Mail"
+  ],
+  "referenceTokens": [
+    "aquatic",
+    "merrow",
+    "mermaid",
+    "siren"
+  ],
+  "sliderNames": [
+    "Belly",
+    "Butt",
+    "WaistWidth",
+    "TailBase",
+    "FinSpread",
+    "FrillWidth",
+    "WhiskerLength"
+  ],
+  "physicsBones": [
+    "TailFin",
+    "PectoralFinMid.L",
+    "PectoralFinMid.R",
+    "WhiskerTip.L",
+    "WhiskerTip.R",
+    "FrillTip.L",
+    "FrillTip.R"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female",
+  "skeletonFoundation": "Aquatic fin-tail skeleton",
+  "skeletonFramework": "aquatic-humanoid",
+  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+}

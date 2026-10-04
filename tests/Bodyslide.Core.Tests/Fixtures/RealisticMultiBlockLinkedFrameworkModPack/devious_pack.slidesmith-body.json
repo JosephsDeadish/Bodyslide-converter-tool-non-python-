@@ -1,0 +1,19 @@
+{
+  "name": "Devious Modular Reference",
+  "referenceTokens": [
+    "3ba",
+    "devious",
+    "ebonite"
+  ],
+  "zapSliderNames": [
+    "HideCollar",
+    "HideArmbinder"
+  ],
+  "physicsBones": [
+    "NPC L Breast01",
+    "NPC R Breast01",
+    "NPC Belly"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female"
+}

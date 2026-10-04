@@ -1,0 +1,32 @@
+{
+  "name": "AvianSparseRig",
+  "aliases": [
+    "Pinionfolk Sparse",
+    "Ravenwing Sparse"
+  ],
+  "referenceTokens": [
+    "avian",
+    "pinion",
+    "talon",
+    "sparse"
+  ],
+  "sliderNames": [
+    "WingSpan",
+    "FeatherSpread",
+    "TalonWidth",
+    "Belly"
+  ],
+  "physicsBones": [
+    "PinionFoldCtrl.L",
+    "PinionFoldCtrl.R",
+    "TalonRear.L",
+    "TalonRear.R",
+    "WingMembrane.L",
+    "WingMembrane.R"
+  ],
+  "physicsProfile": "none",
+  "gender": "female",
+  "skeletonFoundation": "Avian winged-humanoid skeleton",
+  "skeletonFramework": "avian-humanoid",
+  "bodyOutputPath": "meshes\\beast\\avian_sparse\\"
+}

@@ -3,7 +3,8 @@
 This repository contains the SlideSmith .NET conversion toolset (current version `1.0`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
 
 - import scan (single `.nif`, plugin (`.esp`/`.esm`/`.esl`), armor folder, or archive input: `.zip` / `.7z` / `.tar` / `.tar.gz` / `.tgz`)
-- body signature detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
+- body signature detection (CBBE, UNP, UNPB, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SAM Light, SOS, TNG, UBE, Vanilla Beast, Goat Humanoid, Hagraven, Spriggan + CUSTOM fallback); bone-name scoring from physics XML
+- built-in target body aliases for common ecosystem names such as `3BBB` → `3BA`, `TNG Extended` → `TNG`, `Touched By Dibella` → `TBD`, `Shape Atlas for Men` → `SAM`, and `Beast Vanilla` → `Vanilla Beast`
 - custom body profile loading via `*.slidesmith-body.json` files placed beside the input assets, enabling named custom bodies with their own detection tokens, morph field, sliders, gender, and physics settings
 - mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed) with headgear sub-type classification (full-helmet/hood/face-mask/circlet)
 - deformation cage generation
@@ -12,14 +13,16 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - morph generation with **11 regional fields** (chest, waist, pelvis, legs, shoulders, breasts, butt, belly, arms, thighs, calves) tuned per body type
 - partition rebuilding (BSDismemberSkinInstance slot assignment): body/hands/feet for standard armor; full-helmet → slots 30+31 (Head+Hair); hood → slot 31 (Hair); face-mask → slot 30 (Head); circlet/crown/hat → slot 42 (Circlet)
 - clipping detection + auto-correction pass (including explicit armpit risk surfacing in pose simulation output)
-- physics profile generation (CBPC + SMP XML config file output)
-- physics profile selection override (`auto`, `none`, `cbpc`, `smp`, `smp+cbpc`) with built-in per-target defaults for direct body conversions (`soft-body` is accepted as an alias for `smp+cbpc`)
+- physics profile generation (CBPC + SMP XML config file output, including extra target-specific secondary/genital bones when the target ecosystem exposes them)
+- physics profile selection override (`auto`, `none`, `cbpc`, `smp`, `smp+cbpc`) with built-in per-target defaults for direct body conversions (common aliases like `soft-body`, `full-soft-body`, `hdt-smp`, `fsmp`, and `cbp` are accepted and normalized automatically)
 - **vanilla armor database** — 65+ canonical Skyrim / DLC armors matched by mesh token for automatic profile recommendations
 - **voxel collision detection** — 8×8×8 grid penetration scan after auto-correction; per-region push-out offsets logged per mesh type
 - **deformation profile modifier** — fine-tunes regional morphs using 8 named profiles (balanced, curvy, slim, petite, athletic, muscular, lean, anime)
 - **BodySlide `.osp` project generation** — outputs a valid BodySlide slider-set XML alongside each converted armor when slider export is enabled
+- incomplete-source BodySlide fallback recovery that can infer likely source-body slider families plus fallback deformation-profile hints from nearby reference/body asset names when OSP/TRI/BSD support files are missing
+- topology-mismatched TRI/BSD reuse can conservatively retarget source morph deltas before falling back to fully synthetic slider output
 - **texture analysis** — detects DDS textures, classifies diffuse / normal / specular / glow / parallax / subsurface, identifies missing normal maps
-- **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths
+- **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths, including modular device-style armor packs that split body/head/world variants
 - export package + manifest/log output
 - conversion learning cache output (`.conversion-learning-cache.json`) for repeated runs
 - real 3D preview/workbench output (`preview-workbench.html`) rendered from converted mesh vertices, plus diagnostics report (`preview.html`)
@@ -27,13 +30,247 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - optional ZIP output (`--output-zip`) for mod-manager-ready packages
 - runtime readiness self-checks in both CLI and desktop GUI so users can verify the executable, pipeline init, cache path, scratch-write access, and preview/runtime availability before converting anything
 - armor-pack validation reporting with per-conversion readiness summaries and batch-level pack risk rollups
+- batch `regression-failure-matrix.json` groups quality-report issue codes and review requirements by source body, target body, mesh type, and support tier; sample IDs replace mesh names and output paths
+- source BodySlide discovery records `DiscoveryMilliseconds` and `DiscoveredFileCount` in source-asset quality metrics, supports cancellation during traversal, skips directory-link cycles, and bounds retained project caches
 
 ## Projects
 
 - `/src/Bodyslide.Core` - conversion pipeline + modules
 - `/src/Bodyslide.Desktop` - Windows GUI app (drag/drop, preset or manual destination mode, explicit source-body override, output-zip toggle, convert/cancel)
+  - supports startup result loading via `--load-result`, `--result`, `--output`, or an existing output-path argument (useful for MO2 launcher entries)
 - `/src/Bodyslide.Standalone` - CLI app entry point
 - `/tests/Bodyslide.Core.Tests` - focused orchestration and batch/preset tests
+
+### Readiness and regression coverage
+
+Explicit CLI commands and conversions take precedence over MO2/Vortex environment
+variables, managed paths, and launcher switches. Launcher-only invocations still
+open the desktop app; use `--load-result` or manager-specific result/path options
+for desktop result loading rather than CLI conversion flags.
+
+The standalone CLI accepts named options as `--name value`, `--name=value`, or
+`--name:value`. Inline commands such as `--self-check=true` use the same command
+names as startup routing; inline conversion options are not mistaken for launcher
+metadata. This parser/routing coverage does not replace real Windows manager
+handoff testing.
+EXE and DLL desktop handoff preserve the caller's working directory when it
+exists, keeping relative result/diagnostic paths anchored to the manager launch
+context rather than silently resolving them beside the desktop binary.
+
+The regression suite includes synthetic artifact-tampering, mixed launcher,
+catalog-invariant, discovery-cancellation, and failure-matrix cases alongside the
+existing realistic pack fixtures. No new real-user failure packs were supplied.
+To reproduce a reported failure, reduce it to a redistributable fixture, remove
+identifying paths and plugin/mesh names, record the source/target body, skeleton,
+physics and archive layout, and assert the expected issue codes and output
+artifacts in a repeatable test. The batch failure matrix helps prioritize those
+cases but does not itself prove a conversion works in game.
+
+`FailingPackReadinessTests` exercises existing local synthetic, redistributable
+fixtures for unsupported NIF layouts (including NiLines), unresolved cross-plugin
+ties, and oral topology review. It checks issue codes, review gates, nonempty
+guidance artifacts, and batch `regression-failure-matrix.json` against the pack
+validation rollup. `Fixtures/RealUserFailingPackIntake` contains only intake
+instructions, not an actual real-user reproduction. This coverage is not an
+“any armor” guarantee; real load orders and in-game deformation still need proof.
+
+`advanced-review-required` and `experimental-manual-cleanup` remain intentional
+safety gates. Unverified custom rigs, topology changes and external game/UI
+checks must not be relabeled automatic merely to improve readiness counts.
+
+Batch conversion pairs `_0`/`_1` meshes only within the same source directory.
+Distinct armor folders sharing a mesh name are converted separately, with
+deterministic, collision-free per-armor output folder names. Unique names retain
+their existing output layout.
+Colliding plugin-free armor also receives distinct scratch-plugin names and
+game-relative world/first-person/ground mesh namespaces, preventing installation
+of separate packages from overwriting each other's generated plugin references.
+Their BodySlide project/ShapeData identities are distinct, and their OSP build
+paths match those namespaced plugin mesh references. Folder batches discover
+source plugins once at the pack root; shared exports are serialized and retain
+the accumulated mesh rewrites rather than overwriting earlier armor mappings.
+Plugin references are resolved against the complete batch mesh set before each
+item stages only its owned mappings. BodySlide names are allocated after
+sanitization and body qualification, including natural body-suffixed names.
+
+Both desktop and CLI startup preserve a valid caller working directory, including
+the game/Data directory selected by a mod manager. Relative input and launch paths
+are no longer silently rebased to the executable directory. Explicit CLI options
+still take precedence over desktop handoff.
+Desktop readiness/proof scans now run in the background after the window opens,
+not in its constructor. Ordinary GUI launches automatically record startup phases
+in `%LOCALAPPDATA%\SlideSmith\startup-launch-diagnostics.log` (bounded to roughly
+1 MB); `--startup-diagnostics <path>` selects another location. Windows smoke
+checks show the window and run the message loop before closing.
+
+For duplicate-key or unexpectedly slow/large conversions, retain the complete
+exception and `conversion-timings.json`, and record the source/output byte sizes,
+mesh count, target body, and whether the input is an installed mod or an uninstalled
+FOMOD archive. Alternative installer folders may contain conflicting versions of
+the same plugin; select the intended installed variant rather than combining those
+plugins. Supply a minimal permitted reproduction and launcher diagnostics before
+claiming the original real-world failure has been resolved.
+Conversion now stops before mesh/morph processing when multiple paths supply the
+same plugin identity (for example four installer variants of `BDE_Armor.esp`).
+No variant is selected automatically. Install the archive with MO2/Vortex first,
+then convert the chosen installed mod, or prepare a folder containing one selected
+plugin/body variant and its shared assets. Archive extraction still occurs before
+this check; this is not a FOMOD choice interpreter.
+Constant missing-texture fallbacks use compact 4×4 DDS maps instead of expanding
+every channel to the diffuse texture's resolution. Detail-derived maps retain
+their detail; a compact neutral fallback is not a substitute for authored textures.
+Morph diagnostics in `morphs.json` and the conversion manifest retain slider,
+weight, format, vertex-count and delta-count metadata rather than duplicating
+per-vertex source payload arrays. Full deltas remain available to BodySlide
+BSD/TRI/OSD generation. This bounds diagnostic growth by slider count, not by
+slider count multiplied by vertex count; it does not limit required mesh assets.
+Readable BodySlide projects no longer automatically force every pack texture into
+each armor export: their resolved input NIFs participate in shader dependency
+checks, including `ShapeData`/`DataFolder` references. Morph-only OSD files do not
+redirect textures. Missing, unreadable, ambiguous multi-folder project inputs,
+unknown NIF layouts, materials, scripts, and plugin texture swaps still retain the
+conservative full texture set. Companion selection uses hashed filename prefixes
+instead of comparing every texture against every referenced family.
+Source morph discovery also respects authored `DataFolder` paths: a missing
+reference NIF or morph file must not be replaced by a same-named file in
+`SliderSets`, the BodySlide root, or a folder named after the project. Discovery
+and cache invalidation use the authored ShapeData folder, even when its name
+differs from the SliderSet name.
+Morph import rejects non-finite displacements, out-of-range vertex indexes,
+overflowing counts and malformed trailing TRI bytes. Reads are capped at 64 MiB
+per BSD/TRI/OSD file; dense expansion is capped at 8,388,608 deltas per payload
+and 250,000 vertices. Oversized/unreadable sources stay on the existing missing
+source-data/review path rather than allocating gigabytes or claiming reusable
+morph support. OSD parsing tries exact 16/32-bit layouts before padded layouts,
+preventing 32-bit indexes and deltas from being silently read as 16-bit data.
+BodySlide TRI files may include an optional UV morph section; its structure is
+validated without treating UV offsets as position displacements. Legacy files
+ending after position morphs remain supported.
+
+Issue #8 reporting/performance corrections:
+- Morph generation and BodySlide preparation share one immutable source-resolution
+  result per conversion/target. There is no global payload cache or cross-pack reuse.
+- Root reports remain the authoritative diagnostics; exports no longer copy them
+  into a sibling `.reports` folder. Existing folders from older runs are not removed.
+  Required OSP/OSD/BSD/TRI/ShapeData files are unaffected.
+- Final timing JSON, pipeline profile and conversion log use the same completed
+  measurement (including export queue wait and ZIP preparation). The final ZIP
+  includes the corrected log, not the pre-export snapshot. Final report writing and
+  ZIP central-directory closure are outside that measurement.
+- Fallback semantic profiles require exact identifiers or distinctive observed
+  anchors. Generic short tokens cannot select Spriggan for a 3BA breastplate.
+  Catalog physics bones/sliders are expectations, not observed mesh evidence.
+- `BodySlideCompatible` denotes generated scaffold compatibility, not a successful
+  external build; `SourceBodyMatchRatio` is heuristic confidence, not fit accuracy.
+- Generated version-1 OSPs now use `DataFolder` with the project folder name and a
+  leaf `SourceFile`. BodySlide already prefixes ShapeData; repeating the full path
+  caused the missing-input errors visible in issue #8. Regenerate old conversions.
+- Generated projects declare one extension-free `OutputFile`, using `GenWeights`
+  only for a complete weight pair. BodySlide adds `.nif` or `_0.nif`/`_1.nif`
+  itself; orphan weight meshes preserve their original stem without inventing a pair.
+
+The uploaded timing report records 813,629 ms for one item: 259,537 ms for morph
+generation, 248,249 ms for BodySlide preparation and 291,905 ms for export.
+Extraction is not measured by that per-item import timing. The supplied diagnostic
+files total roughly 1.4 MB, so a large output requires a byte inventory of the
+actual NIF, texture, morph and archive payloads before attributing it to JSON.
+
+Remaining issue #8 acceptance work: detailed per-piece diagnostics and generic
+harness plans are still generated; a compact/optional diagnostics mode is not yet
+implemented. Structural NIF support does not prove all UV/skin/partition/material
+relationships, runtime physics linkage/conflicts, or shape-specific source morph
+association. Empty texture lists do not prove textures are unnecessary. A permitted
+sample is also needed to verify shape-specific OSP slider data links and exported
+morph formats against an actual BodySlide build; the input/output path corrections
+alone do not establish usable sliders or correct mesh deformation. Original
+BHUNP/CBBE project input errors may instead reflect missing or disabled providers.
+Provide the affected source OSP and complete linked ShapeData, generated OSP/NIF/
+OSD/TRI files, BodySlide version/build log, MO2 provider/overwrite information,
+source/output byte inventories and current batch timings. A permitted
+source/output sample is needed to distinguish external textures from missed
+discovery and to regenerate the earlier dependency/FOMOD/3BA-physics fixes. Test
+the selected variant in BodySlide, MO2, xEdit and Skyrim before treating it as ready.
+
+Packaging validation accepts the generated `dependency-map.json` mesh-entry
+array as well as legacy object reports; malformed/empty arrays remain invalid.
+FOMOD includes `conversion-quality.json` even though it is generated after the
+installer manifest. Default runtime physics configurations use framework-supported
+target-body metadata when no explicit bone set is supplied, so 3BA thigh coverage
+is not lost to generic five-node defaults. Explicit bone sets remain authoritative;
+configuration coverage alone does not prove mesh weights or in-game physics.
+
+`manual-cleanup-likely`, `pose-risk`, `extreme-topology-adaptation`, and
+`low-body-match` are not packaging errors and are not suppressed by these fixes.
+For an affected outfit, provide its `conversion-quality.json`,
+`topology-correspondence.json`, `pose-simulation-report.json`,
+`skeleton-compatibility.json`, and a permitted source/ShapeData reproduction.
+Confirm the actual source body and skeleton, inspect the listed morphs and hot
+regions in Outfit Studio, and rebuild/test in BodySlide and Skyrim before release.
+Plugin verification accepts repeated normalized source paths and keeps an
+unsupported report when duplicate reports disagree, rather than throwing a
+duplicate-key exception or hiding the unsupported mesh.
+
+Body catalogs describe supported names, sliders, rig families and physics
+expectations; they are not a bundled set of real reference bodies or proven
+deformation data for every armor. Missing readable references or matching morph
+payloads still require review. Adding aliases or inferred bone names cannot prove
+fit, functioning zaps, valid weights, or in-game physics. These need actual
+BodySlide builds and game validation using permitted source assets.
+`CatalogIntegrityTests` checks every declared body alias, skeleton-foundation
+resolution and physics-bone uniqueness. These checks validate metadata consistency,
+not real-world compatibility. Custom-profile fields and built-in catalog fields
+are separate supported schemas, not interchangeable copies of one another.
+
+Body detection ignores GUID-shaped path components and leaf names as opaque
+workspace identifiers. Accidental body-name substrings inside those identifiers
+cannot outweigh BodySlide metadata; meaningful body-named folders remain signals.
+BodySlide fallback inference also excludes these identifiers from individual and
+condensed path evidence so they cannot inject unrelated built-in slider families.
+
+Physics readiness counts a generated CBPC/SMP config only when its XML has the
+expected root and nonempty named bone entries. Empty, malformed, or unrelated
+XML cannot satisfy a requested runtime config, including one missing half of a
+hybrid profile. On-disk package validation applies the same XML checks to every
+root and staged runtime config, even for an unsupported target or a lone file,
+and rejects DTD/entity declarations. Staged XML must match its exported root,
+including bone names and solver values; formatting and attribute quote differences
+do not count as drift. Physics coverage is read from parsed elements, not regex
+matches in comments or broken XML. Unclassified custom bones can still be emitted for SMP, but do
+not produce an empty CBPC config or silently acquire human fallback bones.
+Support-file import includes source BodySlide projects, SliderGroups XML and OSD
+assets without treating ShapeData reference meshes as conversion inputs; explicit
+directory exclusions and generated-output markers still apply.
+
+Folder/archive/plugin-root import discovers meshes and support files from one
+per-import directory snapshot instead of two independent walks. Support discovery
+keeps its depth-16 boundary; mesh discovery still reaches deeper armor folders,
+without descending into excluded BodySlide reference trees beyond that support
+boundary. Direct NIF import still selects only its weight pair and uses a bounded
+support scan. Snapshots are not a global cache: subsequent imports see added or
+removed files.
+
+`ImportDiscoverySnapshotTests` compares the snapshot against independent scans
+and records observational scan/import timings for 100- and 5,000-mesh synthetic
+packs with matching texture counts. Run it with the existing `dotnet test`
+runner and a TRX logger to retain the timing output. These discovery-only samples
+are not real-user packs, cold-cache benchmarks, or end-to-end conversion proof.
+
+Extension-specific batch/export scans retain and sort only matching files rather
+than all source assets. Export plugin/material classification is case-insensitive
+and still performs a fresh scan, including assets added since import; output and
+shared-package exclusions remain in effect. Sparse synthetic support-scan tests
+record observational timings, not real-pack or cold-cache guarantees. Cross-stage
+snapshot reuse is not enabled because it could hide changed assets or change scan
+depth coverage.
+BodySlide package validation reuses one local ShapeData payload listing for
+BSD/TRI/OSD checks, retaining the existing top-directory scope and refreshing it
+for every validation; recursive staged-mesh discovery remains separate.
+
+Local Release verification is separate from external coverage evidence: the
+Linux packaged CLI can be self-checked here, but Windows desktop/MO2/Vortex click
+paths, BodySlide builds and live-game physics must be validated on the target
+Windows mod stack with redistributable real-user reproductions. CI runs marked
+`action_required` have not executed their jobs and are not passing build evidence.
 
 ## Run
 
@@ -43,6 +280,9 @@ dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Re
 
 # launch desktop GUI during development (Windows)
 dotnet run --project src/Bodyslide.Desktop
+
+# load an existing output folder directly in the Desktop app
+dotnet run --project src/Bodyslide.Desktop -- --load-result "<output folder|preview html|fomod\\ModuleConfig.xml>"
 
 # GUI features: drag/drop input (accepts .nif, plugin .esp/.esm/.esl, archive, or folder),
 # separate **"File..."** and **"Folder..."** browse buttons for the input field (no more double-dialog),
@@ -107,6 +347,8 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 
 # supply a skeleton NIF for accurate bone mapping (e.g. XPMSSE installed via mod manager)
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --skeleton-nif "C:\Modlist\XPMSSE\meshes\actors\character\character assets\skeleton.nif"
+# You can also point --skeleton-nif at an XP32/XPMSSE mod folder or a related .pex file from the same mod;
+# SlideSmith will resolve the matching skeleton .nif automatically.
 
 # show built-in presets
 dotnet run --project src/Bodyslide.Standalone -- --list-presets
@@ -115,11 +357,12 @@ dotnet run --project src/Bodyslide.Standalone -- --list-presets
 dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 
 # show supported body types with detection tokens, vertex-count hints,
-# skeleton foundation, and soft-body physics bone reference data
+# skeleton foundation, semantic/collision support regions, and soft-body physics coverage expectations
 dotnet run --project src/Bodyslide.Standalone -- --list-bodies
 
-# show deep reference info for one body (tokens, skeleton, SupportsPhysics, required physics bones, default/recommended physics, matching presets)
-dotnet run --project src/Bodyslide.Standalone -- --body-reference "3BA"
+# show deep reference info for one body (canonical names and common aliases both work),
+# including semantic regions, collision focus, bilateral expectations, and minimum physics coverage
+dotnet run --project src/Bodyslide.Standalone -- --body-reference "3BBB"
 
 # show available physics profiles
 dotnet run --project src/Bodyslide.Standalone -- --list-physics
@@ -148,12 +391,14 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 |---|---|---|
 | `SlideSmith.exe` | Windows | Desktop GUI — double-click to open, drag-and-drop armor |
 | `SlideSmith-CLI.exe` | Windows | Command-line tool — run from a terminal with `--help` |
-| `slidesmith-win-x64-bundle.zip` | Windows | Bundle containing both GUI + CLI side-by-side |
+| `slidesmith-win-x64-bundle.zip` | Windows | MO2/Vortex-installable SkyrimSE bundle that installs under `CalienteTools/SlideSmith` with `SlideSmith.exe`, `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.txt`, `meta/slidesmith-bundle.json`, `meta.ini`, and `fomod/` installer metadata |
 | `slidesmith-linux-x64.zip` | Linux | Single CLI binary |
 
 Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.
 
-If `SlideSmith-CLI.exe` is launched with **no arguments** and `SlideSmith.exe` is in the same folder, the CLI now auto-opens the desktop GUI instead of just printing usage and exiting.
+For Mod Organizer 2, set the executable to `<mod>\CalienteTools\SlideSmith\SlideSmith.exe` with `--mo2-launcher` and keep the Start In folder on the same `CalienteTools\SlideSmith` path so MO2's VFS/USVFS hook can inject mods before startup.
+
+If `SlideSmith-CLI.exe` is launched with **no arguments**, the CLI now auto-opens the desktop GUI when `SlideSmith.exe` is available either in the same folder or in a sibling `desktop/` folder (bundle layout), instead of just printing usage and exiting.
 
 ## GitHub Actions (CI)
 
@@ -161,10 +406,14 @@ This repository includes `.github/workflows/build.yml`, which runs automatically
 
 What it does:
 - **Every push/PR:** restore, build, test, publish a single-file Linux CLI binary, and upload it as a temporary Actions artifact.
-- **Push to `main`/`master` (post-merge):** publish clean single-file Windows executables (Desktop GUI + CLI), create/update a Windows bundle zip, create or update the rolling **"SlideSmith — latest build"** GitHub Release entry, and attach all three Windows artifacts.
-- **Pull requests:** publish both Windows executables, package them as one bundle zip artifact, and upload it for startup/packaging verification.
+- **Push to `main`/`master` (post-merge):** publish clean single-file Windows executables (Desktop GUI + CLI), create/update a Windows bundle zip with FOMOD + `meta.ini` metadata for MO2/Vortex installs, create or update the rolling **"SlideSmith — latest build"** GitHub Release entry, and attach all three Windows artifacts.
+- **Pull requests:** publish both Windows executables, package them as one MO2/Vortex-friendly bundle zip artifact, and upload it for startup/packaging verification.
 
-All published executables are self-contained single files — no installer, no extra DLLs, no debug symbols.
+Standalone executable downloads remain self-contained single files. The Windows
+mod-manager bundle uses a self-contained folder-based desktop build without native
+self-extraction; its installer puts the EXE and all runtime DLLs together in
+`CalienteTools/SlideSmith`. Do not copy only the bundle's desktop EXE. Windows CI
+checks dependencies and smoke-tests the extracted, installed desktop layout.
 
 If the app seems to "do nothing", run it from a terminal with `--help` first. The CLI expects arguments (`--input`, `--target`/`--preset`, optional `--output`) and prints usage when required arguments are missing.
 
@@ -191,13 +440,45 @@ Place a `*.slidesmith-body.json` file anywhere beside the input mesh/folder/arch
 - `detectionTokens`
 - `textureTokens`
 - `physicsTokens`
+- `aliases`
+- `referenceTokens`
 - `vertexCountMin` / `vertexCountMax`
+- `heightToWidthRatioMin` / `heightToWidthRatioMax`
+- `depthToWidthRatioMin` / `depthToWidthRatioMax`
 - `transformationField` (`chest`, `waist`, `pelvis`, `legs`, `shoulders`, `breasts`, `butt`, `belly`, `arms`, `thighs`, `calves`)
 - `sliderNames`
+- `zapSliderNames`
 - `physicsBones`
 - `physicsProfile` (`none`, `cbpc`, `smp`, `smp+cbpc`)
+- `expectedSemanticRegions`
+- `expectedCollisionRegions`
+- `expectedBilateralRegions`
+- `minimumPhysicsSlotCount`
+- `minimumPhysicsChainDepth`
+- `minimumPhysicsFamilyCount`
+- `collisionComplexity` (`none`, `minimal`, `standard`, `extended`)
 - `gender` (`female` or `male`)
 - `bodyOutputPath`
+- `skeletonFoundation`
+- `skeletonFramework`
+
+When SlideSmith detects an unknown/incomplete target body or a low-confidence/custom detected source body, it now also writes starter templates such as `target-body-template.slidesmith-body.json` and `detected-source-body-template.slidesmith-body.json` into the output folder so you can refine and reuse them. Those starter templates now include semantic-region, collision-region, bilateral-region, collision-complexity, and minimum physics coverage hints so support quality can be strengthened instead of only naming the body and sliders.
+
+## Support tiers
+
+SlideSmith now emits a graded support tier in its validation outputs so the app does not pretend every successful file export is equally safe:
+
+- `mainstream-automatic` — strong body/skeleton/topology evidence; conversion, physics, and safe-animation signals all look good
+- `advanced-review-required` — conversion is viable, but runtime/body-fit/topology review is still required before release
+- `experimental-manual-cleanup` — conversion can proceed, but sparse skeleton evidence, heuristic-heavy topology, unsupported physics, or extreme body differences still make manual cleanup likely
+
+The generated JSON reports also separate:
+
+- `CanConvert`
+- `CanPhysicsConvert`
+- `CanSafelyAnimate`
+
+Use those fields together with `SupportTier` instead of treating every successful conversion as universally install-ready.
 
 ## Output files
 
@@ -215,6 +496,8 @@ output/
     BodySlide/
       SliderSets/
         <ArmorName>.osp          ← BodySlide slider-set project (when slider export is enabled)
+      SliderGroups/
+        <ArmorName>.xml          ← BodySlide batch-build/search groups (when slider export is enabled)
       ShapeData/<ArmorName>/
         <ArmorName>.nif          ← BodySlide source-shape reference mesh (when enabled)
         <Slider>.bsd             ← low-weight slider morph (one per slider, when enabled)
@@ -226,9 +509,14 @@ output/
   <PluginName>_SlidesmithPatch.esp ← minimal override patch ESP (ARMA-only)
   fomod/
     info.xml
-    ModuleConfig.xml             ← FOMOD with <files> entries for meshes/ + CalienteTools/
-  cbpc-config.xml                ← CBPC physics XML (when selected physics profile includes CBPC)
-  smp-config.xml                 ← SMP physics XML (when selected physics profile includes SMP)
+    ModuleConfig.xml             ← FOMOD with <files> entries for meshes/ + CalienteTools/ + SKSE/
+  SKSE/Plugins/CBPCSystem/
+    cbpc-config.xml              ← staged CBPC physics XML for mod-manager/manual Data installs
+  SKSE/Plugins/hdtSMP64/
+    smp-config.xml               ← staged SMP physics XML for mod-manager/manual Data installs
+  cbpc-config.xml                ← compatibility/root copy of generated CBPC physics XML
+  smp-config.xml                 ← compatibility/root copy of generated SMP physics XML
+  meta.ini                       ← neutral MO2 package metadata
   conversion-manifest.json       ← full pipeline log
   README.txt                     ← user-facing installation guide
   preview-workbench.html         ← real 3D point-cloud workbench from converted mesh vertices
@@ -243,17 +531,32 @@ output/
 | `meshes/slidesmith/<body>/<ArmorName>.nif` | Data-relative staged mesh; pointed to by the generated plugin |
 | `meshes/slidesmith/<body>/<stem>_ground.nif` | Ground/loot mesh companion for every converted NIF variant |
 | `CalienteTools/BodySlide/SliderSets/<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) — written only when slider export is enabled |
+| `CalienteTools/BodySlide/SliderGroups/<ArmorName>.xml` | BodySlide group definitions so converted single-piece and batch outputs show up under predictable SlideSmith/body filters for search and Batch Build |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.nif` | BodySlide source-shape reference mesh; required for the slider editor to display the base mesh — written only when slider export is enabled |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<Slider>.bsd` + `<Slider>_1.bsd` | Per-slider vertex-displacement morphs for BodySlide (low + high weight) — written only when slider export is enabled |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.tri` + `<ArmorName>_1.tri` | TRI morph files for in-game RaceMenu morph interpolation — written only when slider export is enabled |
-| `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/` and `CalienteTools/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
+| `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/`, `CalienteTools/`, and `SKSE/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
 | `fomod/info.xml` | FOMOD package metadata (name, version, author) |
-| `cbpc-config.xml` | CBPC physics config (breast/butt/belly for female; pec/belly for male) |
-| `smp-config.xml` | SMP physics config (NPC Breast01, NPC Belly, NPC Butt nodes, etc.) |
+| `meta.ini` | Neutral Mod Organizer 2 metadata for the packaged output so the installed mod folder/archive keeps basic name/version/author context without depending on manual tagging |
+| `SKSE/Plugins/CBPCSystem/cbpc-config.xml` | Data-relative staged CBPC physics config for direct installation into Skyrim's SKSE plugin layout |
+| `SKSE/Plugins/hdtSMP64/smp-config.xml` | Data-relative staged SMP physics config for direct installation into Skyrim's SKSE plugin layout |
+| `cbpc-config.xml` | Compatibility/root copy of the generated CBPC physics config for inspection or manual relocation |
+| `smp-config.xml` | Compatibility/root copy of the generated SMP physics config for inspection or manual relocation |
 | `conversion-manifest.json` | Full conversion log with all pipeline steps |
 | `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, plugin mesh references, **detected source body**, **ARMA FormIDs**, and **source skeleton** |
-| `skeleton-compatibility.json` | Full bone-mapping report: source skeleton name, target skeleton name, every mapped bone pair, and the list of unsupported bones that have no target equivalent |
-| `conversion-quality.json` | Machine-readable quality metrics: body-detection confidence + evidence, strategy used, per-region morphing, clipping/voxel/pose risk, topology drift warnings, BodySlide compatibility, readiness score/status, and ISO-8601 generation timestamp |
+| `skeleton-compatibility.json` | Full bone-mapping report: source skeleton name, target skeleton name, every mapped bone pair, unsupported bones, source skeleton reliability, physics compatibility, and graded `SupportTier` / `CanConvert` / `CanPhysicsConvert` / `CanSafelyAnimate` signals |
+| `conversion-quality.json` | Machine-readable quality metrics: body-detection confidence + evidence, strategy used, per-region morphing, clipping/voxel/pose risk, topology drift warnings, BodySlide compatibility, graded support tier/readiness fields, and ISO-8601 generation timestamp |
+| `in-game-validation.json` | Runtime review plan summary: validation gate, support tier, conversion-readiness fields, scenario matrix, caveats, topology correspondence, and checklist guidance for live animation/body-fit review |
+| `topology-correspondence.json` | Dedicated topology review artifact: correspondence classification/confidence, semantic-vertex-matching status, unmatched focus regions, semantic anchor evidence, and review artifacts for manual cleanup decisions |
+| `conversion-matrix-proof.json` | Cross-axis proof summary showing which body-support, topology, skeleton, plugin/mod-stack, runtime, live-game, and Desktop E2E axes are or are not strictly proven yet, plus the remaining blocking gaps and review artifacts |
+| `runtime-validation-plan.json` | Release-gate execution plan derived from the in-game validation report; documents what still needs a live game harness or manual runtime pass before the output is truly trusted |
+| `runtime-validation-harness.json` | External-harness contract for runtime validation automation: dispatch actions, expected assertions, failure signals, and which probes require full-load-order launches or manual observation |
+| `proof-harness-bundle.json` | Canonical external-proof entrypoint linking the Desktop UI flow, runtime harness, live-game scenario catalog, explicit Windows host requirements, replayable evidence layout, import targets, and the `proof-result-bundle.json` contract |
+| `mod-stack-cross-validation.json` | Mixed plugin/race/body-family review summary: plugin/master counts, distinct mesh families, skeleton reliability, race warnings, and recommended runtime/load-order scenarios for large real mod stacks |
+| `desktop-workflow-automation.json` | Shared-output contract for Desktop/UI workflow coverage: preview/report state, artifact inventory, suggested GUI flow, and automation limitations for result-reload/report-rendering paths |
+| `proof-result-bundle.json` | External-harness result import written back into the output root; records host details, per-axis pass/fail status, scenario coverage, probe coverage, evidence references, and any missing proof inputs |
+
+The optional output ZIP mirrors the installable game files only; the JSON review artifacts stay in the folder output so they remain easy to inspect without bloating the packaged mod archive.
 | `armor-pack-validation.json` | Batch-only pack validation rollup: per-item readiness status/score, dominant issue codes, and pack-level ready/review/high-risk counts for real armor-pack runs |
 | `world-physics.json` | Dropped-item/world-object physics guidance: selected world mode (`static` or `rigid-proxy`), collision-shape recommendation, whether source/equipped physics were detected, ground-mesh availability, and practical install/runtime recommendations |
 | `plugin-patches.json` | Detected sidecar plugin mesh paths + structured rewrite mappings (`OriginalMeshPath` → `RewrittenMeshPath`) and per-mesh patch steps |
@@ -270,12 +573,20 @@ When a matching cache entry exists for the same armor mesh + target body, the co
 
 When `--targets` / `--presets` (or the desktop batch-entry boxes) are used, each requested body/preset is exported into its own subfolder under the selected output root so multiple conversions never overwrite each other.
 
+### Supported external Windows proof workflow
+
+1. Run a conversion and treat `proof-harness-bundle.json` as the single canonical entrypoint for external proof execution.
+2. On the Windows harness host, open the bundle manifest and use `ArtifactEntrypoints`, `ScenarioCatalog`, `ReplayableEvidence`, and `ImportTargets` to collect the referenced runtime, live-game, Desktop UI, and observation/template artifacts instead of discovering them ad hoc.
+3. Execute the required Desktop UI flows, runtime probes, and live-game scenarios on the target Windows/mod-stack/game install while writing evidence to the machine-readable locations declared in `proof-harness-bundle.json` (for example `proof-evidence/screenshots/`, `proof-evidence/runtime-logs/`, `proof-evidence/step-traces/`, `proof-evidence/probe-observations/`, and `proof-evidence/scenario-observations/`).
+4. Write the completed `proof-result-bundle.json` back into the output root with host details, per-axis status, executed flows/probes/scenarios, missing items, and evidence references keyed to the exported `ScenarioMatrix`/`ScenarioCatalog` names.
+5. Reload that output directory in SlideSmith/Desktop review. The app will re-ingest `proof-result-bundle.json`, refresh the files listed under `ImportTargets`, and surface the updated planned-vs-executed/imported proof state in reports/guidance.
+
 ## Issue #2 progress comparison
 
 Implemented from issue scope:
 - import scan across single mesh, folder, and archive input (`.zip`, `.7z`, `.tar`, `.tar.gz`, `.tgz`)
 - batch mesh discovery now skips support/body-reference NIFs (e.g., skeleton and body base/reference files) so only convertible armor/clothing meshes are processed
-- body detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback); bone-name scoring from physics XML for higher confidence
+- body detection (CBBE, UNP, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback); bone-name scoring from physics XML for higher confidence
 - body detection reference comparison now scores body-reference asset names (`*.tri`, `*.osp`, reference mesh names) against known body templates as additional evidence
 - body detection UV-signature evidence now samples mesh UV coverage/aspect ranges from readable NIF geometry and factors it into confidence scoring (`uv:u=... ,v=...`)
 - mesh analysis, cage/strategy stages, weight transfer, morph generation, partition rebuild, clipping detect/correct, physics configs
@@ -298,6 +609,7 @@ Implemented from issue scope:
 - **pose simulation** (`pose-simulation-report.json`) — `BasicPoseSimulationService` tests the converted mesh against 8 animation poses (T-pose, Walk, Run, Idle, Crouch, Combat-Idle, Jump, Sneak) using per-pose per-region stress amplifiers; regions where `morph_factor × pose_amplifier ≥ 1.10` are flagged as at-risk; report written as JSON and visualised in the preview HTML; emits `pose-simulation:tested=8,...` pipeline step
 - **deeper mesh/physics solver tuning** — strategy conversion now runs a region-adjacency smoothing solver with mesh-type-specific clamp/blend iterations, and physics XML generation now applies adaptive stiffness/offset/damping/restitution tuning (including reduced offsets when physics weights are missing) for more stable outputs
 - **NIF block graph parsing for geometry nodes** — conversion now parses `Ni*` block/type spans first (e.g. `NiTriShapeData`) to locate real vertex streams before fallback heuristics, improving transform reliability on non-synthetic NIF layouts
+- **NIF backend strategy** — current conversion keeps a managed parser path for supported geometry/topology signatures and treats unknown layouts as manual-review diagnostics; if broader full-block compatibility is required, prefer integrating the maintained pure .NET **NiflySharp** (`Nifly` NuGet) backend over building a parser from scratch or introducing a new native-wrapper dependency
 - **support asset carry-forward** — export now copies scanned textures, material files (`.bgsm`/`.bgem`), physics files, plugin files, and body-reference files (`.tri`/`.osp` plus skeleton `.nif`) into the output tree using source-relative paths so converted packs include required sidecar assets
 - **external custom body profiles** — import now auto-loads nearby `*.slidesmith-body.json` files so conversions can target named custom bodies with custom detection tokens, transformation fields, slider sets, male/female BodySlide metadata, and per-body physics defaults instead of falling back to a generic `CUSTOM` output; explicit paths can also be supplied programmatically via `ConversionRequest.CustomProfilePaths` (or the GUI's **Load Custom Profile…** button) and are merged on top of any auto-discovered profiles so ad-hoc profiles work without being placed next to the input
 - **profile system controls** — direct target-body runs now resolve sensible built-in default physics per body (`CBBE/UBE/Vanilla` → `none`, `UNP/TBD` → `cbpc`, `3BA/BHUNP` → `smp+cbpc`, `HIMBO/SAM/SOS` → `smp`), while CLI/desktop users can explicitly override physics and disable BodySlide slider export for lighter packages

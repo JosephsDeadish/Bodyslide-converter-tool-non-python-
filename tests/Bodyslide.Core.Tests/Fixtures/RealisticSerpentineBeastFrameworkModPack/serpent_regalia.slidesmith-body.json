@@ -1,0 +1,39 @@
+{
+  "name": "Serpentine Framework",
+  "aliases": [
+    "Lamia Regalia",
+    "Naga Coil Harness"
+  ],
+  "referenceTokens": [
+    "lamia",
+    "naga",
+    "serpent",
+    "coil",
+    "tail"
+  ],
+  "sliderNames": [
+    "Belly",
+    "WaistWidth",
+    "HipWidth",
+    "TailBase",
+    "TailLength",
+    "CoilLength"
+  ],
+  "physicsBones": [
+    "NPC Belly",
+    "NPC Tail",
+    "Tail1",
+    "Tail2",
+    "Tail3",
+    "Tail4",
+    "Tail5",
+    "CoilRoot",
+    "CoilMid",
+    "CoilTip"
+  ],
+  "physicsProfile": "smp",
+  "gender": "female",
+  "skeletonFoundation": "Serpentine beast-humanoid skeleton",
+  "skeletonFramework": "serpentine-humanoid",
+  "bodyOutputPath": "meshes\\beast\\serpentine\\"
+}

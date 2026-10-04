@@ -1,0 +1,27 @@
+{
+  "name": "MessyMixedPluginChainReference",
+  "referenceTokens": [
+    "3ba",
+    "devious",
+    "ebonite",
+    "bhunp",
+    "himbo",
+    "sam-light"
+  ],
+  "zapSliderNames": [
+    "HideCollar",
+    "HideArmbinder",
+    "HideHeelAddon"
+  ],
+  "physicsBones": [
+    "NPC L Breast01",
+    "NPC R Breast01",
+    "NPC Belly",
+    "NPC L Foot",
+    "NPC R Foot",
+    "HDT JawLower",
+    "HDT Tongue"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female"
+}

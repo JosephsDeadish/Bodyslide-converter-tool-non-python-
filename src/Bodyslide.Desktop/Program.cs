@@ -1,41 +1,105 @@
+using Bodyslide.Core;
 using System.Windows.Forms;
 
 namespace Bodyslide.Desktop;
 
 internal static class Program
 {
+    private static string? _startupDiagnosticsPath;
+
     [STAThread]
-    private static void Main()
+    private static int Main(string[] args)
+    {
+        if (args.Any(static arg =>
+            StandaloneStartupRouting.TryReadOptionName(arg, out var option) &&
+            option.Equals("smoke-test", StringComparison.OrdinalIgnoreCase)))
+        {
+            return RunSmokeTest();
+        }
+
+        try
+        {
+            _startupDiagnosticsPath = ResolveStartupDiagnosticsPath(args);
+            WriteStartupDiagnostics(
+                _startupDiagnosticsPath,
+                $"desktop-startup: exe={Environment.ProcessPath ?? "(unknown)"}, cwd={Environment.CurrentDirectory}, args=[{string.Join(", ", args)}]");
+            Environment.CurrentDirectory = ExecutionEnvironment.GetStartupWorkingDirectory(
+                Environment.CurrentDirectory,
+                Environment.ProcessPath,
+                AppContext.BaseDirectory);
+            RegisterGlobalExceptionHandlers();
+            var launchOptions = DesktopWorkflowSupport.ParseLaunchOptions(args);
+            WriteStartupDiagnostics(
+                _startupDiagnosticsPath,
+                $"desktop-startup: launcher={launchOptions.FromModOrganizerLauncher}, startup-output={launchOptions.StartupOutputDirectory ?? "(none)"}, startup-input={launchOptions.StartupInputPath ?? "(none)"}");
+            ApplicationConfiguration.Initialize();
+            using var form = new MainForm(launchOptions);
+            WriteStartupDiagnostics(_startupDiagnosticsPath, "desktop-startup: window constructed");
+            form.Shown += (_, _) => WriteStartupDiagnostics(_startupDiagnosticsPath, "desktop-startup: window shown");
+            Application.Run(form);
+            WriteStartupDiagnostics(_startupDiagnosticsPath, "desktop-startup: ui exited normally");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            ShowFatalError(ex, _startupDiagnosticsPath);
+            return 1;
+        }
+    }
+
+    private static void RegisterGlobalExceptionHandlers()
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += OnThreadException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+    }
 
+    private static int RunSmokeTest()
+    {
         try
         {
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
             ApplicationConfiguration.Initialize();
-            Application.Run(new MainForm());
+            using var form = new MainForm();
+            DesktopSmokeTestSummary? summary = null;
+            form.Shown += (_, _) =>
+            {
+                summary = form.GetSmokeTestSummary();
+                form.BeginInvoke(new Action(form.Close));
+            };
+            Application.Run(form);
+            if (summary is null)
+            {
+                Console.Error.WriteLine("SlideSmith desktop smoke test failed: the window was not shown.");
+                return 1;
+            }
+            Console.WriteLine(DesktopSmokeTestContract.Serialize(summary));
+            return summary.Status == DesktopSmokeTestContract.ReadyStatus ? 0 : 1;
         }
         catch (Exception ex)
         {
-            ShowFatalError(ex);
+            Console.Error.WriteLine($"SlideSmith desktop smoke test failed: {ex}");
+            return 1;
         }
     }
 
     private static void OnThreadException(object sender, System.Threading.ThreadExceptionEventArgs e) =>
-        ShowFatalError(e.Exception);
+        ShowFatalError(e.Exception, _startupDiagnosticsPath);
 
     private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
         if (e.ExceptionObject is Exception ex)
         {
-            ShowFatalError(ex);
+            ShowFatalError(ex, _startupDiagnosticsPath);
         }
     }
 
-    private static void ShowFatalError(Exception ex)
+    private static void ShowFatalError(Exception ex, string? startupDiagnosticsPath)
     {
         var crashLogPath = TryWriteCrashLog(ex);
+        WriteStartupDiagnostics(
+            startupDiagnosticsPath,
+            $"desktop-startup: fatal {ex.GetType().FullName}: {ex.Message}; crash-log={crashLogPath ?? "(not written)"}");
         var crashDetails = BuildCrashDetails(ex, crashLogPath);
         using var dialog = new Form
         {
@@ -103,9 +167,17 @@ internal static class Program
             try
             {
                 Clipboard.SetText(crashDetails);
+                MessageBox.Show(dialog, "Crash details copied to the clipboard.", "SlideSmith", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            catch
+            catch (Exception clipboardEx)
             {
+                System.Diagnostics.Trace.TraceWarning($"Failed to copy crash details to the clipboard: {clipboardEx.Message}");
+                MessageBox.Show(
+                    dialog,
+                    "Clipboard access is unavailable on this machine right now. You can still use the crash log path shown above.",
+                    "Clipboard unavailable",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
             }
         };
         actions.Controls.Add(closeButton);
@@ -160,5 +232,81 @@ internal static class Program
         }
 
         yield return Path.Combine(Path.GetTempPath(), "SlideSmith");
+    }
+
+    private static string? ResolveStartupDiagnosticsPath(IReadOnlyList<string> args)
+    {
+        for (var index = 0; index < args.Count; index++)
+        {
+            if (!TryReadOptionToken(args[index], out var optionName, out var inlineValue) ||
+                !optionName.Equals("startup-diagnostics", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(inlineValue))
+            {
+                return NormalizeDiagnosticsPath(inlineValue);
+            }
+
+            if (index + 1 < args.Count)
+            {
+                if (!TryReadOptionToken(args[index + 1], out _, out _))
+                {
+                    return NormalizeDiagnosticsPath(args[index + 1]);
+                }
+            }
+        }
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            return Path.Combine(localAppData, "SlideSmith", "startup-launch-diagnostics.log");
+        }
+
+        return Path.Combine(Path.GetTempPath(), "SlideSmith", "startup-launch-diagnostics.log");
+    }
+
+    private static string? NormalizeDiagnosticsPath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim().Trim('"');
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+    }
+
+    private static bool TryReadOptionToken(string? arg, out string optionName, out string? inlineValue)
+        => StandaloneStartupRouting.TryReadOptionToken(arg, out optionName, out inlineValue);
+
+    private static void WriteStartupDiagnostics(string? diagnosticsPath, string message)
+    {
+        if (string.IsNullOrWhiteSpace(diagnosticsPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var path = Path.GetFullPath(diagnosticsPath);
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            if (File.Exists(path) && new FileInfo(path).Length > 1024 * 1024)
+            {
+                File.WriteAllText(path, string.Empty);
+            }
+            File.AppendAllText(
+                path,
+                $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
+        }
+        catch
+        {
+        }
     }
 }

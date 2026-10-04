@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config installerVersion="5" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+  <moduleName>SlideSmith Windows Bundle</moduleName>
+  <moduleDependencies>
+    <gameDependency version="1.5.97">Skyrim Special Edition</gameDependency>
+  </moduleDependencies>
+  <requiredInstallFiles>
+    <folder source="desktop" destination="CalienteTools/SlideSmith" priority="0" />
+    <folder source="cli" destination="CalienteTools/SlideSmith/cli" priority="0" />
+    <folder source="meta" destination="CalienteTools/SlideSmith/meta" priority="0" />
+    <file source="cli/SlideSmith-CLI.exe" destination="CalienteTools/SlideSmith/SlideSmith-CLI.exe" priority="0" />
+    <file source="README.txt" destination="CalienteTools/SlideSmith/README.txt" priority="0" />
+    <file source="meta.ini" destination="CalienteTools/SlideSmith/meta.ini" priority="0" />
+  </requiredInstallFiles>
+</config>

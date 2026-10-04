@@ -1,0 +1,10 @@
+<SliderSetInfo version="1">
+  <SliderSet name="HornedSparseRig" set="Goat Humanoid">
+    <OutputPath>meshes\beast\horned_sparse\</OutputPath>
+    <OutputFile gender="f" use="true">horned_sparse_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">horned_sparse_1.nif</OutputFile>
+    <Slider name="HornSpread" />
+    <Slider name="HornCurl" />
+    <Slider name="Belly" />
+  </SliderSet>
+</SliderSetInfo>

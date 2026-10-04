@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fomod>
+  <Name>SlideSmith Windows Bundle</Name>
+  <Author>DeadOnTheInside</Author>
+  <Version MachineVersion="1.0.1">1.0.1</Version>
+  <Website></Website>
+  <Description>Auto-generated SkyrimSE Windows tool bundle for SlideSmith. Installs into CalienteTools/SlideSmith so Mod Organizer 2 detects valid Skyrim game data and can launch SlideSmith as a managed executable.</Description>
+</fomod>

@@ -1,0 +1,17 @@
+{
+  "name": "NordicPackReference",
+  "referenceTokens": [
+    "3ba",
+    "3bbb"
+  ],
+  "zapSliderNames": [
+    "ZapSleeves"
+  ],
+  "physicsBones": [
+    "NPC L Breast01",
+    "NPC R Breast01",
+    "NPC Belly"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female"
+}
