@@ -136,6 +136,11 @@ reference NIF or morph file must not be replaced by a same-named file in
 `SliderSets`, the BodySlide root, or a folder named after the project. Discovery
 and cache invalidation use the authored ShapeData folder, even when its name
 differs from the SliderSet name.
+OSP slider and zap names are selected per SliderSet using its declared output
+mesh stem (including `_0`/`_1` normalization), so unrelated armor projects imported
+from the same pack do not add their sliders. Legacy sets without output metadata
+retain their existing behavior. This does not yet prove shape-specific OSD/TRI
+payload ownership, nor distinguish same-named outputs in different directories.
 Morph import rejects non-finite displacements, out-of-range vertex indexes,
 overflowing counts and malformed trailing TRI bytes. Reads are capped at 64 MiB
 per BSD/TRI/OSD file; dense expansion is capped at 8,388,608 deltas per payload

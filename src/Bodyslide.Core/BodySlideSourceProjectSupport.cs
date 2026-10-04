@@ -273,7 +273,7 @@ internal static class BodySlideSourceProjectSupport
             var extension = Path.GetExtension(filePath);
             if (extension.Equals(".osp", StringComparison.OrdinalIgnoreCase))
             {
-                var fromOsp = await TryReadOspAsync(filePath, cancellationToken);
+                var fromOsp = await TryReadOspAsync(filePath, armor.MeshFiles, cancellationToken);
                 hasOsp |= fromOsp.HasOsp;
                 sliders.AddRange(fromOsp.Sliders);
                 zapSliders.AddRange(fromOsp.ZapSliders);
@@ -1179,7 +1179,8 @@ internal static class BodySlideSourceProjectSupport
         }
     }
 
-    private static async Task<BodySlideSourceSupport> TryReadOspAsync(string filePath, CancellationToken cancellationToken)
+    private static async Task<BodySlideSourceSupport> TryReadOspAsync(
+        string filePath, IReadOnlyList<string> meshFiles, CancellationToken cancellationToken)
     {
         try
         {
@@ -1188,7 +1189,22 @@ internal static class BodySlideSourceProjectSupport
             var sliders = new List<SourceSliderCandidate>();
             var zapSliders = new List<SourceSliderCandidate>();
 
-            foreach (var sliderElement in document.Descendants("Slider"))
+            var meshTokens = meshFiles.Select(NormalizeMeshToken).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var sets = document.Descendants("SliderSet").Where(set =>
+            {
+                var output = set.Elements().FirstOrDefault(element =>
+                    element.Name.LocalName.Equals("OutputFile", StringComparison.OrdinalIgnoreCase))?.Value.Trim();
+                if (string.IsNullOrWhiteSpace(output)) return true;
+                var stem = Path.GetFileName(output.Replace('\\', '/'));
+                if (stem.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)) stem = stem[..^4];
+                if (stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+                    stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase)) stem = stem[..^2];
+                return meshTokens.Contains(stem);
+            }).ToArray();
+            var sliderElements = document.Descendants("SliderSet").Any()
+                ? sets.SelectMany(static set => set.Descendants("Slider"))
+                : document.Descendants("Slider");
+            foreach (var sliderElement in sliderElements)
             {
                 var name = sliderElement.Attribute("name")?.Value?.Trim();
                 if (!IsLikelySliderName(name))
@@ -1210,7 +1226,7 @@ internal static class BodySlideSourceProjectSupport
             return new BodySlideSourceSupport(
                 CollapseCandidates(sliders),
                 CollapseCandidates(zapSliders),
-                HasOsp: true,
+                HasOsp: !document.Descendants("SliderSet").Any() || sets.Length > 0,
                 HasTriPayloads: false,
                 HasBsdPayloads: false,
                 HasOsdPayloads: false);
