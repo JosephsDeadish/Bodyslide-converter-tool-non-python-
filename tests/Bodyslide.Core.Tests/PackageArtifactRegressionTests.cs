@@ -17,8 +17,8 @@ public sealed class PackageArtifactRegressionTests
         Assert.NotNull(repository);
         var config = System.Xml.Linq.XDocument.Load(Path.Combine(repository.FullName,
             "packaging", "windows-bundle", "fomod", "ModuleConfig.xml"));
-        var desktopFolder = Assert.Single(config.Descendants("folder").Where(element =>
-            string.Equals(element.Attribute("source")?.Value, "desktop", StringComparison.Ordinal)));
+        var desktopFolder = Assert.Single(config.Descendants("folder"), element =>
+            string.Equals(element.Attribute("source")?.Value, "desktop", StringComparison.Ordinal));
         Assert.Equal("CalienteTools/SlideSmith", desktopFolder.Attribute("destination")?.Value);
         Assert.DoesNotContain(config.Descendants("file"), element =>
             string.Equals(element.Attribute("source")?.Value, "desktop/SlideSmith.exe", StringComparison.Ordinal));
