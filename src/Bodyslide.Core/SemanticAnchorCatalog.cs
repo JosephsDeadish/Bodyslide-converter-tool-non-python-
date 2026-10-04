@@ -60,6 +60,10 @@ internal static class SemanticAnchorCatalog
         {
             return true;
         }
+        if (BuiltInBodyMetadataCatalog.TryGet(bodyName ?? string.Empty, out _))
+        {
+            return false;
+        }
 
         var normalizedCues = NormalizeCueTokens(cueTokens)
             .Concat(NormalizeCueTokens([bodyName ?? string.Empty]))
@@ -81,11 +85,9 @@ internal static class SemanticAnchorCatalog
                 var aliasMatches = candidate.Aliases
                     .Select(NormalizeCueToken)
                     .Where(static alias => !string.IsNullOrWhiteSpace(alias))
-                    .Count(alias => normalizedCues.Any(cue => cue.Contains(alias, StringComparison.OrdinalIgnoreCase) ||
-                                                              alias.Contains(cue, StringComparison.OrdinalIgnoreCase)));
+                    .Count(alias => normalizedCues.Contains(alias, StringComparer.OrdinalIgnoreCase));
                 var nameMatch = normalizedCues.Any(cue =>
-                    cue.Contains(NormalizeCueToken(candidate.Name), StringComparison.OrdinalIgnoreCase) ||
-                    NormalizeCueToken(candidate.Name).Contains(cue, StringComparison.OrdinalIgnoreCase));
+                    cue.Equals(NormalizeCueToken(candidate.Name), StringComparison.OrdinalIgnoreCase));
                 var regionAnchorMatches = candidate.Anchors
                     .Where(pair => relevantRegions.Length == 0 || relevantRegions.Contains(pair.Key, StringComparer.OrdinalIgnoreCase))
                     .Select(pair => new
@@ -94,8 +96,7 @@ internal static class SemanticAnchorCatalog
                         MatchCount = pair.Value.Count(anchor =>
                         {
                             var normalizedAnchor = NormalizeCueToken(anchor);
-                            return normalizedCues.Any(cue => cue.Contains(normalizedAnchor, StringComparison.OrdinalIgnoreCase) ||
-                                                             normalizedAnchor.Contains(cue, StringComparison.OrdinalIgnoreCase));
+                            return normalizedCues.Contains(normalizedAnchor, StringComparer.OrdinalIgnoreCase);
                         })
                     })
                     .Where(static pair => pair.MatchCount > 0)
@@ -116,7 +117,9 @@ internal static class SemanticAnchorCatalog
                     landmarkCoverage
                 };
             })
-            .Where(static entry => entry.score >= 2.2d)
+            .Where(entry => entry.score >= 2.2d &&
+                (entry.nameMatch || entry.aliasMatches > 0 ||
+                 entry.regionAnchorMatches.Any(pair => HasDistinctAnchor(entry.candidate, pair.Key, normalizedCues))))
             .OrderByDescending(static entry => entry.score)
             .ThenByDescending(static entry => entry.landmarkCoverage)
             .ThenByDescending(static entry => entry.regionAnchorMatches.Length)
@@ -141,6 +144,13 @@ internal static class SemanticAnchorCatalog
         .Where(static item => !string.IsNullOrWhiteSpace(item))
         .ToArray();
         return true;
+
+        static bool HasDistinctAnchor(SemanticAnchorProfile candidate, string region, IReadOnlyList<string> cues) =>
+            candidate.Anchors[region].Select(NormalizeCueToken).Any(anchor =>
+                anchor.Length >= 5 && !anchor.StartsWith("npc", StringComparison.OrdinalIgnoreCase) &&
+                cues.Contains(anchor, StringComparer.OrdinalIgnoreCase) &&
+                All.Count(other => other.Anchors.Values.SelectMany(static values => values)
+                    .Any(value => NormalizeCueToken(value).Equals(anchor, StringComparison.OrdinalIgnoreCase))) == 1);
     }
 
     private static IReadOnlyDictionary<string, SemanticAnchorProfile> LoadProfiles()
@@ -176,7 +186,8 @@ internal static class SemanticAnchorCatalog
         values?
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .SelectMany(static value => value
-                .Split(['\\', '/', '_', '-', ' ', '.', ':'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .Split(['\\', '/', '_', '-', ' ', '.', ':'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Append(value))
             .Select(NormalizeCueToken)
             .Where(static token => !string.IsNullOrWhiteSpace(token))
             .Distinct(StringComparer.OrdinalIgnoreCase) ?? [];

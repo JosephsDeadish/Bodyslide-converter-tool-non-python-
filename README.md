@@ -110,6 +110,12 @@ FOMOD archive. Alternative installer folders may contain conflicting versions of
 the same plugin; select the intended installed variant rather than combining those
 plugins. Supply a minimal permitted reproduction and launcher diagnostics before
 claiming the original real-world failure has been resolved.
+Conversion now stops before mesh/morph processing when multiple paths supply the
+same plugin identity (for example four installer variants of `BDE_Armor.esp`).
+No variant is selected automatically. Install the archive with MO2/Vortex first,
+then convert the chosen installed mod, or prepare a folder containing one selected
+plugin/body variant and its shared assets. Archive extraction still occurs before
+this check; this is not a FOMOD choice interpreter.
 Constant missing-texture fallbacks use compact 4×4 DDS maps instead of expanding
 every channel to the diffuse texture's resolution. Detail-derived maps retain
 their detail; a compact neutral fallback is not a substitute for authored textures.
@@ -140,6 +146,31 @@ preventing 32-bit indexes and deltas from being silently read as 16-bit data.
 BodySlide TRI files may include an optional UV morph section; its structure is
 validated without treating UV offsets as position displacements. Legacy files
 ending after position morphs remain supported.
+
+Issue #8 reporting/performance corrections:
+- Morph generation and BodySlide preparation share one immutable source-resolution
+  result per conversion/target. There is no global payload cache or cross-pack reuse.
+- Root reports remain the authoritative diagnostics; exports no longer copy them
+  into a sibling `.reports` folder. Existing folders from older runs are not removed.
+  Required OSP/OSD/BSD/TRI/ShapeData files are unaffected.
+- Final timing JSON, pipeline profile and conversion log use the same completed
+  measurement (including export queue wait and ZIP preparation). The final ZIP
+  includes the corrected log, not the pre-export snapshot. Final report writing and
+  ZIP central-directory closure are outside that measurement.
+- Fallback semantic profiles require exact identifiers or distinctive observed
+  anchors. Generic short tokens cannot select Spriggan for a 3BA breastplate.
+  Catalog physics bones/sliders are expectations, not observed mesh evidence.
+- `BodySlideCompatible` denotes generated scaffold compatibility, not a successful
+  external build; `SourceBodyMatchRatio` is heuristic confidence, not fit accuracy.
+
+Remaining issue #8 acceptance work: detailed per-piece diagnostics and generic
+harness plans are still generated; a compact/optional diagnostics mode is not yet
+implemented. Structural NIF support does not prove all UV/skin/partition/material
+relationships, runtime physics linkage/conflicts, or shape-specific source morph
+association. Empty texture lists do not prove textures are unnecessary. A permitted
+source/output sample is needed to distinguish external textures from missed
+discovery and to regenerate the earlier dependency/FOMOD/3BA-physics fixes. Test
+the selected variant in BodySlide, MO2, xEdit and Skyrim before treating it as ready.
 
 Packaging validation accepts the generated `dependency-map.json` mesh-entry
 array as well as legacy object reports; malformed/empty arrays remain invalid.

@@ -16,6 +16,9 @@ internal sealed record FallbackBodySlideInference(
     IReadOnlyList<string> Signals,
     bool InferredFromPathEvidence = false);
 
+internal sealed record ConversionBodySlideResolution(
+    string TargetBody, Lazy<Task<ResolvedBodySlideSliders>> Value);
+
 internal static class BodySlideSourceProjectSupport
 {
     private static readonly IReadOnlyList<string> DefaultSliders = ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
@@ -69,7 +72,27 @@ internal static class BodySlideSourceProjectSupport
         IReadOnlyList<string> ReferencedPaths,
         IReadOnlyList<string>? DataFolders = null);
 
-    public static async Task<ResolvedBodySlideSliders> ResolveAsync(
+    public static Task<ResolvedBodySlideSliders> ResolveAsync(
+        ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (armor.SourceBodySlideResolution is { } resolution &&
+            resolution.TargetBody.Equals(targetBody, StringComparison.OrdinalIgnoreCase))
+        {
+            return resolution.Value.Value.WaitAsync(cancellationToken);
+        }
+        return ResolveUncachedAsync(armor, targetBody, cancellationToken);
+    }
+
+    internal static ImportedArmor WithConversionResolution(
+        ImportedArmor armor, string targetBody, CancellationToken cancellationToken) =>
+        armor with
+        {
+            SourceBodySlideResolution = new ConversionBodySlideResolution(targetBody,
+                new Lazy<Task<ResolvedBodySlideSliders>>(() => ResolveUncachedAsync(armor, targetBody, cancellationToken)))
+        };
+
+    private static async Task<ResolvedBodySlideSliders> ResolveUncachedAsync(
         ImportedArmor armor,
         string targetBody,
         CancellationToken cancellationToken)

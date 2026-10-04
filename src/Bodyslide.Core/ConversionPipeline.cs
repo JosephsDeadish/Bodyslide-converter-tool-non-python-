@@ -107,6 +107,8 @@ public sealed record ImportedArmor(
     internal IReadOnlyList<string>? BatchPluginFiles { get; init; }
     internal IReadOnlyList<string>? BatchMeshFiles { get; init; }
     internal string? BatchBodySlideProjectName { get; init; }
+    internal ConversionBodySlideResolution? SourceBodySlideResolution { get; init; }
+    internal IReadOnlyList<string>? SourcePluginFiles { get; init; }
 }
 public sealed record BodyDetectionReport(string Body, double Confidence, IReadOnlyList<string> Evidence);
 /// <summary>
@@ -7540,6 +7542,7 @@ public sealed class ConversionOrchestrator(
             {
                 armor = armor with { BatchPluginFiles = batchPluginContext.PluginFiles, BatchMeshFiles = batchPluginContext.MeshFiles };
             }
+            PluginSourceIdentity.RequireUnambiguous(armor.BatchPluginFiles ?? armor.SourcePluginFiles ?? []);
 
             // Merge any explicitly-provided custom profile paths from the request with the
             // auto-scanned profiles that the importer found inside the input directory.
@@ -7866,6 +7869,7 @@ public sealed class ConversionOrchestrator(
             }
 
             ReportStage("Generating morphs", 12);
+            armor = BodySlideSourceProjectSupport.WithConversionResolution(armor, normalized.Request.TargetBody, cancellationToken);
             var morphs = await ProfileStageAsync("morph-generation", () => morphGenerator.GenerateAsync(weighted, armor, normalized.Request.TargetBody, cancellationToken));
             steps.Add($"morphs:{morphs.LowMorph}/{morphs.HighMorph},sliders={morphs.SliderCount},match={morphs.SourceBodyMatchRatio:P0}");
 
@@ -8067,10 +8071,27 @@ public sealed class ConversionOrchestrator(
                 if (normalized.Request.OutputZip)
                     // Install archives omit diagnostic JSON; retain the identical final report as a log.
                     File.WriteAllText(Path.Combine(export.OutputDirectory, "conversion-timings.log"), finalTimingJson);
-                var diagnosticsDirectory = export.OutputDirectory.TrimEnd(
-                    Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".reports";
-                if (Directory.Exists(diagnosticsDirectory))
-                    File.WriteAllText(Path.Combine(diagnosticsDirectory, "conversion-timings.json"), finalTimingJson);
+                File.WriteAllText(Path.Combine(export.OutputDirectory, "conversion-pipeline-profile.json"),
+                    JsonSerializer.Serialize(LocalExportService.BuildConversionPipelineProfileReport(
+                        steps, stageDurationsMs["export"], completed: true),
+                        new JsonSerializerOptions { WriteIndented = true }));
+                var logPath = Path.Combine(export.OutputDirectory, "conversion.log");
+                if (File.Exists(logPath))
+                {
+                    var lines = File.ReadAllLines(logPath).Where(line =>
+                        !line.StartsWith("stage-ms:", StringComparison.Ordinal) &&
+                        !line.StartsWith("stage-top:", StringComparison.Ordinal) &&
+                        !line.StartsWith("phase-ms:", StringComparison.Ordinal) &&
+                        !line.StartsWith("phase-top:", StringComparison.Ordinal) &&
+                        !line.StartsWith("pipeline-total-ms:", StringComparison.Ordinal)).ToList();
+                    lines.AddRange(steps.Where(line =>
+                        line.StartsWith("stage-ms:", StringComparison.Ordinal) ||
+                        line.StartsWith("stage-top:", StringComparison.Ordinal) ||
+                        line.StartsWith("phase-ms:", StringComparison.Ordinal) ||
+                        line.StartsWith("phase-top:", StringComparison.Ordinal) ||
+                        line.StartsWith("pipeline-total-ms:", StringComparison.Ordinal)));
+                    File.WriteAllLines(logPath, lines);
+                }
             }
             steps.Add($"exported:{export.OutputDirectory}");
 
@@ -8820,6 +8841,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         var maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2);
         var batchSupportAssets = LocalExportService.DiscoverSupportAssets(
             sourceDirectory, rootOutput, request.SharedPluginOutputDirectory, cancellationToken);
+        PluginSourceIdentity.RequireUnambiguous(batchSupportAssets.PluginFiles);
         using var batchPluginExportContext = new BatchPluginExportContext
         {
             PluginFiles = batchSupportAssets.PluginFiles,
@@ -8942,7 +8964,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         {
             var relativePath = Path.GetRelativePath(rootOutput, file).Replace('\\', '/');
             if (Path.GetExtension(file).Equals(".json", StringComparison.OrdinalIgnoreCase) ||
-                (finalizeTimings is not null && relativePath.Equals("conversion-timings.log", StringComparison.OrdinalIgnoreCase)) ||
+                (finalizeTimings is not null && (relativePath.Equals("conversion-timings.log", StringComparison.OrdinalIgnoreCase) ||
+                    relativePath.Equals("conversion.log", StringComparison.OrdinalIgnoreCase))) ||
                 relativePath.StartsWith(".reports/", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
@@ -8955,41 +8978,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             finalizeTimings();
             archive.CreateEntryFromFile(Path.Combine(rootOutput, "conversion-timings.log"),
                 "conversion-timings.log", CompressionLevel.Optimal);
+            var logPath = Path.Combine(rootOutput, "conversion.log");
+            if (File.Exists(logPath))
+                archive.CreateEntryFromFile(logPath, "conversion.log", CompressionLevel.Optimal);
         }
     }
-
-    internal static async Task CopyRootJsonReportsToDiagnosticsDirectoryAsync(
-        string outputDirectory,
-        IReadOnlyList<string> outputFiles,
-        CancellationToken cancellationToken)
-    {
-        var diagnosticsDirectory = GetDiagnosticsDirectory(outputDirectory);
-        var rootJsonFiles = outputFiles
-            .Where(file =>
-                string.Equals(Path.GetDirectoryName(file), outputDirectory, StringComparison.OrdinalIgnoreCase) &&
-                Path.GetExtension(file).Equals(".json", StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        if (rootJsonFiles.Length == 0)
-        {
-            return;
-        }
-
-        if (Directory.Exists(diagnosticsDirectory))
-        {
-            Directory.Delete(diagnosticsDirectory, recursive: true);
-        }
-        Directory.CreateDirectory(diagnosticsDirectory);
-        foreach (var file in rootJsonFiles)
-        {
-            var destination = Path.Combine(diagnosticsDirectory, Path.GetFileName(file));
-            File.Copy(file, destination, overwrite: true);
-        }
-    }
-
-    private static string GetDiagnosticsDirectory(string outputDirectory) =>
-        $"{outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)}.reports";
 
     private static string BuildVariantRootOutput(ConversionRequest originalRequest, NormalizedConversionRequest variant, bool batchMode)
     {
@@ -11223,7 +11216,10 @@ internal sealed class LocalArmorImportService : IArmorImportService
             bodyReferenceFiles,
             temporaryWorkspace,
             DetectWeightVariantPairs(meshFiles),
-            customBodyProfiles));
+            customBodyProfiles)
+        {
+            SourcePluginFiles = SelectSupportFiles(".esp", ".esm", ".esl")
+        });
     }
 
     private static IReadOnlyList<string> SelectReferencedTextures(
@@ -19013,6 +19009,19 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
 
 internal static class PluginSourceIdentity
 {
+    internal static void RequireUnambiguous(IEnumerable<string> paths)
+    {
+        var resolution = Resolve(paths);
+        if (resolution.AmbiguousNames.Count > 0)
+        {
+            throw new InvalidDataException("Installer choices must be resolved before conversion. "
+                + "Multiple source variants of " + string.Join(", ", resolution.AmbiguousNames)
+                + " were found. Install the archive with MO2/Vortex and convert the selected installed mod, "
+                + "or prepare a folder with one plugin/body variant plus its shared assets. "
+                + "The converter will not choose or combine alternatives automatically.");
+        }
+    }
+
     internal sealed record Resolution(
         IReadOnlyList<string> SafePaths,
         IReadOnlyList<string> AmbiguousNames,
@@ -23214,8 +23223,6 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(conversionPipelineProfilePath);
 
-        await BatchConversionRunner.CopyRootJsonReportsToDiagnosticsDirectoryAsync(outputDirectory, outputFiles, cancellationToken);
-
         if (request.OutputZip && !request.DeferZipCreation)
         {
             var zipPath = BatchConversionRunner.CreateCombinedBatchZip(outputDirectory);
@@ -23751,8 +23758,10 @@ internal sealed class LocalExportService(
             morphs.LowMorph,
             morphs.HighMorph,
             morphs.BodySlideCompatible,
+            BodySlideCompatibilityMeaning = "Generated project/morph scaffold compatibility only; not a verified BodySlide build or Skyrim-ready conversion.",
             morphs.SliderCount,
             morphs.SourceBodyMatchRatio,
+            SourceBodyMatchRatioMeaning = "Heuristic weighting/profile confidence; not measured body-fit accuracy.",
             morphs.SourceMorphQuality,
             ReusableSourceMorphPayloads = morphs.ReusableSourceMorphPayloads?.ToDictionary(
                 pair => pair.Key,
@@ -33993,7 +34002,7 @@ internal sealed class LocalExportService(
         return SecurityElement.Escape(value) ?? string.Empty;
     }
 
-    private static object BuildConversionPipelineProfileReport(IReadOnlyList<string> steps, long exportDurationMs)
+    internal static object BuildConversionPipelineProfileReport(IReadOnlyList<string> steps, long exportDurationMs, bool completed = false)
     {
         var stageDurations = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         var phaseDurations = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
@@ -34072,7 +34081,7 @@ internal sealed class LocalExportService(
         phaseDurations["export"] = Math.Max(0, exportDurationMs);
 
         var totalDurationMs = Math.Max(
-            reportedPipelineTotalMs.GetValueOrDefault(0) + Math.Max(0, exportDurationMs),
+            reportedPipelineTotalMs.GetValueOrDefault(0) + (completed ? 0 : Math.Max(0, exportDurationMs)),
             stageDurations.Values.Sum());
         var orderedStages = stageDurations
             .OrderByDescending(static pair => pair.Value)
@@ -37675,17 +37684,6 @@ internal sealed class LocalExportService(
         CageTopologyReport? cageTopology)
     {
         var observedTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
-        {
-            foreach (var token in metadata.AvailablePhysicsBones
-                         .Concat(metadata.SliderNames)
-                         .Concat(metadata.ReferenceTokens)
-                         .Concat(metadata.PhysicsBoneSignatures)
-                         .Append(metadata.Name))
-            {
-                observedTokens.Add(token);
-            }
-        }
 
         foreach (var meshFile in armor.MeshFiles)
         {
@@ -37710,25 +37708,6 @@ internal sealed class LocalExportService(
         AddSemanticAnchorPathTokens(observedTokens, armor.SourcePath);
         AddSemanticAnchorPathTokens(observedTokens, Path.GetFileNameWithoutExtension(armor.SourcePath));
 
-        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
-        {
-            foreach (var token in customProfile.DetectionTokens
-                         .Concat(customProfile.ReferenceTokens ?? [])
-                         .Concat(customProfile.TextureTokens)
-                         .Concat(customProfile.PhysicsTokens)
-                         .Concat(customProfile.SliderNames ?? [])
-                         .Concat(customProfile.PhysicsBones ?? [])
-                         .Concat(customProfile.Aliases ?? [])
-                         .Append(customProfile.Name)
-                         .Append(customProfile.SkeletonFoundation ?? string.Empty)
-                         .Append(customProfile.SkeletonFramework ?? string.Empty))
-            {
-                if (!string.IsNullOrWhiteSpace(token))
-                {
-                    observedTokens.Add(token);
-                }
-            }
-        }
 
         if (cageTopology is not null)
         {

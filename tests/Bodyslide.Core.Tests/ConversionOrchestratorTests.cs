@@ -22521,7 +22521,8 @@ public sealed class RealisticModPackFixtureTests
                 .Single();
             AssertZipContainsEntry(archive, Path.GetRelativePath(outputDirectory, sliderGroupsPath).Replace('\\', '/'));
 
-            var reportsDirectory = outputDirectory + ".reports";
+            var reportsDirectory = outputDirectory;
+            Assert.False(Directory.Exists(outputDirectory + ".reports"));
             var copiedQualityJson = await File.ReadAllTextAsync(Path.Combine(reportsDirectory, "conversion-quality.json"));
             Assert.Contains("\"Code\": \"plugin-link-partial-family-failure\"", copiedQualityJson, StringComparison.Ordinal);
 
@@ -30059,7 +30060,8 @@ public sealed class OutputCompletenessTests
             Assert.Contains(result.OutputFiles, path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(result.OutputFiles, path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
             Assert.True(File.Exists(outputDirectory + ".zip"));
-            Assert.True(File.Exists(outputDirectory + ".reports/conversion-quality.json"));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.False(Directory.Exists(outputDirectory + ".reports"));
         }
         finally
         {

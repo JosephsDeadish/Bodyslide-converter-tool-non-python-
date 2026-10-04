@@ -608,13 +608,19 @@ public sealed class ConversionPerformanceRegressionTests
             Assert.Equal(exportMs, timing.RootElement.GetProperty("PhaseMilliseconds").GetProperty("export").GetInt64());
             Assert.True(timing.RootElement.GetProperty("TotalMilliseconds").GetInt64() >= exportMs);
             Assert.Contains(result.Steps, step => step == $"stage-ms:export={exportMs}");
-            Assert.Equal(json, await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory + ".reports", "conversion-timings.json")));
+            Assert.False(Directory.Exists(result.OutputDirectory + ".reports"));
+            using var profile = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion-pipeline-profile.json")));
+            Assert.Equal(timing.RootElement.GetProperty("TotalMilliseconds").GetInt64(),
+                profile.RootElement.GetProperty("TotalDurationMs").GetInt64());
+            Assert.Contains($"stage-ms:export={exportMs}", await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion.log")));
             Assert.Equal(json, await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion-timings.log")));
             using var zip = ZipFile.OpenRead(result.OutputDirectory + ".zip");
             Assert.Null(zip.GetEntry("conversion-timings.json"));
             Assert.Single(zip.Entries, entry => entry.FullName == "conversion-timings.log");
             using var reader = new StreamReader(zip.GetEntry("conversion-timings.log")!.Open());
             Assert.Equal(json, await reader.ReadToEndAsync());
+            using var logReader = new StreamReader(zip.GetEntry("conversion.log")!.Open());
+            Assert.Contains($"stage-ms:export={exportMs}", await logReader.ReadToEndAsync());
         }
         finally { Directory.Delete(root, true); }
     }
