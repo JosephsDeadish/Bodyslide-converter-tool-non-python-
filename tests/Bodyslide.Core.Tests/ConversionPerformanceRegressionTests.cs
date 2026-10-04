@@ -381,6 +381,7 @@ public sealed class ConversionPerformanceRegressionTests
     [InlineData("malformed")]
     [InlineData("unsupported")]
     [InlineData("multiple-folders")]
+    [InlineData("datafolder-shadow")]
     public async Task UnprovenBodySlideInputsRetainConservativeTextureCoverage(string uncertainty)
     {
         var root = CreateRoot();
@@ -394,6 +395,14 @@ public sealed class ConversionPerformanceRegressionTests
             File.WriteAllText(project, uncertainty == "multiple-folders"
                 ? "<SliderSetInfo><SliderSet><DataFolder>A</DataFolder><InputFile>source.nif</InputFile></SliderSet><SliderSet><DataFolder>B</DataFolder><InputFile>source.nif</InputFile></SliderSet></SliderSetInfo>"
                 : "<SliderSetInfo><SliderSet><InputFile>source.nif</InputFile></SliderSet></SliderSetInfo>");
+            if (uncertainty == "datafolder-shadow")
+            {
+                File.Delete(project);
+                project = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets", "armor.osp");
+                Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+                File.WriteAllText(project, "<SliderSetInfo><SliderSet><DataFolder>MissingAssets</DataFolder><InputFile>source.nif</InputFile></SliderSet></SliderSetInfo>");
+                WriteTextureNif(root, "CalienteTools/BodySlide/SliderSets/source.nif", ["textures/a.dds"]);
+            }
             if (uncertainty == "missing") File.Delete(linkedMesh);
             if (uncertainty == "malformed") File.WriteAllText(project, "<SliderSetInfo>");
             if (uncertainty == "unsupported") File.WriteAllText(linkedMesh, "unsupported NIF");

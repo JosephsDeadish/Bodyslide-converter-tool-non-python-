@@ -429,7 +429,25 @@ internal static class BodySlideSourceProjectSupport
             foreach (var reference in references)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var candidates = ResolveLinkedPathCandidates(probe, reference).Where(File.Exists).ToArray();
+                IEnumerable<string> candidatePaths = ResolveLinkedPathCandidates(probe, reference);
+                if (probe.DataFolders is { Count: 1 })
+                {
+                    if (string.IsNullOrWhiteSpace(probe.BodySlideRoot))
+                    {
+                        return false;
+                    }
+                    var normalized = reference.Replace('\\', '/');
+                    const string bodySlidePrefix = "CalienteTools/BodySlide/";
+                    if (normalized.StartsWith(bodySlidePrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        normalized = normalized[bodySlidePrefix.Length..];
+                    }
+                    var relative = normalized.StartsWith("ShapeData/", StringComparison.OrdinalIgnoreCase)
+                        ? normalized
+                        : "ShapeData/" + probe.DataFolders[0].Replace('\\', '/') + "/" + normalized;
+                    candidatePaths = [Path.Combine(probe.BodySlideRoot, relative.Replace('/', Path.DirectorySeparatorChar))];
+                }
+                var candidates = candidatePaths.Where(File.Exists).ToArray();
                 if (candidates.Length == 0)
                 {
                     return false;
