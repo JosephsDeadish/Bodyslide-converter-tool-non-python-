@@ -8695,6 +8695,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         {
             var currentFile = Path.GetFileName(originalRequest.InputPath);
             var stageProgress = CreateStageProgressReporter(progress, currentFile, completed: 0, total: 1);
+            measurements.OutputRoots.Add(originalRequest.OutputDirectory ?? Path.Combine(
+                ExecutionEnvironment.GetDefaultOutputRootForInput(originalRequest.InputPath),
+                variants[0].Request.TargetBody,
+                Path.GetFileNameWithoutExtension(originalRequest.InputPath)));
             var single = await orchestrator.ConvertAsync(originalRequest, cancellationToken, stageProgress);
             measurements.OutputRoots.Add(single.OutputDirectory);
             progress?.Report(new BatchProgressUpdate(1, 1, Path.GetFileName(originalRequest.InputPath), single.Success));

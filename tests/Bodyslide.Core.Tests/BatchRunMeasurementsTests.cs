@@ -7,6 +7,30 @@ namespace Bodyslide.Core.Tests;
 public sealed class BatchRunMeasurementsTests
 {
     [Fact]
+    public async Task InterruptedSingleInputReportsItsImplicitOutputRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var input = Path.Combine(root, "armor.nif");
+            await File.WriteAllTextAsync(input, "unsupported fixture mesh");
+            var output = Path.Combine(ExecutionEnvironment.GetDefaultOutputRootForInput(input), "CBBE", "armor");
+            Directory.CreateDirectory(output);
+            await File.WriteAllBytesAsync(Path.Combine(output, "partial.nif"), new byte[12]);
+            using var cancelled = new CancellationTokenSource();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                new BatchConversionRunner(StandaloneConversionModules.CreateDefault())
+                    .ConvertAsync(new ConversionRequest(input, "CBBE"),
+                        cancellationToken: cancelled.Token, progress: new CancellingProgress(cancelled)));
+            using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(output, "batch-performance.json")));
+            Assert.Equal("cancelled", report.RootElement.GetProperty("Status").GetString());
+            Assert.Equal(12, report.RootElement.GetProperty("OutputBytesByCategory").GetProperty("meshes").GetInt64());
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task CancelledRunPreservesCancellationAndReportsPartialOutput()
     {
         var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -88,6 +112,11 @@ public sealed class BatchRunMeasurementsTests
         {
             Directory.Delete(root, true);
             File.Delete(root + ".zip");
+        }
+
+        private sealed class CancellingProgress(CancellationTokenSource cancellation) : IProgress<BatchProgressUpdate>
+        {
+            public void Report(BatchProgressUpdate value) => cancellation.Cancel();
         }
     }
 }
