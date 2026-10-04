@@ -710,6 +710,34 @@ public sealed class ConversionPerformanceRegressionTests
         return path;
     }
 
+    [Fact]
+    public async Task ExportPreservesDiscoveredBodySlideOsdAndSliderGroupDependencies()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var nif = WriteTextureNif(root, "meshes/armor.nif", []);
+            var project = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets", "source.osp");
+            var payload = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "Source", "morphs.osd");
+            var group = Path.Combine(root, "CalienteTools", "BodySlide", "SliderGroups", "source.xml");
+            foreach (var path in new[] { project, payload, group }) Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllTextAsync(project, "<SliderSetInfo><SliderSet name=\"Source\"><DataFolder>Source</DataFolder><Slider name=\"Fit\"><DataFile>morphs.osd</DataFile></Slider></SliderSet></SliderSetInfo>");
+            await File.WriteAllBytesAsync(payload, "OSD\0source-payload"u8.ToArray());
+            await File.WriteAllTextAsync(group, "<SliderGroups><Group name=\"Source\"><Member name=\"Source\"/></Group></SliderGroups>");
+            var armor = await new LocalArmorImportService().ImportAsync(nif, CancellationToken.None);
+            foreach (var source in new[] { project, payload, group }) Assert.Contains(source, armor.BodyReferenceFiles);
+            var output = await ExportAsync(Path.Combine(root, "converted"), armor,
+                new PluginAnalysisResult([], [], ""), new TextureSummary(0, [], [], []));
+            foreach (var source in new[] { project, payload, group })
+            {
+                var destination = Path.Combine(output, Path.GetRelativePath(root, source));
+                Assert.True(File.Exists(destination), Path.GetRelativePath(root, source));
+                Assert.Equal(await File.ReadAllBytesAsync(source), await File.ReadAllBytesAsync(destination));
+            }
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     private static async Task<string> ExportAsync(
         string root, ImportedArmor armor, PluginAnalysisResult pluginAnalysis, TextureSummary textures,
         BatchPluginExportContext? context = null, MorphSet? morphs = null)

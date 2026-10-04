@@ -23800,8 +23800,10 @@ internal sealed class LocalExportService(
         supportFiles.AddRange(armor.BodyReferenceFiles.Where(path =>
             Path.GetExtension(path).Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(path).Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
+            Path.GetExtension(path).Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(path).Equals(".bsd", StringComparison.OrdinalIgnoreCase) ||
-            Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase)));
+            Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase) ||
+            BodySlideSourceProjectSupport.IsLikelyBodySlideSupportXml(path)));
         supportFiles.AddRange(supportAssets.MaterialFiles);
         supportFiles.AddRange(supportAssets.PluginFiles);
 

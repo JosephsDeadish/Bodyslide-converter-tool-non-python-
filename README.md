@@ -136,6 +136,10 @@ reference NIF or morph file must not be replaced by a same-named file in
 `SliderSets`, the BodySlide root, or a folder named after the project. Discovery
 and cache invalidation use the authored ShapeData folder, even when its name
 differs from the SliderSet name.
+Export retains discovered source OSD files and BodySlide support XML alongside
+copied source projects; copying the OSP without those dependencies can leave
+original sliders/groups incomplete. This preserves discovered files, not missing
+provider assets, and does not prove the copied projects build successfully.
 OSP slider and zap names are selected per SliderSet using its declared output
 mesh stem (including `_0`/`_1` normalization), so unrelated armor projects imported
 from the same pack do not add their sliders. Legacy sets without output metadata

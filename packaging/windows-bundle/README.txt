@@ -69,3 +69,19 @@ BodySlide, xEdit, manager or game checks as passed.
 For a failure report, provide a minimal permitted reproduction, target body,
 launch mode/arguments, error logs and screenshots, and whether failure occurred
 during launch, inspect, convert, build, installation or gameplay.
+
+BodySlide "Unable to load input nif" troubleshooting
+--------------------------------------------------
+- A path containing ShapeData\CalienteTools\BodySlide\ShapeData indicates an old
+  generated project repeating the BodySlide-relative root. Regenerate with the
+  updated app into a clean output folder; disable/remove only the old conversion
+  mod in a disposable test profile so its OSP cannot win a file conflict.
+- Current generated version-1 projects use DataFolder = project folder name and
+  SourceFile = NIF filename. Verify that exact NIF exists under
+  CalienteTools\BodySlide\ShapeData\<project folder> in MO2's active Data view.
+- Missing PlateDancersEdge_BHUNP or CBBE input files are separate provider issues:
+  check the selected original mod/body installation, active profile and file
+  conflict winner. The converter cannot manufacture their authored source NIFs.
+- Keep source OSP, linked ShapeData (including OSD), and slider-group files
+  together. If a current regenerated project still fails, provide that OSP and
+  its referenced NIF, the BodySlide version/log, and MO2 file-provider details.
