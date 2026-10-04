@@ -64,6 +64,7 @@ internal static class Program
             DesktopSmokeTestSummary? summary = null;
             form.Shown += (_, _) =>
             {
+                form.VerifyConversionSetupSmokeTest();
                 summary = form.GetSmokeTestSummary();
                 form.BeginInvoke(new Action(form.Close));
             };

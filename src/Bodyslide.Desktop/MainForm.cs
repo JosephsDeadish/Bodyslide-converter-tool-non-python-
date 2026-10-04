@@ -145,6 +145,9 @@ public sealed class MainForm : Form
     private readonly GroupBox _sourceHintsGroupBox;
     private readonly GroupBox _customProfilesGroupBox;
     private readonly TextBox _presetTargetTextBox;
+    private readonly List<Control> _advancedOptionControls = [];
+    private readonly List<Control> _presetModeControls = [];
+    private readonly List<Control> _manualModeControls = [];
 
     private CancellationTokenSource? _activeConversion;
     private CancellationTokenSource? _autoInspectDebounce;
@@ -447,7 +450,7 @@ public sealed class MainForm : Form
 
         var dropPanel = new Panel
         {
-            Height = 90,
+            Height = 56,
             Dock = DockStyle.Top,
             BorderStyle = BorderStyle.FixedSingle,
             AllowDrop = true,
@@ -512,7 +515,7 @@ public sealed class MainForm : Form
 
         _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Quick import", quickImportPanel), 0, 0);
 
-        var inputRow = CreateThreeColumnRow("Input source", out _inputTextBox);
+        var inputRow = CreateThreeColumnRow("Armor file, archive or installed mod folder", out _inputTextBox);
         _inputTextBox.Name = "inputPathTextBox";
         _inputTextBox.PlaceholderText = "Select armor input (.nif/.esp/.esm/.esl/.zip/.7z/.rar/.tar) or an armor folder";
         _inputTextBox.AllowDrop = true;
@@ -528,9 +531,9 @@ public sealed class MainForm : Form
             UpdateOutputHint();
             ScheduleAutoInspectInput();
         };
-        var browseInputFileButton = new Button { Name = "browseInputFileButton", Text = "File...", AutoSize = true };
+        var browseInputFileButton = new Button { Name = "browseInputFileButton", Text = "Browse file...", AutoSize = true };
         browseInputFileButton.Click += (_, _) => BrowseInputFile();
-        var browseInputFolderButton = new Button { Name = "browseInputFolderButton", Text = "Folder...", AutoSize = true, Margin = new Padding(4, 0, 0, 0) };
+        var browseInputFolderButton = new Button { Name = "browseInputFolderButton", Text = "Installed mod folder...", AutoSize = true, Margin = new Padding(4, 0, 0, 0) };
         browseInputFolderButton.Click += (_, _) => BrowseInputFolder();
         _inspectInputButton = new Button
         {
@@ -563,7 +566,8 @@ public sealed class MainForm : Form
         inputActions.Controls.Add(browseInputFolderButton);
         inputActions.Controls.Add(_inspectInputButton);
         inputActions.Controls.Add(_openInputButton);
-        inputRow.Controls.Add(inputActions, 2, 0);
+        inputRow.Controls.Add(inputActions, 0, 2);
+        inputRow.SetColumnSpan(inputActions, 3);
 
         var modeRow = new TableLayoutPanel
         {
@@ -592,7 +596,7 @@ public sealed class MainForm : Form
         {
             AutoSize = true,
             Margin = new Padding(0, 0, 0, 6),
-            Text = "Step 1: choose a quick preset or switch to manual mode if you want to pick the TO body yourself."
+            Text = "2. Choose the destination body directly, or use a preset."
         };
         modeHeaderRow.Controls.Add(modeHeaderLabel, 0, 0);
         var creatorSupportButton = new Button
@@ -620,13 +624,13 @@ public sealed class MainForm : Form
         };
         _usePresetRadio = new RadioButton
         {
-            Text = "Quick preset mode (recommended)",
+            Text = "Use a preset",
             AutoSize = true,
             Checked = false,
         };
         _useCustomTargetRadio = new RadioButton
         {
-            Text = "Manual mode (I will choose the TO body)",
+            Text = "Choose destination body",
             AutoSize = true,
             Checked = true,
         };
@@ -692,7 +696,7 @@ public sealed class MainForm : Form
         var autoMapTargetButton = new Button
         {
             Name = "autoMapTargetButton",
-            Text = "Auto-map TO body from FROM body",
+            Text = "Use source body as destination",
             AutoSize = true,
             Margin = new Padding(0),
         };
@@ -704,7 +708,7 @@ public sealed class MainForm : Form
         _showAdvancedOptionsCheckBox = new CheckBox
         {
             Name = "showAdvancedOptionsCheckBox",
-            Text = "Show advanced options (source overrides, custom profiles, support tuning)",
+            Text = "Show advanced settings and tools",
             AutoSize = true,
             Checked = false,
             Margin = new Padding(0, 4, 0, 0),
@@ -749,18 +753,18 @@ public sealed class MainForm : Form
             AutoSize = true,
             ColumnCount = 2,
         };
-        leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170f));
         leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         var conversionGuideLabel = new Label
         {
-            Text = "Use a preset when you want one named output setup. Preset mode locks the TO body automatically. Switch to Manual mode only when you want to choose one or more TO bodies yourself.",
+            Text = "Destination body is the body the converted armor should fit. A preset also chooses its shape.",
             Anchor = AnchorStyles.Left,
             AutoSize = true,
             MaximumSize = new Size(420, 0),
         };
         leftOptions.Controls.Add(conversionGuideLabel, 0, 0);
         leftOptions.SetColumnSpan(conversionGuideLabel, 2);
-        leftOptions.Controls.Add(new Label { Text = "Preset (destination body + shape)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        leftOptions.Controls.Add(new Label { Text = "Body + shape preset", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
         _presetComboBox = new ComboBox
         {
             Name = "presetBodyComboBox",
@@ -891,7 +895,7 @@ public sealed class MainForm : Form
         var chooseTargetsButton = new Button
         {
             Name = "chooseTargetsButton",
-            Text = "Choose TO bodies...",
+            Text = "Choose destination bodies...",
             AutoSize = true,
             Anchor = AnchorStyles.Left,
             Margin = new Padding(0, 2, 8, 4),
@@ -900,7 +904,7 @@ public sealed class MainForm : Form
         var allBodiesButton = new Button
         {
             Name = "allBodiesButton",
-            Text = "Convert to every supported body",
+            Text = "All supported bodies",
             AutoSize = true,
             Anchor = AnchorStyles.Left,
             Margin = new Padding(0, 2, 0, 4),
@@ -940,11 +944,22 @@ public sealed class MainForm : Form
             MaximumSize = new Size(420, 0),
         };
         leftOptions.Controls.Add(_targetDetailsLabel, 1, 8);
+        foreach (Control control in leftOptions.Controls)
+        {
+            if (leftOptions.GetRow(control) is 1 or 2 or 7)
+            {
+                _presetModeControls.Add(control);
+            }
+            else if (leftOptions.GetRow(control) is 5 or 6)
+            {
+                _manualModeControls.Add(control);
+            }
+        }
         if (_presetComboBox.Items.Count > 0)
         {
             _presetComboBox.SelectedIndex = 0;
         }
-        _destinationSetupGroupBox = CreateAutoSizeSection("Destination setup (what you want to build)", leftOptions);
+        _destinationSetupGroupBox = CreateAutoSizeSection("Destination body (TO)", leftOptions);
         _conversionOptionsPanel.Controls.Add(_destinationSetupGroupBox, 0, 0);
 
         var rightOptions = new TableLayoutPanel
@@ -953,11 +968,11 @@ public sealed class MainForm : Form
             AutoSize = true,
             ColumnCount = 2,
         };
-        rightOptions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        rightOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170f));
         rightOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         var overrideGuideLabel = new Label
         {
-            Text = "These fields describe the original armor or adjust optional output behavior. Most users only need the FROM body here when auto-detection is wrong.",
+            Text = "Source body is what the original armor was built for. Leave Auto unless detection is wrong.",
             Anchor = AnchorStyles.Left,
             AutoSize = true,
             MaximumSize = new Size(420, 0),
@@ -979,7 +994,7 @@ public sealed class MainForm : Form
         _profileComboBox.SelectedIndex = 0;
         rightOptions.Controls.Add(_profileComboBox, 1, 1);
 
-        rightOptions.Controls.Add(new Label { Text = "FROM body / original armor body (usually leave Auto)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+        rightOptions.Controls.Add(new Label { Text = "Source body (FROM)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
         _sourceComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -1014,7 +1029,7 @@ public sealed class MainForm : Form
         };
         rightOptions.Controls.Add(_sourceDetailsLabel, 1, 3);
 
-        rightOptions.Controls.Add(new Label { Text = "Physics for converted output (optional override)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
+        rightOptions.Controls.Add(new Label { Text = "Output physics", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
         _physicsComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -1038,7 +1053,7 @@ public sealed class MainForm : Form
         };
         rightOptions.Controls.Add(_physicsDetailsLabel, 1, 5);
 
-        rightOptions.Controls.Add(new Label { Text = "Dropped-item / world mesh mode (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 6);
+        rightOptions.Controls.Add(new Label { Text = "Dropped-item physics", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 6);
         _worldModeComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -1090,9 +1105,26 @@ public sealed class MainForm : Form
         };
         rightOptions.Controls.Add(supportGuideLabel, 1, 8);
 
-        _sourceHintsGroupBox = CreateAutoSizeSection("Original armor source hints, optional output overrides, and support files", rightOptions);
+        foreach (Control control in rightOptions.Controls)
+        {
+            if (rightOptions.GetRow(control) is 1 or 4 or 5 or 6 or 7 or 8)
+            {
+                _advancedOptionControls.Add(control);
+            }
+        }
+        foreach (var panel in new[] { leftOptions, rightOptions })
+        {
+            foreach (Control control in panel.Controls)
+            {
+                if (control is Label label && panel.GetColumn(control) == 0 && panel.GetColumnSpan(control) == 1)
+                {
+                    label.MaximumSize = new Size(160, 0);
+                }
+            }
+        }
+        _sourceHintsGroupBox = CreateAutoSizeSection("Source body (FROM)", rightOptions);
         _conversionOptionsPanel.Controls.Add(_sourceHintsGroupBox, 1, 0);
-        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Conversion setup", _conversionOptionsPanel), 0, 3);
+        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Conversion settings", _conversionOptionsPanel), 0, 3);
 
         var outputRow = CreateThreeColumnRow("Output destination (optional)", out _outputTextBox);
         _outputTextBox.Name = "outputPathTextBox";
@@ -1106,7 +1138,7 @@ public sealed class MainForm : Form
         };
         var browseOutputButton = new Button { Text = "Browse...", AutoSize = true };
         browseOutputButton.Click += (_, _) => BrowseOutput();
-        outputRow.Controls.Add(browseOutputButton, 2, 0);
+        outputRow.Controls.Add(browseOutputButton, 2, 1);
         var outputSection = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -1148,22 +1180,21 @@ public sealed class MainForm : Form
             AutoSize = true,
             Margin = new Padding(0, 4, 0, 0),
             MaximumSize = new Size(560, 0),
-            Text = "Choose the armor file, plugin, archive, or folder you want to inspect and convert.",
+            Text = "For FOMOD archives with body/plugin alternatives, install with MO2/Vortex first, then select that installed mod's folder. Do not select the entire mods folder.",
         }, 0, 1);
         var pathSelectionPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            ColumnCount = 2,
+            ColumnCount = 1,
             AutoSize = true,
             Margin = new Padding(0),
             Padding = new Padding(0),
         };
-        pathSelectionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-        pathSelectionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+        pathSelectionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         pathSelectionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         pathSelectionPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        pathSelectionPanel.Controls.Add(CreateAutoSizeSection("Input source", inputSection), 0, 0);
-        pathSelectionPanel.Controls.Add(CreateAutoSizeSection("Output destination", outputSection), 1, 0);
+        pathSelectionPanel.Controls.Add(CreateAutoSizeSection("1. Input armor", inputSection), 0, 0);
+        pathSelectionPanel.Controls.Add(CreateAutoSizeSection("Output folder", outputSection), 0, 1);
         _topLayoutPanel.Controls.Add(pathSelectionPanel, 0, 1);
 
         var cacheRow = CreateThreeColumnRow("Learning cache (optional)", out _cachePathTextBox);
@@ -1174,7 +1205,8 @@ public sealed class MainForm : Form
         _cachePathTextBox.TextChanged += (_, _) => ScheduleAutoInspectLearningCache();
         var browseCacheButton = new Button { Text = "Browse...", AutoSize = true };
         browseCacheButton.Click += (_, _) => BrowseCachePath();
-        cacheRow.Controls.Add(browseCacheButton, 2, 0);
+        cacheRow.Controls.Add(browseCacheButton, 2, 1);
+        _advancedOptionControls.Add(cacheRow);
         _topLayoutPanel.Controls.Add(cacheRow, 0, 5);
 
         var customProfilesPanel = new TableLayoutPanel
@@ -1268,9 +1300,9 @@ public sealed class MainForm : Form
         _convertButton = new Button
         {
             Name = "convertButton",
-            Text = "START CONVERSION",
+            Text = "Start conversion",
             Width = 220,
-            Height = 48,
+            Height = 34,
             Margin = new Padding(0, 0, 12, 0),
             Font = new Font(Font, FontStyle.Bold),
         };
@@ -1442,6 +1474,7 @@ public sealed class MainForm : Form
         secondaryActionRow.Controls.Add(_inspectCacheButton);
         secondaryActionRow.Controls.Add(_runSelfCheckButton);
         secondaryActionRow.Controls.Add(_copyMo2SetupButton);
+        _advancedOptionControls.AddRange([_loadCustomProfileButton, _saveProfileButton, _inspectCacheButton, _runSelfCheckButton]);
         var actionLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -1457,11 +1490,11 @@ public sealed class MainForm : Form
         {
             AutoSize = true,
             Margin = new Padding(0, 0, 0, 6),
-            Text = "Step 4: review the setup above, then use Start conversion. The buttons below it are optional tools and reports."
+            Text = "3. Review the source → destination summary, then start conversion."
         }, 0, 0);
         actionLayout.Controls.Add(primaryActionRow, 0, 1);
         actionLayout.Controls.Add(secondaryActionRow, 0, 2);
-        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Actions", actionLayout), 0, 7);
+        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Convert and review", actionLayout), 0, 7);
 
         var bottomPanel = new TableLayoutPanel
         {
@@ -1833,6 +1866,58 @@ public sealed class MainForm : Form
     internal string GetSmokeTestSummaryJson()
     {
         return DesktopSmokeTestContract.Serialize(GetSmokeTestSummary());
+    }
+
+    internal void VerifyConversionSetupSmokeTest()
+    {
+        var originalSize = Size;
+        var showAdvanced = _showAdvancedOptionsCheckBox.Checked;
+        var usingPreset = _usePresetRadio.Checked;
+        try
+        {
+            _showAdvancedOptionsCheckBox.Checked = false;
+            if (!_sourceComboBox.Visible || _profileComboBox.Visible || _cachePathTextBox.Visible)
+            {
+                throw new InvalidOperationException("Basic layout must show the source body and hide advanced settings.");
+            }
+            _showAdvancedOptionsCheckBox.Checked = true;
+            if (!_profileComboBox.Visible || !_cachePathTextBox.Visible || !_skeletonNifTextBox.Visible)
+            {
+                throw new InvalidOperationException("Advanced settings did not become visible.");
+            }
+            _usePresetRadio.Checked = true;
+            if (_targetComboBox.Visible || !_presetTargetTextBox.Visible ||
+                !_presetComboBox.Visible || _targetBatchTextBox.Visible)
+            {
+                throw new InvalidOperationException("Preset mode must show a read-only destination body.");
+            }
+            _useCustomTargetRadio.Checked = true;
+            if (!_targetComboBox.Visible || _presetTargetTextBox.Visible ||
+                _presetComboBox.Visible || !_targetBatchTextBox.Visible)
+            {
+                throw new InvalidOperationException("Manual mode must show an editable destination body.");
+            }
+            foreach (var size in new[] { MinimumSize, originalSize })
+            {
+                Size = size;
+                PerformLayout();
+                UpdateResponsiveLayout();
+                foreach (var pathBox in new[] { _inputTextBox, _outputTextBox })
+                {
+                    if (pathBox.Width < 200 || pathBox.Right > pathBox.Parent!.ClientSize.Width)
+                    {
+                        throw new InvalidOperationException("Input/output path fields are clipped or too narrow.");
+                    }
+                }
+            }
+        }
+        finally
+        {
+            Size = originalSize;
+            _usePresetRadio.Checked = usingPreset;
+            _useCustomTargetRadio.Checked = !usingPreset;
+            _showAdvancedOptionsCheckBox.Checked = showAdvanced;
+        }
     }
 
     private static GroupBox CreateSection(string title, Control content)
@@ -2688,9 +2773,13 @@ public sealed class MainForm : Form
         row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         row.Controls.Add(new Label { Text = labelText, Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
+        row.SetColumnSpan(row.Controls[0], 3);
         textBox = new TextBox { Dock = DockStyle.Fill };
-        row.Controls.Add(textBox, 1, 0);
+        row.Controls.Add(textBox, 0, 1);
+        row.SetColumnSpan(textBox, 2);
         return row;
     }
 
@@ -3022,6 +3111,14 @@ public sealed class MainForm : Form
     private void RefreshModeState()
     {
         var usingPreset = _usePresetRadio.Checked;
+        foreach (var control in _presetModeControls)
+        {
+            control.Visible = usingPreset;
+        }
+        foreach (var control in _manualModeControls)
+        {
+            control.Visible = !usingPreset;
+        }
         _presetComboBox.Enabled = usingPreset;
         _presetBatchTextBox.Enabled = usingPreset;
         _targetComboBox.Enabled = !usingPreset;
@@ -3029,11 +3126,9 @@ public sealed class MainForm : Form
         _presetTargetTextBox.Visible = usingPreset;
         _targetBatchTextBox.Enabled = !usingPreset;
         _targetSelectionLabel.Text = usingPreset
-            ? "TO body from preset"
-            : "TO body / destination body";
-        _targetBatchLabel.Text = usingPreset
-            ? "Manual multi-target list (switches to manual mode)"
-            : "Destination body batch list (optional)";
+            ? "Destination from preset"
+            : "Destination body (TO)";
+        _targetBatchLabel.Text = "Additional bodies";
         _modeStatusLabel.Text = usingPreset
             ? "Preset mode is active. The selected preset chooses the TO body below for you. Switch to Manual mode above if you want to change the TO body yourself."
             : "Manual mode is active. Use the TO body box below to choose the converted output body. FROM body stays in the Source hints section.";
@@ -3063,8 +3158,8 @@ public sealed class MainForm : Form
         }
 
         _targetModeHintLabel.Text = usingPreset
-            ? "Preset mode locks the TO body to the preset above. The editable FROM body is in the Source hints section on the right. Need a mixed female/male or cross-body pack? Use the shortcut below or switch to Manual mode and enter multiple TO bodies like 3BA, HIMBO."
-            : "Manual mode lets you choose the TO body directly. Use the batch list for multiple outputs or mixed female/male packs such as 3BA, HIMBO.";
+            ? "The preset chooses the destination body. Switch to Choose destination body to select it yourself."
+            : "Choose one destination body above. Additional bodies are optional and produce separate outputs.";
 
         UpdatePresetDetails();
         UpdateTargetDetails();
@@ -3077,6 +3172,10 @@ public sealed class MainForm : Form
     private void ApplyAdvancedOptionsVisibility()
     {
         var showAdvanced = _showAdvancedOptionsCheckBox?.Checked ?? false;
+        foreach (var control in _advancedOptionControls)
+        {
+            control.Visible = showAdvanced;
+        }
         if (_sourceHintsGroupBox is not null && !_sourceHintsGroupBox.IsDisposed)
         {
             _sourceHintsGroupBox.Visible = true;
@@ -3088,8 +3187,8 @@ public sealed class MainForm : Form
         }
 
         _modeStatusLabel.Text = showAdvanced
-            ? "Advanced options are visible. FROM body = original armor body hint, TO body = converted output body target."
-            : "Quick layout is active. FROM body stays visible so you can always verify source hints while choosing TO targets.";
+            ? "Advanced settings are visible. Hiding them does not reset your choices."
+            : "Source (FROM) = original armor body. Destination (TO) = converted output body. Advanced settings are hidden, not reset.";
         UpdateMainSplitLayout();
     }
 
@@ -3224,6 +3323,7 @@ public sealed class MainForm : Form
         long? runtimeStressArchiveBytesEstimated = null;
         DateTime? runtimeStressLastUiUpdateUtc = null;
         string runtimeStressOutcome = "running";
+        InstallerChoicesRequiredException? installerConflict = null;
         _conversionCancellationRequestedAtUtc = null;
 
         try
@@ -3513,6 +3613,17 @@ public sealed class MainForm : Form
                 AppendLog($"Cancellation latency: {latencyMs:0} ms from user request to stop.");
             }
         }
+        catch (InstallerChoicesRequiredException ex)
+        {
+            installerConflict = ex;
+            AppendLog("Conversion paused: select one installed mod variant before converting.");
+            foreach (var conflict in ex.Conflicts)
+            {
+                AppendLog(conflict);
+            }
+            _statusLabel.Text = "Installer selection needed — no variants were combined.";
+            runtimeStressOutcome = "installer-selection-required";
+        }
         catch (Exception ex)
         {
             AppendLog($"Conversion failed: {ex}");
@@ -3571,6 +3682,47 @@ public sealed class MainForm : Form
             _activeConversion = null;
             _conversionCancellationRequestedAtUtc = null;
             SetBusyState(isBusy: false);
+        }
+
+        if (installerConflict is not null)
+        {
+            SelectInstalledModAfterConflict(installerConflict);
+        }
+    }
+
+    private void SelectInstalledModAfterConflict(InstallerChoicesRequiredException conflict)
+    {
+        var selectFolder = new TaskDialogButton("Select installed mod folder...");
+        var page = new TaskDialogPage
+        {
+            Caption = "SlideSmith — Installer selection",
+            Heading = "This input contains alternative installer choices",
+            Text = $"Conflicting plugins: {string.Join(", ", conflict.PluginNames)}\n\n"
+                + "1. Install the source archive in MO2 or Vortex, choosing the original armor's body variant (for example BHUNP).\n"
+                + "2. Select that installed mod's folder, containing its meshes, textures and BodySlide files — not the archive, options subfolder, or entire mods folder.\n"
+                + "3. Review the source and destination bodies, then start conversion again.\n\n"
+                + "The source installer choice is separate from the destination body (for example 3BA). "
+                + "No alternatives were combined. Conflict details are in the log.",
+            Icon = TaskDialogIcon.Warning,
+            Buttons = { selectFolder, TaskDialogButton.Cancel }
+        };
+        if (TaskDialog.ShowDialog(this, page) != selectFolder)
+        {
+            return;
+        }
+
+        using var folderDialog = new FolderBrowserDialog
+        {
+            Description = "Select the installed source mod folder (one body variant plus shared assets)",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false
+        };
+        if (folderDialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _inputTextBox.Text = folderDialog.SelectedPath;
+            AppendLog("Installed mod selected. Review the setup and start conversion; installer checks will run again.");
+            _statusLabel.Text = "Installed mod selected — review the setup, then start conversion.";
+            _inputTextBox.Focus();
         }
     }
 
@@ -4409,7 +4561,7 @@ public sealed class MainForm : Form
     private void SetBusyState(bool isBusy)
     {
         _convertButton.Enabled = !isBusy;
-        _convertButton.Text = isBusy ? "CONVERTING..." : "START CONVERSION";
+        _convertButton.Text = isBusy ? "Converting..." : "Start conversion";
         _cancelButton.Enabled = isBusy && _activeConversion is not null;
         _clearLogButton.Enabled = !isBusy;
         _copyCurrentViewButton.Enabled = !isBusy;
@@ -5741,7 +5893,7 @@ public sealed class MainForm : Form
             "Use this when you want to type or choose one or more TO bodies directly instead of letting a preset lock the destination body.");
         _optionToolTip.SetToolTip(_showAdvancedOptionsCheckBox,
             "Show or hide advanced/manual tuning controls.\n" +
-            "Keep this unchecked for a cleaner default layout.");
+            "Source body stays visible. Hiding controls preserves their current values.");
         _optionToolTip.SetToolTip(_presetComboBox,
             "Quick setup for the output you want. Presets do not describe the original source armor body.");
         _optionToolTip.SetToolTip(_presetBatchTextBox,
@@ -5750,7 +5902,7 @@ public sealed class MainForm : Form
             "The body you want the converted armor to fit. This is the TO/output body and is only editable in Manual mode.");
         _optionToolTip.SetToolTip(_targetBatchTextBox,
             "Optional comma-separated destination body list for batch conversion. Use all to build every supported body.\n" +
-            "For mixed male/female packs you can use 'Choose TO bodies...' to select targets like 3BA and HIMBO so female body assets stay on the female target and male body assets stay on the male target.");
+            "For mixed male/female packs you can use 'Choose destination bodies...' to select targets like 3BA and HIMBO so female body assets stay on the female target and male body assets stay on the male target.");
         _optionToolTip.SetToolTip(_profileComboBox,
             "Optional shape override for the converted output. Leave Auto unless you specifically want a different slider/deformation profile.");
         _optionToolTip.SetToolTip(_sourceComboBox,
@@ -5773,7 +5925,7 @@ public sealed class MainForm : Form
         _optionToolTip.SetToolTip(_buildSlidersCheckBox,
             "Generate BodySlide project files for the converted result so it can be rebuilt or adjusted later.");
         _optionToolTip.SetToolTip(_compactDiagnosticsCheckBox,
-            "Reduce optional diagnostic reports while preserving validation failures, dependencies, physics and required installation assets.");
+            "Reduce diagnostic bytes with compact JSON and small HTML previews. Report filenames/count and installation assets are preserved.");
         _optionToolTip.SetToolTip(_copyCurrentViewButton,
             "Copies the selected rows from the active diagnostics tab.\n" +
             "If nothing is selected, copies the full log text.");

@@ -19113,11 +19113,7 @@ internal static class PluginSourceIdentity
         var resolution = Resolve(paths);
         if (resolution.AmbiguousNames.Count > 0)
         {
-            throw new InvalidDataException("Installer choices must be resolved before conversion. "
-                + "Multiple source variants of " + string.Join(", ", resolution.AmbiguousNames)
-                + " were found. Install the archive with MO2/Vortex and convert the selected installed mod, "
-                + "or prepare a folder with one plugin/body variant plus its shared assets. "
-                + "The converter will not choose or combine alternatives automatically.");
+            throw new InstallerChoicesRequiredException(resolution.AmbiguousNames, resolution.Warnings);
         }
     }
 

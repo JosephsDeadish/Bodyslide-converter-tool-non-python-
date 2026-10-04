@@ -31,10 +31,14 @@ public sealed class Issue8RegressionTests
                 ZipFile.CreateFromDirectory(source, input);
             }
             var runner = new BatchConversionRunner(StandaloneConversionModules.CreateDefault());
-            var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            var exception = await Assert.ThrowsAsync<InstallerChoicesRequiredException>(() =>
                 runner.ConvertAsync(new ConversionRequest(input, "3BA", output)));
             Assert.Contains("BDE_Armor.esp", exception.Message);
             Assert.Contains("MO2/Vortex", exception.Message);
+            Assert.Equal(["BDE_Armor.esp"], exception.PluginNames);
+            Assert.Single(exception.Conflicts);
+            Assert.Contains("BHUNP", exception.Conflicts[0]);
+            Assert.Contains("3BA", exception.Conflicts[0]);
             Assert.Empty(Directory.Exists(output)
                 ? Directory.GetFiles(output, "*.nif", SearchOption.AllDirectories) : []);
         }
@@ -46,10 +50,49 @@ public sealed class Issue8RegressionTests
     {
         var paths = new[] { "BHUNP", "3BA", "CBBE", "UNP" }
             .Select(folder => Path.Combine(Path.GetTempPath(), folder, "BDE_Armor.esp")).ToArray();
-        var exception = Assert.Throws<InvalidDataException>(() => PluginSourceIdentity.RequireUnambiguous(paths));
+        var exception = Assert.Throws<InstallerChoicesRequiredException>(() => PluginSourceIdentity.RequireUnambiguous(paths));
         Assert.Contains("Installer choices", exception.Message);
         Assert.Contains("shared assets", exception.Message);
+        Assert.Equal(["BDE_Armor.esp"], exception.PluginNames);
+        Assert.Single(exception.Conflicts);
         PluginSourceIdentity.RequireUnambiguous([paths[0], paths[0], Path.Combine(Path.GetTempPath(), "Shared.esm")]);
+    }
+
+    [Fact]
+    public void InstallerConflictDetailsAreImmutableSnapshots()
+    {
+        var names = new[] { "Armor.esp" };
+        var conflicts = new[] { "BHUNP and 3BA alternatives" };
+        var exception = new InstallerChoicesRequiredException(names, conflicts);
+        names[0] = "changed.esp";
+        conflicts[0] = "changed";
+        Assert.Equal("Armor.esp", exception.PluginNames[0]);
+        Assert.Equal("BHUNP and 3BA alternatives", exception.Conflicts[0]);
+        Assert.Throws<NotSupportedException>(() => ((IList<string>)exception.PluginNames)[0] = "changed");
+    }
+
+    [Fact]
+    public async Task SelectedInstalledVariantCanBeConvertedWithoutCombiningAlternatives()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var installed = Path.Combine(root, "installed-BHUNP");
+        var output = Path.Combine(root, "output");
+        Directory.CreateDirectory(Path.Combine(installed, "meshes"));
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(installed, "meshes", "breastplate_0.nif"), "mesh");
+            await File.WriteAllTextAsync(Path.Combine(installed, "BDE_Armor.esp"), "selected plugin");
+            var alternative = Path.Combine(root, "uninstalled-3BA");
+            Directory.CreateDirectory(alternative);
+            await File.WriteAllTextAsync(Path.Combine(alternative, "BDE_Armor.esp"), "alternative plugin");
+            var imported = await new LocalArmorImportService().ImportAsync(installed, CancellationToken.None);
+            Assert.Equal([Path.Combine(installed, "BDE_Armor.esp")], imported.SourcePluginFiles);
+            var results = await new BatchConversionRunner(StandaloneConversionModules.CreateDefault())
+                .ConvertAsync(new ConversionRequest(installed, "3BA", output, SourceBodyOverride: "BHUNP"));
+            Assert.Single(results);
+            Assert.True(results[0].Success);
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 
     [Fact]

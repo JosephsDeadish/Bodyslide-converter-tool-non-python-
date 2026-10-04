@@ -116,6 +116,16 @@ No variant is selected automatically. Install the archive with MO2/Vortex first,
 then convert the chosen installed mod, or prepare a folder containing one selected
 plugin/body variant and its shared assets. Archive extraction still occurs before
 this check; this is not a FOMOD choice interpreter.
+The desktop now presents **Select installed mod folder...** for this condition
+instead of a generic conversion-failed dialog. Select the individual installed
+source mod (for example its BHUNP variant), including shared textures and BodySlide
+assets; keep the desired destination body (for example 3BA) in the conversion
+settings. Review the setup and start conversion again. Cancelling the selection
+leaves the original input unchanged, and the next run repeats all safety checks.
+The input and output paths use full-width stacked sections. Source and destination
+body labels are aligned consistently. **Show advanced settings and tools** reveals
+shape/physics overrides, skeleton support, cache configuration and custom-profile
+tools; hiding them preserves their values and leaves source-body selection visible.
 Extraction also rejects duplicate normalized file destinations instead of silently
 overwriting an earlier mesh, texture or plugin. Separator, dot-segment and
 case-only aliases are treated as the same game path, including on Linux.
