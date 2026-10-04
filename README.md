@@ -128,6 +128,12 @@ The input and output paths use full-width stacked sections. Source and destinati
 body labels are aligned consistently. **Show advanced settings and tools** reveals
 shape/physics overrides, skeleton support, cache configuration and custom-profile
 tools; hiding them preserves their values and leaves source-body selection visible.
+Start conversion, Cancel, Load result and output options stay outside the scrolling
+setup, above progress and results. Report, file, preview, cache and diagnostic
+actions are grouped in their corresponding tabs instead of one crowded toolbar;
+custom-profile actions stay beside the profile list. Result tab headers wrap.
+The Windows layout smoke check verifies control bounds at minimum/default sizes
+in both basic/advanced and preset/manual modes, including when setup is scrolled.
 Extraction also rejects duplicate normalized file destinations instead of silently
 overwriting an earlier mesh, texture or plugin. Separator, dot-segment and
 case-only aliases are treated as the same game path, including on Linux.
