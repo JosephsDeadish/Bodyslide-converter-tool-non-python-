@@ -191,8 +191,14 @@ public sealed class BatchOutputNamingTests
                 {
                     var buildPath = set.Element("OutputPath")!.Value.Replace('\\', Path.DirectorySeparatorChar);
                     foreach (var mesh in set.Elements("OutputFile"))
-                        Assert.True(File.Exists(Path.Combine(result.OutputDirectory, buildPath, mesh.Value)),
-                            $"BodySlide build target was not staged: {buildPath}{mesh.Value}");
+                    {
+                        var suffixes = (bool?)mesh.Attribute("GenWeights") == true
+                            ? new[] { "_0.nif", "_1.nif" }
+                            : new[] { ".nif" };
+                        foreach (var suffix in suffixes)
+                            Assert.True(File.Exists(Path.Combine(result.OutputDirectory, buildPath, mesh.Value + suffix)),
+                                $"BodySlide build target was not staged: {buildPath}{mesh.Value}{suffix}");
+                    }
                 }
             }
             Assert.True(mappings.Count > 1);

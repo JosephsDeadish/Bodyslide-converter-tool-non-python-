@@ -281,6 +281,7 @@ public sealed class PackageArtifactRegressionTests
         using var package = new PackageFixture();
         package.WriteBodySlide();
         package.Write("CalienteTools/BodySlide/ShapeData/Project/armor_0.nif", string.Empty);
+        package.Write("CalienteTools/BodySlide/ShapeData/Project/armor_1.nif", string.Empty);
 
         var issues = package.Verify(bodySlide: true);
 
@@ -318,9 +319,20 @@ public sealed class PackageArtifactRegressionTests
             issue.Message.Contains("missing ShapeData NIFs", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void GeneratedOutputStemPreservesDotsInsideMeshNames()
+    {
+        using var package = new PackageFixture();
+        package.WriteBodySlide(outputFile: "armor.v2", generateWeights: false);
+        package.Write("CalienteTools/BodySlide/ShapeData/Project/armor.v2.nif", "synthetic reference mesh");
+
+        Assert.DoesNotContain(package.Verify(bodySlide: true), issue =>
+            issue.Message.Contains("OSP OutputFile entries", StringComparison.Ordinal));
+    }
+
     [Theory]
-    [InlineData("CalienteTools/BodySlide/ShapeData/Project/armor_0.nif")]
-    [InlineData("CalienteTools\\BodySlide\\ShapeData\\Project\\armor_0.nif")]
+    [InlineData("armor_0.nif")]
+    [InlineData("armor_1.nif")]
     public void GeneratedSourceFileSeparatorsRemainSupported(string sourceFile)
     {
         using var package = new PackageFixture();
@@ -469,19 +481,21 @@ public sealed class PackageArtifactRegressionTests
         }
 
         public void WriteBodySlide(
-            string sourceFile = "CalienteTools/BodySlide/ShapeData/Project/armor_0.nif",
-            string setFolder = "CalienteTools/BodySlide/ShapeData/Project",
+            string sourceFile = "armor_0.nif",
+            string setFolder = "Project",
             string outputPath = "meshes/slidesmith/cbbe",
-            string outputFile = "armor_0.nif")
+            string outputFile = "armor_0.nif",
+            bool? generateWeights = null)
         {
             Write("CalienteTools/BodySlide/ShapeData/Project/armor_0.nif", "synthetic reference mesh");
+            Write("CalienteTools/BodySlide/ShapeData/Project/armor_1.nif", "synthetic reference mesh");
             Write("CalienteTools/BodySlide/SliderGroups/Project.xml", "<SliderGroups><Group name=\"Project\"><Member name=\"Project\"/></Group></SliderGroups>");
             Write("CalienteTools/BodySlide/SliderSets/Project.osp", $"""
                 <SliderSetInfo version="1"><SliderSet name="Project">
-                  <SetFolder>{SecurityElement.Escape(setFolder)}</SetFolder>
+                  <DataFolder>{SecurityElement.Escape(setFolder)}</DataFolder>
                   <SourceFile>{SecurityElement.Escape(sourceFile)}</SourceFile>
                   <OutputPath>{SecurityElement.Escape(outputPath)}</OutputPath>
-                  <OutputFile gender="f">{SecurityElement.Escape(outputFile)}</OutputFile>
+                  <OutputFile gender="f"{(generateWeights is null ? "" : $" GenWeights=\"{generateWeights.Value.ToString().ToLowerInvariant()}\"")}>{SecurityElement.Escape(outputFile)}</OutputFile>
                 </SliderSet></SliderSetInfo>
                 """);
             Write("fomod/ModuleConfig.xml", "<config><folder source=\"meshes\"/><folder source=\"CalienteTools\"/></config>");

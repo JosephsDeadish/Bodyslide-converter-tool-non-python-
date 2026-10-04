@@ -162,12 +162,31 @@ Issue #8 reporting/performance corrections:
   Catalog physics bones/sliders are expectations, not observed mesh evidence.
 - `BodySlideCompatible` denotes generated scaffold compatibility, not a successful
   external build; `SourceBodyMatchRatio` is heuristic confidence, not fit accuracy.
+- Generated version-1 OSPs now use `DataFolder` with the project folder name and a
+  leaf `SourceFile`. BodySlide already prefixes ShapeData; repeating the full path
+  caused the missing-input errors visible in issue #8. Regenerate old conversions.
+- Generated projects declare one extension-free `OutputFile`, using `GenWeights`
+  only for a complete weight pair. BodySlide adds `.nif` or `_0.nif`/`_1.nif`
+  itself; orphan weight meshes preserve their original stem without inventing a pair.
+
+The uploaded timing report records 813,629 ms for one item: 259,537 ms for morph
+generation, 248,249 ms for BodySlide preparation and 291,905 ms for export.
+Extraction is not measured by that per-item import timing. The supplied diagnostic
+files total roughly 1.4 MB, so a large output requires a byte inventory of the
+actual NIF, texture, morph and archive payloads before attributing it to JSON.
 
 Remaining issue #8 acceptance work: detailed per-piece diagnostics and generic
 harness plans are still generated; a compact/optional diagnostics mode is not yet
 implemented. Structural NIF support does not prove all UV/skin/partition/material
 relationships, runtime physics linkage/conflicts, or shape-specific source morph
 association. Empty texture lists do not prove textures are unnecessary. A permitted
+sample is also needed to verify shape-specific OSP slider data links and exported
+morph formats against an actual BodySlide build; the input/output path corrections
+alone do not establish usable sliders or correct mesh deformation. Original
+BHUNP/CBBE project input errors may instead reflect missing or disabled providers.
+Provide the affected source OSP and complete linked ShapeData, generated OSP/NIF/
+OSD/TRI files, BodySlide version/build log, MO2 provider/overwrite information,
+source/output byte inventories and current batch timings. A permitted
 source/output sample is needed to distinguish external textures from missed
 discovery and to regenerate the earlier dependency/FOMOD/3BA-physics fixes. Test
 the selected variant in BodySlide, MO2, xEdit and Skyrim before treating it as ready.

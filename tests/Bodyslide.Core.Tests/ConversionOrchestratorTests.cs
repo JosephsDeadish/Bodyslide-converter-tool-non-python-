@@ -2173,7 +2173,8 @@ public sealed class ConversionOrchestratorTests
             Assert.NotNull(ospFile);
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("BreastsPhysics", ospXml, StringComparison.Ordinal);
-            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\cuirass_3BA\cuirass.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<DataFolder>cuirass_3BA</DataFolder>", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<SourceFile>cuirass.nif</SourceFile>", ospXml, StringComparison.Ordinal);
             Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
         }
         finally
@@ -2201,7 +2202,8 @@ public sealed class ConversionOrchestratorTests
             Assert.NotNull(ospFile);
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("Pecs", ospXml, StringComparison.Ordinal);
-            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\armor_HIMBO\armor.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<DataFolder>armor_HIMBO</DataFolder>", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<SourceFile>armor.nif</SourceFile>", ospXml, StringComparison.Ordinal);
             Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
         }
         finally
@@ -2232,13 +2234,12 @@ public sealed class ConversionOrchestratorTests
             var ospFile = Assert.Single(Directory.GetFiles(outputDirectory, "*.osp", SearchOption.AllDirectories));
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(ospXml, "<SliderSet name=").Count);
-            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\GweldaWitch_3BA\cuirass_0.nif", ospXml, StringComparison.Ordinal);
-            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\GweldaWitch_3BA\boots_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<DataFolder>GweldaWitch_3BA</DataFolder>", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<SourceFile>cuirass_0.nif</SourceFile>", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<SourceFile>boots_0.nif</SourceFile>", ospXml, StringComparison.Ordinal);
             Assert.Contains(@"<OutputPath>meshes\DX\MiniArmorsCollection\Armors\GweldaWitch\</OutputPath>", ospXml, StringComparison.Ordinal);
-            Assert.Contains(">cuirass_0.nif</OutputFile>", ospXml, StringComparison.Ordinal);
-            Assert.Contains(">cuirass_1.nif</OutputFile>", ospXml, StringComparison.Ordinal);
-            Assert.Contains(">boots_0.nif</OutputFile>", ospXml, StringComparison.Ordinal);
-            Assert.Contains(">boots_1.nif</OutputFile>", ospXml, StringComparison.Ordinal);
+            Assert.Contains("GenWeights=\"true\">cuirass</OutputFile>", ospXml, StringComparison.Ordinal);
+            Assert.Contains("GenWeights=\"true\">boots</OutputFile>", ospXml, StringComparison.Ordinal);
 
             var document = System.Xml.Linq.XDocument.Parse(ospXml);
             var sliderSets = document.Descendants("SliderSet").ToArray();
@@ -18705,7 +18706,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.NotEmpty(sliderSetNames);
 
             var setFolders = ospDocument.Descendants()
-                .Where(static element => element.Name.LocalName.Equals("SetFolder", StringComparison.OrdinalIgnoreCase))
+                .Where(static element => element.Name.LocalName.Equals("DataFolder", StringComparison.OrdinalIgnoreCase))
                 .Select(static element => element.Value?.Trim())
                 .Where(static value => !string.IsNullOrWhiteSpace(value))
                 .Select(static value => value!.Replace('\\', '/').Trim('/'))
@@ -18713,7 +18714,7 @@ public sealed class RealisticModPackFixtureTests
                 .ToArray();
             Assert.NotEmpty(setFolders);
             Assert.All(setFolders, setFolder =>
-                Assert.StartsWith("CalienteTools/BodySlide/ShapeData/", setFolder, StringComparison.OrdinalIgnoreCase));
+                Assert.True(Directory.Exists(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", setFolder))));
 
             var sourceFiles = ospDocument.Descendants()
                 .Where(static element => element.Name.LocalName.Equals("SourceFile", StringComparison.OrdinalIgnoreCase))
@@ -18723,7 +18724,7 @@ public sealed class RealisticModPackFixtureTests
                 .ToArray();
             Assert.NotEmpty(sourceFiles);
             Assert.All(sourceFiles, sourceFile =>
-                Assert.StartsWith("CalienteTools/BodySlide/ShapeData/", sourceFile, StringComparison.OrdinalIgnoreCase));
+                Assert.True(File.Exists(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", setFolders.Single(), sourceFile))));
 
             var sliderGroupsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderGroups");
             var sliderGroupsPath = Directory.GetFiles(sliderGroupsDirectory, "*.xml", SearchOption.TopDirectoryOnly).Single();
@@ -29184,8 +29185,8 @@ public sealed class OutputCompletenessTests
                 <?xml version="1.0" encoding="utf-8"?>
                 <SliderSetInfo version="1">
                   <SliderSet name="OsdParityProject" baseShape="Base Shape" bsversion="20">
-                    <SetFolder>CalienteTools\BodySlide\ShapeData\OsdParityProject</SetFolder>
-                    <SourceFile>CalienteTools\BodySlide\ShapeData\OsdParityProject\armor_0.nif</SourceFile>
+                    <DataFolder>OsdParityProject</DataFolder>
+                    <SourceFile>armor_0.nif</SourceFile>
                     <OutputPath>meshes\slidesmith\cbbe\</OutputPath>
                     <OutputFile gender="f" use="true">armor_1.nif</OutputFile>
                     <Slider name="Waist" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
@@ -29325,16 +29326,16 @@ public sealed class OutputCompletenessTests
                 <?xml version="1.0" encoding="utf-8"?>
                 <SliderSetInfo version="1">
                   <SliderSet name="ParityProject Cuirass" baseShape="Base Shape" bsversion="20">
-                    <SetFolder>CalienteTools\BodySlide\ShapeData\ParityProject</SetFolder>
-                    <SourceFile>CalienteTools\BodySlide\ShapeData\ParityProject\cuirass_0.nif</SourceFile>
+                    <DataFolder>ParityProject</DataFolder>
+                    <SourceFile>cuirass_0.nif</SourceFile>
                     <OutputPath>meshes\slidesmith\cbbe\</OutputPath>
                     <OutputFile gender="female" use="true">cuirass_0.nif</OutputFile>
                     <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
                     <Slider name="Butt" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
                   </SliderSet>
                   <SliderSet name="ParityProject Boots" baseShape="Base Shape" bsversion="20">
-                    <SetFolder>CalienteTools\BodySlide\ShapeData\ParityProject</SetFolder>
-                    <SourceFile>CalienteTools\BodySlide\ShapeData\ParityProject\boots_0.nif</SourceFile>
+                    <DataFolder>ParityProject</DataFolder>
+                    <SourceFile>boots_0.nif</SourceFile>
                     <OutputPath>meshes\slidesmith\cbbe\</OutputPath>
                     <OutputFile gender="male" use="true">boots_0.nif</OutputFile>
                     <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
@@ -29413,8 +29414,8 @@ public sealed class OutputCompletenessTests
                 <?xml version="1.0" encoding="utf-8"?>
                 <SliderSetInfo version="1">
                   <SliderSet name="CoverageProject" baseShape="Base Shape" bsversion="20">
-                    <SetFolder>CalienteTools\BodySlide\ShapeData\CoverageProject</SetFolder>
-                    <SourceFile>CalienteTools\BodySlide\ShapeData\CoverageProject\coverage_0.nif</SourceFile>
+                    <DataFolder>CoverageProject</DataFolder>
+                    <SourceFile>coverage_0.nif</SourceFile>
                     <OutputPath>meshes\slidesmith\ube\</OutputPath>
                     <OutputFile gender="f" use="true">armor_0.nif</OutputFile>
                     <Slider name="BreastsShape" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
@@ -29690,8 +29691,8 @@ public sealed class OutputCompletenessTests
                 <?xml version="1.0" encoding="utf-8"?>
                 <SliderSetInfo version="1">
                   <SliderSet name="StagedMismatchProject" baseShape="Base Shape" bsversion="20">
-                    <SetFolder>CalienteTools\BodySlide\ShapeData\StagedMismatchProject</SetFolder>
-                    <SourceFile>CalienteTools\BodySlide\ShapeData\StagedMismatchProject\armor_0.nif</SourceFile>
+                    <DataFolder>StagedMismatchProject</DataFolder>
+                    <SourceFile>armor_0.nif</SourceFile>
                     <OutputPath>meshes\armor\oracle\</OutputPath>
                     <OutputFile gender="f" use="true">oracle_good_0.nif</OutputFile>
                     <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
@@ -29753,8 +29754,8 @@ public sealed class OutputCompletenessTests
                 <?xml version="1.0" encoding="utf-8"?>
                 <SliderSetInfo version="1">
                   <SliderSet name="VariantMatchProject" baseShape="Base Shape" bsversion="20">
-                    <SetFolder>CalienteTools\BodySlide\ShapeData\VariantMatchProject</SetFolder>
-                    <SourceFile>CalienteTools\BodySlide\ShapeData\VariantMatchProject\armor_0.nif</SourceFile>
+                    <DataFolder>VariantMatchProject</DataFolder>
+                    <SourceFile>armor_0.nif</SourceFile>
                     <OutputPath>meshes\armor\oracle\</OutputPath>
                     <OutputFile gender="f" use="true">GNDlegs.nif</OutputFile>
                     <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
@@ -29816,8 +29817,8 @@ public sealed class OutputCompletenessTests
                 <?xml version="1.0" encoding="utf-8"?>
                 <SliderSetInfo version="1">
                   <SliderSet name="VariantSuffixProject" baseShape="Base Shape" bsversion="20">
-                    <SetFolder>CalienteTools\BodySlide\ShapeData\VariantSuffixProject</SetFolder>
-                    <SourceFile>CalienteTools\BodySlide\ShapeData\VariantSuffixProject\armor_0.nif</SourceFile>
+                    <DataFolder>VariantSuffixProject</DataFolder>
+                    <SourceFile>armor_0.nif</SourceFile>
                     <OutputPath>meshes\armor\oracle\</OutputPath>
                     <OutputFile gender="f" use="true">GNDlegs_f.nif</OutputFile>
                     <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
@@ -29881,8 +29882,8 @@ public sealed class OutputCompletenessTests
                 <?xml version="1.0" encoding="utf-8"?>
                 <SliderSetInfo version="1">
                   <SliderSet name="PayloadCoverageProject" baseShape="Base Shape" bsversion="20">
-                    <SetFolder>CalienteTools\BodySlide\ShapeData\PayloadCoverageProject</SetFolder>
-                    <SourceFile>CalienteTools\BodySlide\ShapeData\PayloadCoverageProject\armor_0.nif</SourceFile>
+                    <DataFolder>PayloadCoverageProject</DataFolder>
+                    <SourceFile>armor_0.nif</SourceFile>
                     <OutputPath>meshes\armor\oracle\</OutputPath>
                     <OutputFile gender="f" use="true">oracle_good_0.nif</OutputFile>
                     <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
@@ -33159,8 +33160,8 @@ public sealed class BasicWeightTransferServicePhysicsTests
                 <?xml version="1.0" encoding="utf-8"?>
                 <SliderSetInfo version="1">
                   <SliderSet name="RegionCoverageProject" baseShape="Base Shape" bsversion="20">
-                    <SetFolder>CalienteTools\BodySlide\ShapeData\RegionCoverageProject</SetFolder>
-                    <SourceFile>CalienteTools\BodySlide\ShapeData\RegionCoverageProject\coverage_0.nif</SourceFile>
+                    <DataFolder>RegionCoverageProject</DataFolder>
+                    <SourceFile>coverage_0.nif</SourceFile>
                     <OutputPath>meshes\armor\coverage\</OutputPath>
                     <OutputFile gender="f" use="true">coverage_0.nif</OutputFile>
                     <Slider name="CustomNub" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
@@ -34824,7 +34825,8 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Contains("Bust", ospXml, StringComparison.Ordinal);
             Assert.Contains("HideCape", ospXml, StringComparison.Ordinal);
             Assert.Contains("zap=\"true\"", ospXml, StringComparison.Ordinal);
-            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\myfollower_armor\myfollower_armor_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<SourceFile>myfollower_armor_0.nif</SourceFile>", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<DataFolder>myfollower_armor</DataFolder>", ospXml, StringComparison.Ordinal);
             Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
 
             Assert.True(File.Exists(Path.Combine(outputDir, "smp-config.xml")));

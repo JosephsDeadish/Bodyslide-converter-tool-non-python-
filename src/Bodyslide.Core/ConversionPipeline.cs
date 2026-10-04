@@ -18481,14 +18481,18 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
         foreach (var target in targets)
         {
             sb.AppendLine($"    <SliderSet name=\"{Escape(target.SliderSetName)}\" baseShape=\"Base Shape\" bsversion=\"20\">");
-            sb.AppendLine($"        <SetFolder>{Escape(target.SetFolder)}</SetFolder>");
+            sb.AppendLine($"        <DataFolder>{Escape(target.SetFolder)}</DataFolder>");
             sb.AppendLine($"        <SourceFile>{Escape(target.SourceFile)}</SourceFile>");
             sb.AppendLine($"        <OutputPath>{Escape(target.OutputPath)}</OutputPath>");
-            sb.AppendLine($"        <OutputFile gender=\"{Escape(gender)}\" use=\"true\">{Escape(target.OutputFile0)}</OutputFile>");
-            if (!string.IsNullOrWhiteSpace(target.OutputFile1))
+            var outputStem = Path.GetFileNameWithoutExtension(target.OutputFile0);
+            var generateWeights = !string.IsNullOrWhiteSpace(target.OutputFile1);
+            if (generateWeights &&
+                (outputStem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+                 outputStem.EndsWith("_1", StringComparison.OrdinalIgnoreCase)))
             {
-                sb.AppendLine($"        <OutputFile gender=\"{Escape(gender)}\" use=\"true\" morphfile=\"1\">{Escape(target.OutputFile1)}</OutputFile>");
+                outputStem = outputStem[..^2];
             }
+            sb.AppendLine($"        <OutputFile gender=\"{Escape(gender)}\" GenWeights=\"{generateWeights.ToString().ToLowerInvariant()}\">{Escape(outputStem)}</OutputFile>");
 
             foreach (var slider in sliders)
             {
@@ -18587,7 +18591,7 @@ internal static class BodySlideLayoutPlanner
 
     public static IReadOnlyList<BodySlideMeshTarget> BuildTargets(ImportedArmor armor, string projectName)
     {
-        var setFolder = $@"CalienteTools\BodySlide\ShapeData\{projectName}";
+        var setFolder = projectName;
         var meshInfos = armor.MeshFiles
             .Select(meshPath =>
             {
@@ -18606,7 +18610,7 @@ internal static class BodySlideLayoutPlanner
                 new BodySlideMeshTarget(
                     projectName,
                     setFolder,
-                    $@"{setFolder}\{projectName}.nif",
+                    $"{projectName}.nif",
                     @"meshes\",
                     $"{projectName}.nif")
             ];
@@ -18619,7 +18623,9 @@ internal static class BodySlideLayoutPlanner
                 var items = group.ToList();
                 var primary = items.FirstOrDefault(static item => item.IsLowWeightVariant) ?? items[0];
                 var lowVariant = items.FirstOrDefault(static item => item.IsLowWeightVariant) ?? primary;
-                var highVariant = items.FirstOrDefault(static item => item.IsHighWeightVariant);
+                var highVariant = lowVariant.IsLowWeightVariant
+                    ? items.FirstOrDefault(static item => item.IsHighWeightVariant)
+                    : null;
                 var sliderSetName = meshInfos.Count > 1
                     ? $"{projectName} - {group.First().GroupName}"
                     : projectName;
@@ -18627,7 +18633,7 @@ internal static class BodySlideLayoutPlanner
                 return new BodySlideMeshTarget(
                     sliderSetName,
                     setFolder,
-                    $@"{setFolder}\{primary.FileName}",
+                    primary.FileName,
                     armor.BodySlideOutputPath ?? lowVariant.OutputPath,
                     lowVariant.FileName,
                     highVariant?.FileName);
@@ -27782,7 +27788,7 @@ internal sealed class LocalExportService(
                     value.Split('/').All(segment => segment.Length > 0 && segment is not "." and not "..");
 
                 var projectName = Path.GetFileName(shapeDataDirectory);
-                var expectedSetFolderSuffix = NormalizeBodySlidePath(Path.Combine("CalienteTools", "BodySlide", "ShapeData", projectName));
+                var expectedSetFolderSuffix = NormalizeBodySlidePath(projectName);
                 var expectedGender = BodyTypeCatalog.TryGetGender(armor, request.TargetBody, out var resolvedTargetGender)
                     ? resolvedTargetGender
                     : null;
@@ -27898,10 +27904,9 @@ internal sealed class LocalExportService(
                     .ToArray();
                 var missingSourceFiles = sourceFiles
                     .Where(value => !IsSafeBodySlideRelativePath(value) ||
-                                    !value.StartsWith(expectedSetFolderSuffix + "/", StringComparison.OrdinalIgnoreCase) ||
                                     !value.EndsWith(".nif", StringComparison.OrdinalIgnoreCase) ||
                                     !HasNonEmptyFile(Path.Combine(shapeDataDirectory,
-                                        value[(expectedSetFolderSuffix.Length + 1)..].Replace('/', Path.DirectorySeparatorChar))))
+                                       value.Replace('/', Path.DirectorySeparatorChar))))
                     .Cast<string>()
                     .ToArray();
                 if (missingSourceFiles.Length > 0)
@@ -27915,19 +27920,19 @@ internal sealed class LocalExportService(
                 }
 
                 var setFolders = document.Descendants()
-                    .Where(static element => string.Equals(element.Name.LocalName, "SetFolder", StringComparison.OrdinalIgnoreCase))
+                    .Where(static element => string.Equals(element.Name.LocalName, "DataFolder", StringComparison.OrdinalIgnoreCase))
                     .Select(static element => NormalizeBodySlidePath(element.Value))
                     .Where(static value => !string.IsNullOrWhiteSpace(value))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
                 if (setFolders.Length == 0)
                 {
-                    problems.Add("OSP does not declare a SetFolder for the generated ShapeData project.");
+                    problems.Add("OSP does not declare a version-1 DataFolder for the generated ShapeData project (legacy SetFolder is not supported).");
                 }
                 else if (setFolders.Any(folder => !IsSafeBodySlideRelativePath(folder) ||
                                                   !folder.Equals(expectedSetFolderSuffix, StringComparison.OrdinalIgnoreCase)))
                 {
-                    problems.Add($"OSP SetFolder does not point at the generated ShapeData folder '{expectedSetFolderSuffix}'.");
+                    problems.Add($"OSP DataFolder does not point at the generated ShapeData folder '{expectedSetFolderSuffix}' (do not use legacy SetFolder).");
                 }
 
                 var invalidSourceFilePaths = document.Descendants()
@@ -27935,7 +27940,7 @@ internal sealed class LocalExportService(
                     .Select(static element => NormalizeBodySlidePath(element.Value))
                     .Where(static value => !string.IsNullOrWhiteSpace(value))
                     .Where(value => !IsSafeBodySlideRelativePath(value) ||
-                                    !value.StartsWith(expectedSetFolderSuffix + "/", StringComparison.OrdinalIgnoreCase) ||
+                                    value.Contains('/') ||
                                     !value.EndsWith(".nif", StringComparison.OrdinalIgnoreCase))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
@@ -27965,6 +27970,7 @@ internal sealed class LocalExportService(
                     .Select(element => new
                     {
                         FileName = NormalizeBodySlidePath(element.Value),
+                        IsOutputStem = element.Attribute("GenWeights") is not null,
                         Gender = ((string?)element.Attribute("gender"))?.Trim(),
                         OutputPath = element.Parent?.Elements()
                             .FirstOrDefault(static child => string.Equals(child.Name.LocalName, "OutputPath", StringComparison.OrdinalIgnoreCase))
@@ -27980,9 +27986,10 @@ internal sealed class LocalExportService(
                 {
                     if (outputFileEntries.Any(entry => !IsSafeBodySlideRelativePath(entry.FileName) ||
                                                        entry.FileName.Contains('/') ||
-                                                       !entry.FileName.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)))
+                                                       (!entry.IsOutputStem &&
+                                                        !entry.FileName.EndsWith(".nif", StringComparison.OrdinalIgnoreCase))))
                     {
-                        problems.Add("OSP OutputFile entries must be NIF leaf names without directory traversal.");
+                        problems.Add("OSP OutputFile entries must be mesh stems or legacy NIF leaf names without directory traversal.");
                     }
 
                     var stagedMeshPaths = Directory.EnumerateFiles(shapeDataDirectory, "*.*", SearchOption.AllDirectories).ToArray();
@@ -28027,7 +28034,7 @@ internal sealed class LocalExportService(
                         return trimmed;
                     }
 
-                    bool HasMatchingStagedMesh(string outputPath, string fileName)
+                    bool HasMatchingStagedMesh(string outputPath, string fileName, bool isOutputStem)
                     {
                         var relativeOutputPath = NormalizeBodySlidePath(outputPath);
                         if (IsSafeBodySlideRelativePath(relativeOutputPath) &&
@@ -28046,14 +28053,16 @@ internal sealed class LocalExportService(
                             return true;
                         }
 
-                        var fileStem = NormalizeBodySlideOutputMeshStem(Path.GetFileNameWithoutExtension(fileName) ?? string.Empty);
+                        var fileStem = NormalizeBodySlideOutputMeshStem(isOutputStem
+                            ? fileName
+                            : Path.GetFileNameWithoutExtension(fileName) ?? string.Empty);
                         return !string.IsNullOrWhiteSpace(fileStem) && stagedMeshStems.Contains(fileStem);
                     }
 
                     var missingOutputFileMatches = outputFileEntries
                         .Where(entry =>
                         {
-                            return !HasMatchingStagedMesh(entry.OutputPath ?? string.Empty, entry.FileName!);
+                            return !HasMatchingStagedMesh(entry.OutputPath ?? string.Empty, entry.FileName!, entry.IsOutputStem);
                         })
                         .Select(static entry => entry.FileName!)
                         .ToArray();
