@@ -1420,6 +1420,11 @@ internal static class BodySlideSourceProjectSupport
         }
 
         var resolvedVertexCount = ResolveOsdPayloadVertexCount(filePath, payload.InferredVertexCount);
+        if (resolvedVertexCount > MorphPayloadLimits.MaximumVertices ||
+            (long)resolvedVertexCount * payload.Morphs.Count > MorphPayloadLimits.MaximumExpandedDeltas)
+        {
+            return false;
+        }
         var extracted = new List<SourceSliderCandidate>(payload.Morphs.Count);
         foreach (var morph in payload.Morphs)
         {
@@ -1474,9 +1479,9 @@ internal static class BodySlideSourceProjectSupport
         byte[] bytes;
         try
         {
-            bytes = File.ReadAllBytes(filePath);
+            bytes = MorphPayloadLimits.ReadFile(filePath);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
         {
             return false;
         }
@@ -1493,6 +1498,12 @@ internal static class BodySlideSourceProjectSupport
         resolvedVertexCount = IsPirtTriPayload(bytes)
             ? ResolveTriPayloadVertexCount(filePath, payload.VertexCount)
             : payload.VertexCount;
+        if (resolvedVertexCount > MorphPayloadLimits.MaximumVertices ||
+            (long)resolvedVertexCount * payload.Morphs.Count > MorphPayloadLimits.MaximumExpandedDeltas)
+        {
+            payload = null;
+            return false;
+        }
         return true;
     }
 

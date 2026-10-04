@@ -13,6 +13,28 @@ internal readonly record struct MorphDeltaStats(int TotalCount, int MeaningfulCo
     public float MeaningfulRatio => TotalCount <= 0 ? 0f : MeaningfulCount / (float)TotalCount;
 }
 
+internal static class MorphPayloadLimits
+{
+    internal const int MaximumFileBytes = 64 * 1024 * 1024;
+    internal const int MaximumVertices = 250_000;
+    internal const int MaximumExpandedDeltas = 8 * 1024 * 1024;
+
+    internal static byte[] ReadFile(string filePath)
+    {
+        using var stream = File.OpenRead(filePath);
+        if (stream.Length > MaximumFileBytes)
+        {
+            throw new InvalidDataException("Morph payload exceeds the 64 MiB read limit.");
+        }
+        var bytes = new byte[(int)stream.Length];
+        stream.ReadExactly(bytes);
+        return bytes;
+    }
+
+    internal static bool IsFinite(float x, float y, float z) =>
+        float.IsFinite(x) && float.IsFinite(y) && float.IsFinite(z);
+}
+
 internal static class MorphPayloadAnalysis
 {
     private const float MeaningfulDeltaThreshold = 0.0001f;
@@ -69,9 +91,9 @@ internal static class BsdMorphReader
 
         try
         {
-            return TryRead(File.ReadAllBytes(filePath), out payload);
+            return TryRead(MorphPayloadLimits.ReadFile(filePath), out payload);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
         {
             return false;
         }
@@ -84,7 +106,7 @@ internal static class BsdMorphReader
     public static bool TryRead(ReadOnlySpan<byte> bytes, out BsdMorphPayload? payload)
     {
         payload = null;
-        if (bytes.Length < 13 || !bytes[..4].SequenceEqual(Magic))
+        if (bytes.Length < 13 || bytes.Length > MorphPayloadLimits.MaximumFileBytes || !bytes[..4].SequenceEqual(Magic))
         {
             return false;
         }
@@ -122,6 +144,10 @@ internal static class BsdMorphReader
             var x = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)])); offset += 4;
             var y = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)])); offset += 4;
             var z = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)])); offset += 4;
+            if (!MorphPayloadLimits.IsFinite(x, y, z))
+            {
+                return false;
+            }
             deltas[i] = (x, y, z);
         }
 
@@ -152,9 +178,9 @@ internal static class TriMorphReader
 
         try
         {
-            return TryRead(File.ReadAllBytes(filePath), out payload);
+            return TryRead(MorphPayloadLimits.ReadFile(filePath), out payload);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
         {
             return false;
         }
@@ -167,6 +193,10 @@ internal static class TriMorphReader
     public static bool TryRead(ReadOnlySpan<byte> bytes, out TriMorphPayload? payload)
     {
         payload = null;
+        if (bytes.Length > MorphPayloadLimits.MaximumFileBytes)
+        {
+            return false;
+        }
         if (bytes.Length >= FaceGenMagic.Length && bytes[..FaceGenMagic.Length].SequenceEqual(FaceGenMagic))
         {
             return TryReadFaceGenTri(bytes, FaceGenMagic, usesQuantizedInt16: true, out payload);
@@ -207,7 +237,8 @@ internal static class TriMorphReader
 
         var vertexCount = (int)rawVertexCount;
         var morphCount = (int)rawMorphCount;
-        if (vertexCount <= 0 || vertexCount > 250_000 || morphCount <= 0 || morphCount > 10_000)
+        if (vertexCount <= 0 || vertexCount > MorphPayloadLimits.MaximumVertices || morphCount <= 0 || morphCount > 10_000 ||
+            (long)vertexCount * morphCount > MorphPayloadLimits.MaximumExpandedDeltas)
         {
             return false;
         }
@@ -230,7 +261,7 @@ internal static class TriMorphReader
             names.Add(Encoding.UTF8.GetString(bytes[offset..(offset + nameLength)]));
             offset += nameLength;
             var rawDeltaCount = BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]);
-            if (rawDeltaCount > int.MaxValue)
+            if (rawDeltaCount == 0 || rawDeltaCount > vertexCount)
             {
                 return false;
             }
@@ -240,8 +271,8 @@ internal static class TriMorphReader
         }
 
         var morphs = new List<TriMorphEntry>(morphCount);
-        var densePayloadBytes = counts.Sum(count => checked(count * (usesQuantizedInt16 ? 6 : 12)));
-        var indexedPayloadBytes = counts.Sum(count => checked(count * (usesQuantizedInt16 ? 8 : 14)));
+        var densePayloadBytes = counts.Sum(count => (long)count * (usesQuantizedInt16 ? 6 : 12));
+        var indexedPayloadBytes = counts.Sum(count => (long)count * (usesQuantizedInt16 ? 8 : 14));
         var remainingBytes = bytes.Length - offset;
         var usesExplicitIndexes = remainingBytes switch
         {
@@ -297,7 +328,7 @@ internal static class TriMorphReader
                     z = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)])); offset += 4;
                 }
 
-                if (vertexIndex >= vertexCount)
+                if (vertexIndex >= vertexCount || !MorphPayloadLimits.IsFinite(x, y, z))
                 {
                     return false;
                 }
@@ -333,6 +364,7 @@ internal static class TriMorphReader
 
         if (shapeCount == 0)
         {
+            if (bytes.Length != 6) return false;
             payload = new TriMorphPayload(0, []);
             return true;
         }
@@ -381,6 +413,10 @@ internal static class TriMorphReader
                 offset += morphNameLength;
                 var multiplier = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]));
                 offset += 4;
+                if (!float.IsFinite(multiplier))
+                {
+                    return false;
+                }
                 var deltaCount = (int)BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]);
                 offset += 2;
                 if (deltaCount < 0 || deltaCount > 65_535)
@@ -414,6 +450,10 @@ internal static class TriMorphReader
                     var x = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * multiplier; offset += 2;
                     var y = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * multiplier; offset += 2;
                     var z = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * multiplier; offset += 2;
+                    if (!MorphPayloadLimits.IsFinite(x, y, z))
+                    {
+                        return false;
+                    }
                     sparse.Add((vertexIndex, x, y, z));
                     shapeVertexCount = Math.Max(shapeVertexCount, vertexIndex + 1);
                 }
@@ -423,6 +463,10 @@ internal static class TriMorphReader
 
             if (shapeIndex == 0)
             {
+                if ((long)shapeVertexCount * morphCount > MorphPayloadLimits.MaximumExpandedDeltas)
+                {
+                    return false;
+                }
                 firstShapeMorphs = shapeMorphs?
                     .Select(morph =>
                     {
@@ -442,7 +486,7 @@ internal static class TriMorphReader
             }
         }
 
-        if (firstShapeMorphs is null)
+        if (firstShapeMorphs is null || offset != bytes.Length)
         {
             return false;
         }
@@ -467,9 +511,9 @@ internal static class OsdMorphReader
 
         try
         {
-            return TryRead(File.ReadAllBytes(filePath), out payload);
+            return TryRead(MorphPayloadLimits.ReadFile(filePath), out payload);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
         {
             return false;
         }
@@ -482,6 +526,10 @@ internal static class OsdMorphReader
     public static bool TryRead(ReadOnlySpan<byte> bytes, out OsdMorphPayload? payload)
     {
         payload = null;
+        if (bytes.Length > MorphPayloadLimits.MaximumFileBytes)
+        {
+            return false;
+        }
         if (bytes.Length >= 12 && bytes[..OutfitStudioMagic.Length].SequenceEqual(OutfitStudioMagic))
         {
             var version = BinaryPrimitives.ReadInt32LittleEndian(bytes[4..8]);
@@ -509,12 +557,22 @@ internal static class OsdMorphReader
         out OsdMorphPayload? payload)
     {
         payload = null;
-        if (TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 2, out payload))
+        if (!TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 2, allowPadding: false, out payload) &&
+            !TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 4, allowPadding: false, out payload) &&
+            !TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 2, allowPadding: true, out payload) &&
+            !TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 4, allowPadding: true, out payload))
         {
-            return true;
+            return false;
         }
 
-        return TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 4, out payload);
+        if (payload!.Morphs.Any(morph => morph.SparseDeltas.Any(delta =>
+                delta.Index < 0 || delta.Index >= MorphPayloadLimits.MaximumVertices ||
+                !MorphPayloadLimits.IsFinite(delta.X, delta.Y, delta.Z))))
+        {
+            payload = null;
+            return false;
+        }
+        return true;
     }
 
     private static bool TryReadPayload(
@@ -522,6 +580,7 @@ internal static class OsdMorphReader
         int headerSize,
         int morphCount,
         int indexByteWidth,
+        bool allowPadding,
         out OsdMorphPayload? payload)
     {
         payload = null;
@@ -580,10 +639,6 @@ internal static class OsdMorphReader
                 {
                     vertexIndex = BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]);
                     offset += 4;
-                    if (vertexIndex < 0)
-                    {
-                        return false;
-                    }
                 }
 
                 var x = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]));
@@ -593,13 +648,16 @@ internal static class OsdMorphReader
                 var z = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]));
                 offset += 4;
                 sparseDeltas.Add((vertexIndex, x, y, z));
-                inferredVertexCount = Math.Max(inferredVertexCount, vertexIndex + 1);
+                if (vertexIndex >= 0 && vertexIndex < MorphPayloadLimits.MaximumVertices)
+                {
+                    inferredVertexCount = Math.Max(inferredVertexCount, vertexIndex + 1);
+                }
             }
 
             morphs.Add(new OsdMorphEntry(morphName, sparseDeltas));
         }
 
-        if ((offset != bytes.Length && !HasOnlyTrailingZeroPadding(bytes[offset..])) || morphs.Count == 0)
+        if ((offset != bytes.Length && (!allowPadding || !HasOnlyTrailingZeroPadding(bytes[offset..]))) || morphs.Count == 0)
         {
             return false;
         }

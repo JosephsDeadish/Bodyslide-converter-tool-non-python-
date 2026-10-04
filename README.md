@@ -130,6 +130,13 @@ reference NIF or morph file must not be replaced by a same-named file in
 `SliderSets`, the BodySlide root, or a folder named after the project. Discovery
 and cache invalidation use the authored ShapeData folder, even when its name
 differs from the SliderSet name.
+Morph import rejects non-finite displacements, out-of-range vertex indexes,
+overflowing counts and malformed trailing TRI bytes. Reads are capped at 64 MiB
+per BSD/TRI/OSD file; dense expansion is capped at 8,388,608 deltas per payload
+and 250,000 vertices. Oversized/unreadable sources stay on the existing missing
+source-data/review path rather than allocating gigabytes or claiming reusable
+morph support. OSD parsing tries exact 16/32-bit layouts before padded layouts,
+preventing 32-bit indexes and deltas from being silently read as 16-bit data.
 Plugin verification accepts repeated normalized source paths and keeps an
 unsupported report when duplicate reports disagree, rather than throwing a
 duplicate-key exception or hiding the unsupported mesh.
