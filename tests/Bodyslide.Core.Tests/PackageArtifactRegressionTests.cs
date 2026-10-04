@@ -241,6 +241,32 @@ public sealed class PackageArtifactRegressionTests
     }
 
     [Fact]
+    public void GeneratedDependencyArrayIsValidPackageEvidence()
+    {
+        using var package = new PackageFixture();
+        package.Write("dependency-map.json", System.Text.Json.JsonSerializer.Serialize(new[]
+        {
+            new MeshDependencyMapEntry("armor.nif", [], [], [], [], "CBBE")
+        }));
+        Assert.DoesNotContain(package.Verify(), issue => issue.Code == "invalid-package-artifact" &&
+            issue.Message.Contains("dependency-map.json", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("[null]")]
+    [InlineData("[{}]")]
+    [InlineData("[{\"Mesh\":\"\"}]")]
+    [InlineData("[{\"Mesh\":42}]")]
+    public void InvalidDependencyArraysStillRequireReview(string content)
+    {
+        using var package = new PackageFixture();
+        package.Write("dependency-map.json", content);
+        Assert.Contains(package.Verify(), issue => issue.Code == "invalid-package-artifact" &&
+            issue.Message.Contains("dependency-map.json", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void EmptyStagedMeshCannotSatisfyInstallableMeshGate()
     {
         using var package = new PackageFixture();

@@ -91,8 +91,30 @@ public sealed class ConversionPerformanceRegressionTests
                 Assert.Equal(deltas.Length, low.GetProperty("DeltaCount").GetInt32());
                 Assert.False(low.TryGetProperty("Deltas", out _));
             }
+
             Assert.Same(deltas, payload.Deltas);
             Assert.Equal((1f, 2f, 3f), payload.Deltas[0]);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task ExportIncludesLateQualityReportInFomodAndAcceptsGeneratedDependencyMap()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var nif = Path.Combine(root, "armor.nif");
+            await File.WriteAllTextAsync(nif, "mesh");
+            var output = await ExportAsync(root, new ImportedArmor(root, [nif], [], [], []),
+                new PluginAnalysisResult([], [], ""), new TextureSummary(0, [], [], []));
+            var config = System.Xml.Linq.XDocument.Load(Path.Combine(output, "fomod", "ModuleConfig.xml"));
+            Assert.Contains(config.Descendants("file"), entry =>
+                entry.Attribute("source")?.Value == "conversion-quality.json" &&
+                entry.Attribute("destination")?.Value == "conversion-quality.json");
+            var quality = await File.ReadAllTextAsync(Path.Combine(output, "conversion-quality.json"));
+            Assert.DoesNotContain("fomod-missing-root-support-entry", quality);
+            Assert.DoesNotContain("Report must contain a JSON object", quality);
         }
         finally { Directory.Delete(root, true); }
     }

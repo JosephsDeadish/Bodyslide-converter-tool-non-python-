@@ -140,6 +140,22 @@ preventing 32-bit indexes and deltas from being silently read as 16-bit data.
 BodySlide TRI files may include an optional UV morph section; its structure is
 validated without treating UV offsets as position displacements. Legacy files
 ending after position morphs remain supported.
+
+Packaging validation accepts the generated `dependency-map.json` mesh-entry
+array as well as legacy object reports; malformed/empty arrays remain invalid.
+FOMOD includes `conversion-quality.json` even though it is generated after the
+installer manifest. Default runtime physics configurations use framework-supported
+target-body metadata when no explicit bone set is supplied, so 3BA thigh coverage
+is not lost to generic five-node defaults. Explicit bone sets remain authoritative;
+configuration coverage alone does not prove mesh weights or in-game physics.
+
+`manual-cleanup-likely`, `pose-risk`, `extreme-topology-adaptation`, and
+`low-body-match` are not packaging errors and are not suppressed by these fixes.
+For an affected outfit, provide its `conversion-quality.json`,
+`topology-correspondence.json`, `pose-simulation-report.json`,
+`skeleton-compatibility.json`, and a permitted source/ShapeData reproduction.
+Confirm the actual source body and skeleton, inspect the listed morphs and hot
+regions in Outfit Studio, and rebuild/test in BodySlide and Skyrim before release.
 Plugin verification accepts repeated normalized source paths and keeps an
 unsupported report when duplicate reports disagree, rather than throwing a
 duplicate-key exception or hiding the unsupported mesh.

@@ -16590,9 +16590,20 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             (mesh.TargetPhysicsBones?.Any(static bone => bone.Contains("pec", StringComparison.OrdinalIgnoreCase)) ?? false);
 
         var tuning = BuildSolverTuning(mesh);
+        var targetPhysicsBones = mesh.TargetPhysicsBones;
+        if (targetPhysicsBones is null && BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        {
+            targetPhysicsBones = metadata.AvailablePhysicsBones
+                .Select(bone => SkeletonMappingCatalog.TryResolveSupportedBone(bone, metadata.SkeletonFramework, out var resolved)
+                    ? resolved : null)
+                .Where(static bone => bone is not null)
+                .Select(static bone => bone!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
 
-        var cbpcXml = hasCbpc && !suppressPhysicsConfigs ? BuildCbpcXml(isMale, tuning, mesh.TargetPhysicsBones) : null;
-        var smpXml  = hasSmp  && !suppressPhysicsConfigs ? BuildSmpXml(targetBody, isMale, tuning, mesh.TargetPhysicsBones) : null;
+        var cbpcXml = hasCbpc && !suppressPhysicsConfigs ? BuildCbpcXml(isMale, tuning, targetPhysicsBones) : null;
+        var smpXml  = hasSmp  && !suppressPhysicsConfigs ? BuildSmpXml(targetBody, isMale, tuning, targetPhysicsBones) : null;
 
         return Task.FromResult(new PhysicsConfig(physicsProfile, cbpcXml, smpXml));
     }
@@ -28514,7 +28525,20 @@ internal sealed class LocalExportService(
                     if (relativePath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
                     {
                         using var document = JsonDocument.Parse(File.ReadAllText(fullPath));
-                        if (document.RootElement.ValueKind != JsonValueKind.Object)
+                        var root = document.RootElement;
+                        if (relativePath.Equals("dependency-map.json", StringComparison.OrdinalIgnoreCase) &&
+                            root.ValueKind == JsonValueKind.Array)
+                        {
+                            if (root.GetArrayLength() == 0 || root.EnumerateArray().Any(entry =>
+                                    entry.ValueKind != JsonValueKind.Object ||
+                                    !entry.TryGetProperty("Mesh", out var meshFile) ||
+                                    meshFile.ValueKind != JsonValueKind.String ||
+                                    string.IsNullOrWhiteSpace(meshFile.GetString())))
+                            {
+                                throw new InvalidDataException("Dependency map must contain mesh dependency objects.");
+                            }
+                        }
+                        else if (root.ValueKind != JsonValueKind.Object)
                         {
                             throw new InvalidDataException("Report must contain a JSON object.");
                         }
@@ -34268,6 +34292,7 @@ internal sealed class LocalExportService(
         {
             "README.txt",
             "meta.ini",
+            "conversion-quality.json",
             "remaining-gaps-checklist.md",
             "preview.html",
             "preview.svg",

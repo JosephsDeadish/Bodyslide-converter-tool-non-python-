@@ -8,6 +8,28 @@ namespace Bodyslide.Core.Tests;
 
 public sealed class PhysicsReadinessRegressionTests
 {
+    [Theory]
+    [InlineData("smp+cbpc")]
+    [InlineData("cbpc+smp")]
+    public async Task ThreeBaDefaultsIncludeFrameworkSupportedThighPhysics(string profile)
+    {
+        var weighted = new WeightedMesh("mixed", "default", false);
+        var physics = await new BasicPhysicsSupportService().BuildAsync(weighted, "3BA", profile, CancellationToken.None);
+        Assert.False(weighted.PhysicsWeightsTransferred);
+        foreach (var xml in new[] { physics.CbpcConfigXml, physics.SmpConfigXml })
+        {
+            var bones = XDocument.Parse(xml!).Descendants("bone").Select(b => (string)b.Attribute("name")!).ToArray();
+            Assert.Contains("NPC L Thigh", bones);
+            Assert.Contains("NPC R Thigh", bones);
+            Assert.All(bones, bone => Assert.True(
+                SkeletonMappingCatalog.IsBoneSupportedByFramework("xpmsse-female-advanced", bone), bone));
+        }
+        var report = BuildCompatibilityReport(physics);
+        Assert.True(report.GeneratedPhysicsSlotCount >= 4);
+        Assert.True(report.GeneratedPhysicsFamilyCount >= 4);
+        Assert.Contains("NPC L Thigh", report.GeneratedPhysicsBones);
+    }
+
     [Fact]
     public async Task UnclassifiedDeclaredBoneDoesNotProduceEmptyCbpcButRemainsAvailableToSmp()
     {
