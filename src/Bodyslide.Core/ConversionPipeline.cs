@@ -11599,6 +11599,16 @@ internal static class ArchiveExtractionHelper
         private int entries;
         private long declaredBytes;
         private long copiedBytes;
+        private readonly HashSet<string> fileDestinations = new(StringComparer.OrdinalIgnoreCase);
+
+        public FileStream CreateOutput(string destinationPath)
+        {
+            if (!fileDestinations.Add(Path.GetFullPath(destinationPath)))
+            {
+                throw new InvalidDataException("Archive contains duplicate file destinations; select an unambiguous installed pack instead.");
+            }
+            return new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        }
 
         public void RegisterEntry(long length)
         {
@@ -11801,7 +11811,7 @@ internal static class ArchiveExtractionHelper
             var entryBaseBytes = totalBytesCopied;
             var entryBytesCopied = 0L;
             using var entryStream = entry.Open();
-            using var outputStream = File.Create(destinationPath);
+            using var outputStream = budget.CreateOutput(destinationPath);
             CopyStreamWithCancellation(
                 entryStream,
                 outputStream,
@@ -11907,7 +11917,7 @@ internal static class ArchiveExtractionHelper
             var entryBaseBytes = totalBytesCopied;
             var entryBytesCopied = 0L;
             using var entryStream = entry.OpenEntryStream();
-            using var outputStream = File.Create(destinationPath);
+            using var outputStream = budget.CreateOutput(destinationPath);
             CopyStreamWithCancellation(
                 entryStream,
                 outputStream,
@@ -12021,7 +12031,7 @@ internal static class ArchiveExtractionHelper
             var entryBaseBytes = totalBytesCopied;
             var entryBytesCopied = 0L;
             using var entryStream = entry.OpenEntryStream();
-            using var outputStream = File.Create(destinationPath);
+            using var outputStream = budget.CreateOutput(destinationPath);
             CopyStreamWithCancellation(
                 entryStream,
                 outputStream,
@@ -12136,7 +12146,7 @@ internal static class ArchiveExtractionHelper
                 force: true);
             var entryBaseBytes = totalBytesCopied;
             var entryBytesCopied = 0L;
-            using var outputStream = File.Create(destinationPath);
+            using var outputStream = budget.CreateOutput(destinationPath);
             if (entry.DataStream is { } entryStream)
             {
                 CopyStreamWithCancellation(

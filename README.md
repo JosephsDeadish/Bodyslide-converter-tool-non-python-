@@ -116,6 +116,11 @@ No variant is selected automatically. Install the archive with MO2/Vortex first,
 then convert the chosen installed mod, or prepare a folder containing one selected
 plugin/body variant and its shared assets. Archive extraction still occurs before
 this check; this is not a FOMOD choice interpreter.
+Extraction also rejects duplicate normalized file destinations instead of silently
+overwriting an earlier mesh, texture or plugin. Separator, dot-segment and
+case-only aliases are treated as the same game path, including on Linux.
+Partially extracted workspaces are removed after failure; select a single installed
+variant or repair the source archive rather than relying on entry order.
 Constant missing-texture fallbacks use compact 4×4 DDS maps instead of expanding
 every channel to the diffuse texture's resolution. Detail-derived maps retain
 their detail; a compact neutral fallback is not a substitute for authored textures.
