@@ -1328,7 +1328,7 @@ public sealed class MainForm : Form
         _copyCurrentViewButton = new Button
         {
             Name = "copyCurrentViewButton",
-            Text = "Copy view",
+            Text = "Copy log",
             AutoSize = true,
             MinimumSize = new Size(100, 34),
             Margin = new Padding(0, 0, 8, 0),
