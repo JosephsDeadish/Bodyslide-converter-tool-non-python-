@@ -385,6 +385,7 @@ public static class StandaloneStartupRouting
                 option.Equals("skeleton-nif", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("skeleton-nif-path", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("build-sliders", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("compact-diagnostics", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("custom-profiles", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("world-mode", StringComparison.OrdinalIgnoreCase) ||
                 option.Equals("shared-plugin-output", StringComparison.OrdinalIgnoreCase))
@@ -424,7 +425,7 @@ public static class StandaloneStartupRouting
         ModManagerLaunchArgumentCatalog.StartupDiagnosticsArgumentNames.Contains(option, StringComparer.OrdinalIgnoreCase) ||
         option.ToLowerInvariant() is "input" or "output" or "target" or "targets" or "preset" or "presets" or
             "profile" or "source" or "physics" or "cache-path" or "skeleton-nif" or "skeleton-nif-path" or
-            "build-sliders" or "custom-profiles" or "world-mode" or "shared-plugin-output" or "game" or "instance";
+            "build-sliders" or "compact-diagnostics" or "custom-profiles" or "world-mode" or "shared-plugin-output" or "game" or "instance";
 
     public static bool HasStandalonePositionalConversionUsage(IReadOnlyList<string> args)
     {

@@ -96,6 +96,7 @@ public sealed class MainForm : Form
     private readonly CheckBox _showAdvancedOptionsCheckBox;
     private readonly CheckBox _outputZipCheckBox;
     private readonly CheckBox _buildSlidersCheckBox;
+    private readonly CheckBox _compactDiagnosticsCheckBox;
     private readonly Label _outputHintLabel;
     private readonly Label _statusLabel;
     private readonly Label _progressDetailsLabel;
@@ -1257,6 +1258,13 @@ public sealed class MainForm : Form
             Checked = true,
             Margin = new Padding(0, 8, 12, 0),
         };
+        _compactDiagnosticsCheckBox = new CheckBox
+        {
+            Text = "Compact diagnostics",
+            AutoSize = true,
+            Checked = false,
+            Margin = new Padding(0, 8, 12, 0),
+        };
         _convertButton = new Button
         {
             Name = "convertButton",
@@ -1419,6 +1427,7 @@ public sealed class MainForm : Form
         primaryActionRow.Controls.Add(_cancelButton);
         primaryActionRow.Controls.Add(_outputZipCheckBox);
         primaryActionRow.Controls.Add(_buildSlidersCheckBox);
+        primaryActionRow.Controls.Add(_compactDiagnosticsCheckBox);
         secondaryActionRow.Controls.Add(_clearLogButton);
         secondaryActionRow.Controls.Add(_copyCurrentViewButton);
         secondaryActionRow.Controls.Add(_openOutputButton);
@@ -3233,7 +3242,8 @@ public sealed class MainForm : Form
                 GenerateBodySlideFiles: _buildSlidersCheckBox.Checked,
                 CustomProfilePaths: _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null,
                 WorldDropModeOverride: worldModeOverride,
-                SkeletonNifPath: skeletonNifPath);
+                SkeletonNifPath: skeletonNifPath,
+                CompactDiagnostics: _compactDiagnosticsCheckBox.Checked);
 
             ConversionLearningCache.SetGlobalCachePath(cachePathOverride);
             if (!string.IsNullOrWhiteSpace(cachePathOverride))
@@ -5762,6 +5772,8 @@ public sealed class MainForm : Form
             "The raw output folder always includes README.txt plus fomod/ installer metadata.");
         _optionToolTip.SetToolTip(_buildSlidersCheckBox,
             "Generate BodySlide project files for the converted result so it can be rebuilt or adjusted later.");
+        _optionToolTip.SetToolTip(_compactDiagnosticsCheckBox,
+            "Reduce optional diagnostic reports while preserving validation failures, dependencies, physics and required installation assets.");
         _optionToolTip.SetToolTip(_copyCurrentViewButton,
             "Copies the selected rows from the active diagnostics tab.\n" +
             "If nothing is selected, copies the full log text.");

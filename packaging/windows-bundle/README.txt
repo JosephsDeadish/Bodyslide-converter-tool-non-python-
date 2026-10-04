@@ -49,6 +49,11 @@ is resolved and the result has been tested.
    locate each generated project and slider group, check previews at low/high
    weights and slider extremes, test applicable zaps, and build the outputs.
    Confirm the builds update the mesh paths referenced by the generated plugin.
+   Check MO2's Data view for the winning OSP, ShapeData NIF/OSD and textures.
+   Record where BodySlide writes its builds (Overwrite or a configured output
+   mod), move only those observed generated files into the selected output mod,
+   and confirm that mod wins the final mesh paths. Do not assume that a file
+   existing on disk means it is the active profile's provider.
 5) In xEdit, check generated plugin records, masters, model paths and partitions.
    Use either the full-copy patched plugin or the minimal override as instructed
    by the conversion reports; do not enable both alternatives blindly.
@@ -59,6 +64,8 @@ is resolved and the result has been tested.
 7) Measure import and conversion on a representative large pack with both cold
    and warm caches. Test cancellation in a disposable output location and verify
    a subsequent clean retry does not reuse incomplete output as a ready package.
+   Preserve batch-performance.json from the output folder alongside per-item
+   timing/inventory reports; the final batch report is not inside the ZIP.
 
 Each conversion exports proof-harness-bundle.json as its external-validation
 entrypoint. Follow its scenario/probe requirements and evidence locations.

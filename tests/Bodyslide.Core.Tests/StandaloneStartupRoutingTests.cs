@@ -31,6 +31,7 @@ public sealed class StandaloneStartupRoutingTests
     [InlineData("--list-bodies")]
     [InlineData("--export-cache")]
     [InlineData("--help")]
+    [InlineData("--compact-diagnostics")]
     public void InlineCommandsUseSameNamesAsStartupRouting(string command)
     {
         var args = new[] { "--from-vortex", command + "=true" };
@@ -135,6 +136,7 @@ public sealed class StandaloneStartupRoutingTests
             ["--input", @"D:\Vortex\mods\Armor", "--output", @"D:\MO2\mods\Converted"],
             ["--targets=CBBE,UNP", "--from-mo2"],
             ["--preset=Default", "--from-vortex"],
+            ["--compact-diagnostics", "true"],
             [@"D:\MO2\mods\Armor\armor.nif", "CBBE"],
             ["/home/test/vortex/mods/armor.nif", "CBBE"]
         ];

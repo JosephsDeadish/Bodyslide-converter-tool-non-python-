@@ -393,7 +393,7 @@ internal static class BodySlideSourceProjectSupport
             foreach (var ospPath in EnumerateOspFiles(location.Root, location.SearchOption, visitedDirectories, cancellationToken))
             {
                 if (!visitedOspFiles.Add(Path.GetFullPath(ospPath)) ||
-                    !TryProbeOspProject(ospPath, out var probe) ||
+                    !TryProbeOspProject(ospPath, out var probe, armor.MeshFiles) ||
                     !IsAssociatedWithArmor(probe, meshTokens, meshDirectories))
                 {
                     continue;
@@ -812,8 +812,10 @@ internal static class BodySlideSourceProjectSupport
     {
         cancellationToken.ThrowIfCancellationRequested();
         var stamp = BuildLinkedAssetStamp(probe, cancellationToken);
+        var cacheKey = probe.OspPath + "\0" + string.Join("\0",
+            probe.ProjectNames.Concat(probe.OutputFiles).Concat(probe.ReferencedPaths).Concat(probe.DataFolders ?? []));
         if (stamp is not null &&
-            LinkedAssetCache.TryGetValue(probe.OspPath, out var cached) &&
+            LinkedAssetCache.TryGetValue(cacheKey, out var cached) &&
             string.Equals(cached.Stamp, stamp, StringComparison.Ordinal))
         {
             return cached.Files;
@@ -866,7 +868,7 @@ internal static class BodySlideSourceProjectSupport
             {
                 LinkedAssetCache.Clear();
             }
-            LinkedAssetCache[probe.OspPath] = new BodySlideLinkedAssetCacheEntry(stamp, result);
+            LinkedAssetCache[cacheKey] = new BodySlideLinkedAssetCacheEntry(stamp, result);
         }
         return result;
     }
@@ -963,17 +965,19 @@ internal static class BodySlideSourceProjectSupport
             .Select(static folder => folder.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar))
             .ToArray();
 
-    private static bool TryProbeOspProject(string ospPath, out BodySlideProjectProbe probe)
+    private static bool TryProbeOspProject(string ospPath, out BodySlideProjectProbe probe, IReadOnlyList<string>? meshFiles = null)
     {
         var normalizedPath = Path.GetFullPath(ospPath);
         var stamp = GetFileStamp(normalizedPath);
+        var cacheKey = meshFiles is null ? normalizedPath : normalizedPath + "\0" +
+            string.Join("\0", meshFiles.Select(Path.GetFullPath).Order(StringComparer.OrdinalIgnoreCase));
         if (stamp is null)
         {
             probe = new BodySlideProjectProbe(normalizedPath, Path.GetDirectoryName(normalizedPath) ?? string.Empty, FindBodySlideRoot(Path.GetDirectoryName(normalizedPath)), [], [], [], []);
             return false;
         }
 
-        if (OspProbeCache.TryGetValue(normalizedPath, out var cached) &&
+        if (OspProbeCache.TryGetValue(cacheKey, out var cached) &&
             string.Equals(cached.Stamp, stamp, StringComparison.Ordinal))
         {
             if (cached.Success && cached.Probe is not null)
@@ -985,12 +989,12 @@ internal static class BodySlideSourceProjectSupport
             return false;
         }
 
-        var fresh = ProbeOspProject(normalizedPath, stamp);
+        var fresh = ProbeOspProject(normalizedPath, stamp, meshFiles);
         if (OspProbeCache.Count >= MaximumCachedProjects)
         {
             OspProbeCache.Clear();
         }
-        OspProbeCache[normalizedPath] = fresh;
+        OspProbeCache[cacheKey] = fresh;
         if (!fresh.Success || fresh.Probe is null)
         {
             probe = new BodySlideProjectProbe(normalizedPath, Path.GetDirectoryName(normalizedPath) ?? string.Empty, FindBodySlideRoot(Path.GetDirectoryName(normalizedPath)), [], [], [], []);
@@ -1001,11 +1005,17 @@ internal static class BodySlideSourceProjectSupport
         return true;
     }
 
-    private static BodySlideProjectProbeCacheEntry ProbeOspProject(string ospPath, string stamp)
+    private static BodySlideProjectProbeCacheEntry ProbeOspProject(
+        string ospPath, string stamp, IReadOnlyList<string>? meshFiles = null)
     {
         try
         {
             var document = XDocument.Load(ospPath, LoadOptions.None);
+            if (meshFiles is not null)
+            {
+                foreach (var set in document.Descendants("SliderSet").Where(set => !MatchesOutput(set, meshFiles)).ToArray())
+                    set.Remove();
+            }
             var projectNames = document
                 .Descendants("SliderSet")
                 .Select(static element => element.Attribute("name")?.Value?.Trim())
@@ -1189,20 +1199,7 @@ internal static class BodySlideSourceProjectSupport
             var sliders = new List<SourceSliderCandidate>();
             var zapSliders = new List<SourceSliderCandidate>();
 
-            var sets = document.Descendants("SliderSet").Where(set =>
-            {
-                var output = set.Elements().FirstOrDefault(element =>
-                    element.Name.LocalName.Equals("OutputFile", StringComparison.OrdinalIgnoreCase))?.Value.Trim();
-                if (string.IsNullOrWhiteSpace(output)) return true;
-                var stem = Path.GetFileName(output.Replace('\\', '/'));
-                if (stem.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)) stem = stem[..^4];
-                if (stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
-                    stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase)) stem = stem[..^2];
-                var outputPath = set.Elements().FirstOrDefault(element =>
-                    element.Name.LocalName.Equals("OutputPath", StringComparison.OrdinalIgnoreCase))?.Value;
-                return meshFiles.Any(mesh => NormalizeMeshToken(mesh).Equals(stem, StringComparison.OrdinalIgnoreCase) &&
-                    MatchesOutputDirectory(mesh, outputPath));
-            }).ToArray();
+            var sets = document.Descendants("SliderSet").Where(set => MatchesOutput(set, meshFiles)).ToArray();
             var sliderElements = document.Descendants("SliderSet").Any()
                 ? sets.SelectMany(static set => set.Descendants("Slider"))
                 : document.Descendants("Slider");
@@ -1245,6 +1242,21 @@ internal static class BodySlideSourceProjectSupport
         return token.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || token.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
             ? token[..^2]
             : token;
+    }
+
+    private static bool MatchesOutput(XElement set, IReadOnlyList<string> meshFiles)
+    {
+        var output = set.Elements().FirstOrDefault(element =>
+            element.Name.LocalName.Equals("OutputFile", StringComparison.OrdinalIgnoreCase))?.Value.Trim();
+        if (string.IsNullOrWhiteSpace(output)) return true;
+        var stem = Path.GetFileName(output.Replace('\\', '/'));
+        if (stem.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)) stem = stem[..^4];
+        if (stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+            stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase)) stem = stem[..^2];
+        var outputPath = set.Elements().FirstOrDefault(element =>
+            element.Name.LocalName.Equals("OutputPath", StringComparison.OrdinalIgnoreCase))?.Value;
+        return meshFiles.Any(mesh => NormalizeMeshToken(mesh).Equals(stem, StringComparison.OrdinalIgnoreCase) &&
+            MatchesOutputDirectory(mesh, outputPath));
     }
 
     private static bool MatchesOutputDirectory(string meshPath, string? outputPath)

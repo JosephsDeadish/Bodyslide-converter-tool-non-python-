@@ -171,7 +171,29 @@ addition to unpacked files, not as a duplicate-free install size. The scan check
 cancellation, skips links and stops after 100,000 entries. `Complete=false` and
 warnings identify partial inventories. The inventory excludes itself and is
 written after ZIP closure, so it is not included in that ZIP or completed pipeline
-timing. Batch totals and peak-memory profiling still require separate measurement.
+timing.
+
+Batch runs also write `batch-performance.json` at the requested output root (or
+the first generated variant root) after packaging and archive cleanup. It records
+total wall time, extraction/discovery/conversion/packaging/cleanup phase totals,
+output-category bytes, process allocation bytes and sampled peak working set.
+Discovery means the initial mesh scan; conversion includes item export and
+internal dependency scans, including ZIP creation for a single input. The
+250 ms working-set samples include concurrent process activity and can miss short
+peaks. Byte totals cover existing output contents plus sibling ZIPs, not source
+sizes or newly written bytes. Inventory skips links and stops at 100,000 entries;
+incomplete inventories are explicitly marked. Final inventory/report writing is
+outside measured wall time, and the final report is outside the completed ZIP.
+Failure/cancellation reporting is best-effort and never replaces the conversion
+exception.
+
+Enable **Compact diagnostics** in the desktop conversion options, or pass
+`--compact-diagnostics true` to the CLI, to minify diagnostic JSON and replace
+large interactive preview/workbench pages with concise, non-interactive review
+summaries. Default exports remain unchanged. Report names and JSON schemas,
+conversion quality, actionable validation evidence, physics/dependency records
+and required BodySlide/install assets remain available. This reduces report
+clutter, not the actual mesh, texture or morph payload sizes.
 
 Issue #8 reporting/performance corrections:
 - Morph generation and BodySlide preparation share one immutable source-resolution
@@ -201,9 +223,12 @@ Extraction is not measured by that per-item import timing. The supplied diagnost
 files total roughly 1.4 MB, so a large output requires a byte inventory of the
 actual NIF, texture, morph and archive payloads before attributing it to JSON.
 
-Remaining issue #8 acceptance work: detailed per-piece diagnostics and generic
-harness plans are still generated; a compact/optional diagnostics mode is not yet
-implemented. Structural NIF support does not prove all UV/skin/partition/material
+Linked OSP discovery now selects matching output projects before resolving their
+DataFolders and morph payloads, with project-scoped cache keys. This prevents
+cross-project payload reuse but does not establish per-shape ownership within a
+selected project. Original multi-project support assets remain preserved.
+
+Remaining issue #8 acceptance work: structural NIF support does not prove all UV/skin/partition/material
 relationships, runtime physics linkage/conflicts, or shape-specific source morph
 association. Empty texture lists do not prove textures are unnecessary. A permitted
 sample is also needed to verify shape-specific OSP slider data links and exported

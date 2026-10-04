@@ -33,7 +33,8 @@ public sealed record ConversionRequest(
     IReadOnlyList<string>? CustomProfilePaths = null,
     string? WorldDropModeOverride = null,
     string? SkeletonNifPath = null,
-    string? SharedPluginOutputDirectory = null)
+    string? SharedPluginOutputDirectory = null,
+    bool CompactDiagnostics = false)
 {
     internal string? BatchOutputNamespace { get; init; }
     internal string? BatchBodySlideProjectName { get; init; }
@@ -8523,6 +8524,45 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         CancellationToken cancellationToken = default,
         IProgress<BatchProgressUpdate>? progress = null)
     {
+        using var measurements = new BatchRunMeasurements();
+        IReadOnlyList<ConversionResult> results = [];
+        var status = "failed";
+        try
+        {
+            results = await ConvertMeasuredAsync(request, measurements, cancellationToken, progress);
+            status = results.All(static result => result.Success) ? "completed" : "completed-with-failures";
+            return results;
+        }
+        catch (OperationCanceledException)
+        {
+            status = "cancelled";
+            throw;
+        }
+        finally
+        {
+            var roots = measurements.OutputRoots.Concat(results.Select(static result => result.OutputDirectory))
+                .Where(Directory.Exists).Distinct().ToArray();
+            var reportRoot = request.OutputDirectory ?? roots.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(reportRoot) && Directory.Exists(reportRoot))
+            {
+                try
+                {
+                    await measurements.WriteAsync(reportRoot, roots.Length > 0 ? roots : [reportRoot], status);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Optional telemetry must not hide a conversion failure or cancellation.
+                }
+            }
+        }
+    }
+
+    private async Task<IReadOnlyList<ConversionResult>> ConvertMeasuredAsync(
+        ConversionRequest request,
+        BatchRunMeasurements measurements,
+        CancellationToken cancellationToken,
+        IProgress<BatchProgressUpdate>? progress)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         var variants = RequestNormalizer.Expand(request);
         cancellationToken.ThrowIfCancellationRequested();
@@ -8542,7 +8582,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 StageCount: 3,
                 IsItemCompleted: false,
                 ExtractionArchiveFormat: archiveFormat));
-            var extractedArchive = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(
+            string extractedArchive;
+            using (measurements.Measure("extraction"))
+            {
+            extractedArchive = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(
                 request.InputPath,
                 "bodyslide-batch-extract",
                 cancellationToken,
@@ -8605,6 +8648,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                         ExtractionArchiveFormat: archiveFormat));
                     lastArchiveProgressReportUtc = nowUtc;
                 });
+            }
             progress?.Report(new BatchProgressUpdate(
                 Completed: 0,
                 Total: 1,
@@ -8618,10 +8662,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                return await ConvertDirectoryMeshesAsync(request, variants, extractedArchive, progress, cancellationToken);
+                return await ConvertDirectoryMeshesAsync(request, variants, extractedArchive, progress, cancellationToken, measurements);
             }
             finally
             {
+                using var cleanup = measurements.Measure("cleanup");
                 if (Directory.Exists(extractedArchive))
                 {
                     Directory.Delete(extractedArchive, recursive: true);
@@ -8631,10 +8676,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         if (File.Exists(request.InputPath) || !Directory.Exists(request.InputPath))
         {
+            using var conversion = measurements.Measure("conversion");
             return await ConvertSingleInputAsync(request, variants, progress, cancellationToken);
         }
 
-        return await ConvertDirectoryMeshesAsync(request, variants, request.InputPath, progress, cancellationToken);
+        return await ConvertDirectoryMeshesAsync(request, variants, request.InputPath, progress, cancellationToken, measurements);
     }
 
     private async Task<IReadOnlyList<ConversionResult>> ConvertSingleInputAsync(
@@ -8679,15 +8725,20 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         IReadOnlyList<NormalizedConversionRequest> variants,
         string sourceDirectory,
         IProgress<BatchProgressUpdate>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        BatchRunMeasurements measurements)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var excludedDirectories = BuildExcludedScanDirectories(request);
         var includeCharacterBodyAssets = variants.Count > 1;
-        var meshFiles = SourceScanEnumerator.EnumerateFiles(sourceDirectory, [".nif"], excludedDirectories, cancellationToken)
+        List<string> meshFiles;
+        using (measurements.Measure("discovery"))
+        {
+        meshFiles = SourceScanEnumerator.EnumerateFiles(sourceDirectory, [".nif"], excludedDirectories, cancellationToken)
             .Where(path => IsConvertibleBatchMesh(path, includeCharacterBodyAssets))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        }
         cancellationToken.ThrowIfCancellationRequested();
 
         if (meshFiles.Count == 0)
@@ -8712,7 +8763,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var variant = variants[0];
             var rootOutput = request.OutputDirectory ??
                 Path.Combine(ExecutionEnvironment.GetDefaultOutputRoot(), request.TargetBody, "batch");
-            var resultsWithPaths = await ConvertMeshSetAsync(processableMeshFiles, variant.Request, sourceDirectory, rootOutput, processableMeshFiles.Count, progress, cancellationToken);
+            measurements.OutputRoots.Add(rootOutput);
+            IReadOnlyList<(string MeshFile, ConversionResult Result)> resultsWithPaths;
+            using (measurements.Measure("conversion"))
+                resultsWithPaths = await ConvertMeshSetAsync(processableMeshFiles, variant.Request, sourceDirectory, rootOutput, processableMeshFiles.Count, progress, cancellationToken);
+            using var packaging = measurements.Measure("packaging");
             await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, rootOutput, cancellationToken);
             if (request.OutputZip)
             {
@@ -8739,7 +8794,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             cancellationToken.ThrowIfCancellationRequested();
             var variant = entry.Variant;
             var variantRootOutput = BuildVariantRootOutput(request, variant, batchMode: true);
-            var resultsWithPaths = await ConvertMeshSetAsync(
+            measurements.OutputRoots.Add(variantRootOutput);
+            IReadOnlyList<(string MeshFile, ConversionResult Result)> resultsWithPaths;
+            using (measurements.Measure("conversion"))
+            {
+            resultsWithPaths = await ConvertMeshSetAsync(
                 entry.MeshFiles,
                 variant.Request,
                 sourceDirectory,
@@ -8750,7 +8809,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 () => Interlocked.Increment(ref completed),
                 () => Volatile.Read(ref completed),
                 variant.DisplayName);
-
+            }
+            using var packaging = measurements.Measure("packaging");
             await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, variantRootOutput, cancellationToken);
             if (request.OutputZip)
             {
@@ -22046,6 +22106,7 @@ internal sealed class LocalExportService(
         CancellationToken cancellationToken)
     {
         var exportStopwatch = Stopwatch.StartNew();
+        var diagnosticJsonOptions = new JsonSerializerOptions { WriteIndented = !request.CompactDiagnostics };
         var defaultOutput = Path.Combine(
             ExecutionEnvironment.GetDefaultOutputRootForInput(request.InputPath),
             request.TargetBody,
@@ -22111,7 +22172,7 @@ internal sealed class LocalExportService(
             Steps = steps
         };
 
-        var manifestJson = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
+        var manifestJson = JsonSerializer.Serialize(manifest, diagnosticJsonOptions);
         var manifestPath = await WriteConversionManifestAsync(outputDirectory, manifestJson, cancellationToken);
         outputFiles.Add(manifestPath);
 
@@ -22216,7 +22277,7 @@ internal sealed class LocalExportService(
             sourceSkeleton: skeletonMapping.SourceSkeleton);
         await File.WriteAllTextAsync(
             dependencyMapPath,
-            JsonSerializer.Serialize(dependencyMap, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(dependencyMap, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(dependencyMapPath);
 
@@ -22257,7 +22318,7 @@ internal sealed class LocalExportService(
                 SourceSkeletonInferenceSummary = BuildSourceSkeletonInferenceSummary(skeletonMapping),
                 PhysicsCompatibility = physicsCompatibility,
                 TargetBodySupport = targetBodySupport,
-            }, new JsonSerializerOptions { WriteIndented = true }),
+            }, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(skeletonCompatPath);
 
@@ -22275,7 +22336,7 @@ internal sealed class LocalExportService(
             };
             await File.WriteAllTextAsync(
                 raceCompatibilityPath,
-                JsonSerializer.Serialize(raceCompatibilityOutput, new JsonSerializerOptions { WriteIndented = true }),
+                JsonSerializer.Serialize(raceCompatibilityOutput, diagnosticJsonOptions),
                 cancellationToken);
             outputFiles.Add(raceCompatibilityPath);
         }
@@ -22318,11 +22379,11 @@ internal sealed class LocalExportService(
         PluginRewriteVerificationReport? pluginRewriteVerification = null;
 
         var morphPath = Path.Combine(outputDirectory, "morphs.json");
-        await File.WriteAllTextAsync(morphPath, JsonSerializer.Serialize(BuildMorphDiagnosticSummary(morphs), new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        await File.WriteAllTextAsync(morphPath, JsonSerializer.Serialize(BuildMorphDiagnosticSummary(morphs), diagnosticJsonOptions), cancellationToken);
         outputFiles.Add(morphPath);
 
         var physicsPath = Path.Combine(outputDirectory, "physics.json");
-        await File.WriteAllTextAsync(physicsPath, JsonSerializer.Serialize(physics, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        await File.WriteAllTextAsync(physicsPath, JsonSerializer.Serialize(physics, diagnosticJsonOptions), cancellationToken);
         outputFiles.Add(physicsPath);
 
         // Write CBPC physics config XML when present.
@@ -22581,7 +22642,7 @@ internal sealed class LocalExportService(
                 RewriteVerification = pluginRewriteVerification
             };
             await File.WriteAllTextAsync(pluginPatchPath,
-                JsonSerializer.Serialize(patchOutput, new JsonSerializerOptions { WriteIndented = true }),
+                JsonSerializer.Serialize(patchOutput, diagnosticJsonOptions),
                 cancellationToken);
             outputFiles.Add(pluginPatchPath);
         }
@@ -22715,7 +22776,7 @@ internal sealed class LocalExportService(
         {
             var textureSummaryPath = Path.Combine(outputDirectory, "texture-summary.json");
             await File.WriteAllTextAsync(textureSummaryPath,
-                JsonSerializer.Serialize(textureSummary, new JsonSerializerOptions { WriteIndented = true }),
+                JsonSerializer.Serialize(textureSummary, diagnosticJsonOptions),
                 cancellationToken);
             outputFiles.Add(textureSummaryPath);
         }
@@ -22723,7 +22784,7 @@ internal sealed class LocalExportService(
         // Write pose simulation report.
         var poseReportPath = Path.Combine(outputDirectory, "pose-simulation-report.json");
         await File.WriteAllTextAsync(poseReportPath,
-            JsonSerializer.Serialize(poseSimulation, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(poseSimulation, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(poseReportPath);
 
@@ -22738,7 +22799,7 @@ internal sealed class LocalExportService(
             request.WorldDropModeOverride,
             sourceNifSupport);
         await File.WriteAllTextAsync(worldPhysicsPath,
-            JsonSerializer.Serialize(worldPhysics, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(worldPhysics, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(worldPhysicsPath);
 
@@ -22920,7 +22981,7 @@ internal sealed class LocalExportService(
             FallbackInferredFromPathEvidenceCount: morphs.SourceAssetSupport?.FallbackInferredFromPathEvidenceCount ?? 0);
         await File.WriteAllTextAsync(
             qualityPath,
-            JsonSerializer.Serialize(provisionalQualityReport, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(provisionalQualityReport, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(qualityPath);
 
@@ -23004,7 +23065,7 @@ internal sealed class LocalExportService(
                 TargetBodySupport = targetBodySupport,
                 SupportTier = conversionReadiness.SupportTier,
                 ConversionReadiness = conversionReadiness,
-            }, new JsonSerializerOptions { WriteIndented = true }),
+            }, diagnosticJsonOptions),
             cancellationToken);
 
         var inGameValidationPath = Path.Combine(outputDirectory, "in-game-validation.json");
@@ -23025,7 +23086,7 @@ internal sealed class LocalExportService(
             conversionReadiness);
         await File.WriteAllTextAsync(
             inGameValidationPath,
-            JsonSerializer.Serialize(inGameValidation, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(inGameValidation, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(inGameValidationPath);
 
@@ -23047,7 +23108,7 @@ internal sealed class LocalExportService(
                     "in-game-validation.json",
                     "runtime-validation-plan.json"
                 }
-            }, new JsonSerializerOptions { WriteIndented = true }),
+            }, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(topologyCorrespondencePath);
 
@@ -23063,7 +23124,7 @@ internal sealed class LocalExportService(
         {
             await File.WriteAllTextAsync(
                 modStackCrossValidationPath,
-                JsonSerializer.Serialize(modStackCrossValidation, new JsonSerializerOptions { WriteIndented = true }),
+                JsonSerializer.Serialize(modStackCrossValidation, diagnosticJsonOptions),
                 cancellationToken);
             outputFiles.Add(modStackCrossValidationPath);
         }
@@ -23082,7 +23143,7 @@ internal sealed class LocalExportService(
         var runtimeValidationPlan = BuildRuntimeValidationExecutionPlan(inGameValidation, matrixProofContext);
         await File.WriteAllTextAsync(
             runtimeValidationPlanPath,
-            JsonSerializer.Serialize(runtimeValidationPlan, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(runtimeValidationPlan, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(runtimeValidationPlanPath);
 
@@ -23091,7 +23152,7 @@ internal sealed class LocalExportService(
             var runtimeHarnessPath = Path.Combine(outputDirectory, "runtime-validation-harness.json");
             await File.WriteAllTextAsync(
                 runtimeHarnessPath,
-                JsonSerializer.Serialize(runtimeValidationPlan.AutomationHarness, new JsonSerializerOptions { WriteIndented = true }),
+                JsonSerializer.Serialize(runtimeValidationPlan.AutomationHarness, diagnosticJsonOptions),
                 cancellationToken);
             outputFiles.Add(runtimeHarnessPath);
         }
@@ -23100,13 +23161,13 @@ internal sealed class LocalExportService(
         var liveGameExecution = BuildLiveGameExecutionPlan(runtimeValidationPlan, matrixProofContext);
         await File.WriteAllTextAsync(
             liveGameExecutionPath,
-            JsonSerializer.Serialize(liveGameExecution, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(liveGameExecution, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(liveGameExecutionPath);
         var runtimeObservationBundleTemplatePath = Path.Combine(outputDirectory, "runtime-observation-bundle.template.json");
         await File.WriteAllTextAsync(
             runtimeObservationBundleTemplatePath,
-            JsonSerializer.Serialize(liveGameExecution.ObservationBundleContract, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(liveGameExecution.ObservationBundleContract, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(runtimeObservationBundleTemplatePath);
 
@@ -23119,14 +23180,14 @@ internal sealed class LocalExportService(
             windowsUiAutomation);
         await File.WriteAllTextAsync(
             conversionMatrixProofPath,
-            JsonSerializer.Serialize(conversionMatrixProof, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(conversionMatrixProof, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(conversionMatrixProofPath);
         var remainingGapsChecklist = RemainingGapsChecklistSupport.BuildRemainingGapsChecklistReport(conversionMatrixProof);
         var remainingGapsChecklistJsonPath = Path.Combine(outputDirectory, "remaining-gaps-checklist.json");
         await File.WriteAllTextAsync(
             remainingGapsChecklistJsonPath,
-            JsonSerializer.Serialize(remainingGapsChecklist, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(remainingGapsChecklist, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(remainingGapsChecklistJsonPath);
         var remainingGapsChecklistPath = Path.Combine(outputDirectory, "remaining-gaps-checklist.md");
@@ -23147,7 +23208,7 @@ internal sealed class LocalExportService(
         var supportCoverageSignalsPath = Path.Combine(outputDirectory, "support-coverage-signals.json");
         await File.WriteAllTextAsync(
             supportCoverageSignalsPath,
-            JsonSerializer.Serialize(supportCoverageSignals, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(supportCoverageSignals, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(supportCoverageSignalsPath);
 
@@ -23205,13 +23266,13 @@ internal sealed class LocalExportService(
             FallbackInferredFromPathEvidenceCount: morphs.SourceAssetSupport?.FallbackInferredFromPathEvidenceCount ?? 0);
         await File.WriteAllTextAsync(
             qualityPath,
-            JsonSerializer.Serialize(qualityReport, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(qualityReport, diagnosticJsonOptions),
             cancellationToken);
 
         var windowsUiAutomationPath = Path.Combine(outputDirectory, "windows-ui-e2e-automation.json");
         await File.WriteAllTextAsync(
             windowsUiAutomationPath,
-            JsonSerializer.Serialize(windowsUiAutomation, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(windowsUiAutomation, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(windowsUiAutomationPath);
 
@@ -23224,7 +23285,7 @@ internal sealed class LocalExportService(
             conversionMatrixProof);
         await File.WriteAllTextAsync(
             proofHarnessBundleManifestPath,
-            JsonSerializer.Serialize(proofHarnessBundleManifest, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(proofHarnessBundleManifest, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(proofHarnessBundleManifestPath);
 
@@ -23233,9 +23294,19 @@ internal sealed class LocalExportService(
             ? previewWorkbenchPath
             : File.Exists(previewPath) ? previewPath : null;
         var desktopWorkflowSnapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, preferredPreviewPath);
+        if (request.CompactDiagnostics)
+        {
+            // Building the desktop snapshot refreshes imported proof state using its own verbose writer.
+            foreach (var proofPath in new[] { runtimeValidationPlanPath, liveGameExecutionPath, windowsUiAutomationPath, conversionMatrixProofPath })
+            {
+                using var proofDocument = JsonDocument.Parse(await File.ReadAllTextAsync(proofPath, cancellationToken));
+                await File.WriteAllTextAsync(proofPath,
+                    JsonSerializer.Serialize(proofDocument.RootElement, diagnosticJsonOptions), cancellationToken);
+            }
+        }
         await File.WriteAllTextAsync(
             desktopWorkflowAutomationPath,
-            JsonSerializer.Serialize(desktopWorkflowSnapshot, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(desktopWorkflowSnapshot, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(desktopWorkflowAutomationPath);
 
@@ -23243,7 +23314,7 @@ internal sealed class LocalExportService(
         var conversionPipelineProfile = BuildConversionPipelineProfileReport(steps, exportStopwatch.ElapsedMilliseconds);
         await File.WriteAllTextAsync(
             conversionPipelineProfilePath,
-            JsonSerializer.Serialize(conversionPipelineProfile, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(conversionPipelineProfile, diagnosticJsonOptions),
             cancellationToken);
         outputFiles.Add(conversionPipelineProfilePath);
 
@@ -43829,6 +43900,11 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> convertedMeshPaths,
         ConversionValidationSummary? validationSummary)
     {
+        if (request.CompactDiagnostics)
+        {
+            return BuildCompactDiagnosticHtml(request, armor, validationSummary, "Compact workbench");
+        }
+
         var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
         var payload = BuildPreviewWorkbenchPayload(convertedMeshPaths, mesh.DeformationCage, armor.MeshFiles);
         var payloadJson = JsonSerializer.Serialize(payload);
@@ -44571,6 +44647,42 @@ internal sealed class LocalExportService(
     private static bool IsPreviewWorkbenchCoordinate(float value, float maxMagnitude) =>
         float.IsFinite(value) && MathF.Abs(value) <= maxMagnitude;
 
+    private static string BuildCompactDiagnosticHtml(
+        ConversionRequest request,
+        ImportedArmor armor,
+        ConversionValidationSummary? validationSummary,
+        string title)
+    {
+        var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
+        return $$"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+            <title>{{HtmlEncode(title)}} — {{HtmlEncode(armorName)}}</title>
+            <style>body{font:16px system-ui;max-width:900px;margin:2rem auto;padding:1rem;background:#17202b;color:#eef}a{color:#9cf}img{max-width:100%}</style></head>
+            <body>
+            <h1>{{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}}</h1>
+            <p>Compact diagnostics: interactive mesh payloads and duplicated report tables are omitted.
+            This static regional preview is not geometry or runtime proof. Inspect the exported meshes in Outfit Studio or NifSkope and validate in-game before release.</p>
+            <img src="preview.svg" alt="Static regional conversion preview">
+            {{BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody)}}
+            <h2>Review and install</h2>
+            <ul>
+            <li><a href="conversion-quality.json">Full quality gate, issues and readiness</a></li>
+            <li><a href="README.txt">Install instructions and manual follow-up</a></li>
+            <li><a href="remaining-gaps-checklist.md">Remaining proof and validation gaps</a></li>
+            <li><a href="skeleton-compatibility.json">Skeleton compatibility</a></li>
+            <li><a href="pose-simulation-report.json">Pose risk</a></li>
+            <li><a href="world-physics.json">World physics</a></li>
+            <li><a href="in-game-validation.json">In-game validation</a></li>
+            <li><a href="runtime-validation-plan.json">Runtime validation plan</a></li>
+            <li><a href="dependency-map.json">Dependencies</a></li>
+            </ul>
+            <p>Machine-readable manifests, validation evidence and proof contracts are retained without indentation.</p>
+            </body></html>
+            """;
+    }
+
     private static string BuildPreviewHtml(
         ConversionRequest request,
         ImportedArmor armor,
@@ -44584,6 +44696,11 @@ internal sealed class LocalExportService(
         TextureSummary textureSummary,
         ConversionValidationSummary? validationSummary)
     {
+        if (request.CompactDiagnostics)
+        {
+            return BuildCompactDiagnosticHtml(request, armor, validationSummary, "Compact conversion review");
+        }
+
         var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
         var orderedRegions = mesh.RegionalMorphing
             .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
