@@ -8677,7 +8677,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         if (File.Exists(request.InputPath) || !Directory.Exists(request.InputPath))
         {
             using var conversion = measurements.Measure("conversion");
-            return await ConvertSingleInputAsync(request, variants, progress, cancellationToken);
+            return await ConvertSingleInputAsync(request, variants, progress, cancellationToken, measurements);
         }
 
         return await ConvertDirectoryMeshesAsync(request, variants, request.InputPath, progress, cancellationToken, measurements);
@@ -8687,7 +8687,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         ConversionRequest originalRequest,
         IReadOnlyList<NormalizedConversionRequest> variants,
         IProgress<BatchProgressUpdate>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        BatchRunMeasurements measurements)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (variants.Count <= 1)
@@ -8695,6 +8696,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var currentFile = Path.GetFileName(originalRequest.InputPath);
             var stageProgress = CreateStageProgressReporter(progress, currentFile, completed: 0, total: 1);
             var single = await orchestrator.ConvertAsync(originalRequest, cancellationToken, stageProgress);
+            measurements.OutputRoots.Add(single.OutputDirectory);
             progress?.Report(new BatchProgressUpdate(1, 1, Path.GetFileName(originalRequest.InputPath), single.Success));
             return [single];
         }
@@ -8709,6 +8711,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var variant = variants[index];
             var variantRootOutput = BuildVariantRootOutput(originalRequest, variant, batchMode: false);
             var variantOutput = Path.Combine(variantRootOutput, armorName);
+            measurements.OutputRoots.Add(variantRootOutput);
             var variantRequest = variant.Request with { OutputDirectory = variantOutput };
             var currentFile = $"{fileName} [{variant.DisplayName}]";
             var stageProgress = CreateStageProgressReporter(progress, currentFile, completed: index, total: variants.Count);
