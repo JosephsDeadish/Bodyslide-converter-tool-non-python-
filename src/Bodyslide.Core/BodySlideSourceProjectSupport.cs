@@ -875,15 +875,15 @@ internal static class BodySlideSourceProjectSupport
 
     private static string? BuildLinkedAssetStamp(BodySlideProjectProbe probe, CancellationToken cancellationToken)
     {
-        var stamps = new List<string?> { GetFileStamp(probe.OspPath), GetDirectoryStamp(probe.OspDirectory) };
+        var stamps = new List<string?> { GetFileStamp(probe.OspPath), GetDirectoryStamp(probe.OspDirectory, cancellationToken) };
         if (!string.IsNullOrWhiteSpace(probe.BodySlideRoot))
         {
-            stamps.Add(GetDirectoryStamp(Path.Combine(probe.BodySlideRoot, "ShapeData")));
+            stamps.Add(GetDirectoryStamp(Path.Combine(probe.BodySlideRoot, "ShapeData"), cancellationToken));
             foreach (var projectName in GetShapeDataFolderNames(probe))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var shapeDataFolder = Path.Combine(probe.BodySlideRoot, "ShapeData", projectName);
-                stamps.Add(GetDirectoryStamp(shapeDataFolder));
+                stamps.Add(GetDirectoryStamp(shapeDataFolder, cancellationToken));
                 if (Directory.Exists(shapeDataFolder))
                 {
                     foreach (var filePath in ReadDirectorySnapshot(shapeDataFolder, cancellationToken).Files.Order(StringComparer.OrdinalIgnoreCase))
@@ -901,7 +901,7 @@ internal static class BodySlideSourceProjectSupport
             foreach (var candidate in ResolveLinkedPathCandidates(probe, reference))
             {
                 stamps.Add(GetFileStamp(candidate));
-                stamps.Add(GetDirectoryStamp(Path.GetDirectoryName(candidate) ?? string.Empty));
+                stamps.Add(GetDirectoryStamp(Path.GetDirectoryName(candidate) ?? string.Empty, cancellationToken));
             }
         }
 
@@ -1165,8 +1165,9 @@ internal static class BodySlideSourceProjectSupport
         }
     }
 
-    private static string? GetDirectoryStamp(string path)
+    private static string? GetDirectoryStamp(string path, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         try
         {
             var info = new DirectoryInfo(path);
@@ -1175,13 +1176,8 @@ internal static class BodySlideSourceProjectSupport
                 return null;
             }
 
-            var entryCount = 0;
-            foreach (var _ in info.EnumerateFileSystemInfos())
-            {
-                entryCount++;
-            }
-
-            return $"{info.LastWriteTimeUtc.Ticks}:{entryCount}";
+            var snapshot = ReadDirectorySnapshot(path, cancellationToken);
+            return $"{snapshot.Stamp}:{snapshot.Files.Count + snapshot.Directories.Count}";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

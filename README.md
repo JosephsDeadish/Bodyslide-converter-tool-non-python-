@@ -193,11 +193,16 @@ large interactive preview/workbench pages with concise, non-interactive review
 summaries. Default exports remain unchanged. Report names and JSON schemas,
 conversion quality, actionable validation evidence, physics/dependency records
 and required BodySlide/install assets remain available. This reduces report
-clutter, not the actual mesh, texture or morph payload sizes.
+byte overhead, not the number of JSON files or the actual mesh, texture or morph
+payload sizes. Required evidence files are retained; compact mode is not a
+minimal-report/export mode.
 
 Issue #8 reporting/performance corrections:
 - Morph generation and BodySlide preparation share one immutable source-resolution
   result per conversion/target. There is no global payload cache or cross-pack reuse.
+- Linked-source cache stamp checks reuse bounded directory snapshots rather than
+  recounting the whole directory for every referenced asset. Cancellation is
+  checked on this path, including cached lookups.
 - Root reports remain the authoritative diagnostics; exports no longer copy them
   into a sibling `.reports` folder. Existing folders from older runs are not removed.
   Required OSP/OSD/BSD/TRI/ShapeData files are unaffected.

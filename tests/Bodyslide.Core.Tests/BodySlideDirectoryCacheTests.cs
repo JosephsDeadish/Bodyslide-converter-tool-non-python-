@@ -82,6 +82,33 @@ public sealed class BodySlideDirectoryCacheTests : IDisposable
             .Invoke(null, [path, cancellationToken])!;
 
     [Fact]
+    public void LinkedDirectoryStampHonorsCancellation()
+    {
+        Directory.CreateDirectory(root);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var method = typeof(BodySlideSourceProjectSupport)
+            .GetMethod("GetDirectoryStamp", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var error = Assert.Throws<TargetInvocationException>(() =>
+            method.Invoke(null, [root, cancellation.Token]));
+        Assert.IsType<OperationCanceledException>(error.InnerException);
+    }
+
+    [Fact]
+    public void LinkedDirectoryStampUsesBoundedCachedSnapshot()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "asset.osd"), "asset");
+        var snapshot = ReadSnapshot(root);
+        var method = typeof(BodySlideSourceProjectSupport)
+            .GetMethod("GetDirectoryStamp", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var first = method.Invoke(null, [root, CancellationToken.None]);
+        var second = method.Invoke(null, [root, CancellationToken.None]);
+        Assert.Equal(first, second);
+        Assert.Same(snapshot, ReadSnapshot(root));
+    }
+
+    [Fact]
     public async Task ResolveAsync_ExcessiveDirectoryFanout_FailsInsteadOfTruncatingDiscovery()
     {
         var bodySlideRoot = Path.Combine(root, "BodySlide");
