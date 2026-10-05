@@ -17,7 +17,7 @@ WriteStartupDiagnostics(
 
 if (TryLaunchDesktopGuiOnWindows(args, startupDiagnosticsPath, strictLauncherMode))
 {
-    WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: handoff complete");
+    WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: handoff completed and desktop exited");
     return;
 }
 
@@ -370,7 +370,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
             return false;
         }
 
-        var executableDirectory = Path.GetDirectoryName(currentExePath);
+        var executableDirectory = DesktopLaunchPathResolver.GetLauncherDirectory(currentExePath, AppContext.BaseDirectory);
         if (string.IsNullOrWhiteSpace(executableDirectory))
         {
             return false;
@@ -451,6 +451,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
             if (TryStartDesktopProcess(desktopExePath, Environment.CurrentDirectory, launchedFromModOrganizer, args, startupDiagnosticsPath, out var launched))
             {
+                using var desktopProcess = launched!;
                 if (TryContinueAfterEarlyExit(launched, "candidate", desktopExePath))
                 {
                     continue;
@@ -463,6 +464,9 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
                     currentExeFullPath,
                     Environment.CurrentDirectory,
                     args);
+                Environment.ExitCode = DesktopProcessLifetime.WaitForCompletion(desktopProcess);
+                WriteStartupDiagnostics(startupDiagnosticsPath,
+                    $"desktop-launch: desktop exited with code {Environment.ExitCode}: {desktopExePath}");
                 return true;
             }
         }
@@ -481,6 +485,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
             if (TryStartDesktopDllProcess(desktopDllPath, Environment.CurrentDirectory, launchedFromModOrganizer, args, startupDiagnosticsPath, out var launched))
             {
+                using var desktopProcess = launched!;
                 if (TryContinueAfterEarlyExit(launched, "dll candidate", desktopDllPath))
                 {
                     continue;
@@ -493,6 +498,9 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
                     currentExeFullPath,
                     Environment.CurrentDirectory,
                     args);
+                Environment.ExitCode = DesktopProcessLifetime.WaitForCompletion(desktopProcess);
+                WriteStartupDiagnostics(startupDiagnosticsPath,
+                    $"desktop-launch: desktop exited with code {Environment.ExitCode}: {desktopDllPath}");
                 return true;
             }
         }

@@ -10,9 +10,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        if (args.Any(static arg =>
-            StandaloneStartupRouting.TryReadOptionName(arg, out var option) &&
-            option.Equals("smoke-test", StringComparison.OrdinalIgnoreCase)))
+        if (StandaloneStartupRouting.HasOption(args, "smoke-test"))
         {
             return RunSmokeTest();
         }

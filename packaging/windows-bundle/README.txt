@@ -29,6 +29,14 @@ failure occurred before managed startup (or the log directory was unwritable).
 CLI-to-desktop startup also logs its candidate search and immediate process
 failures automatically. The nested cli/ executable can find the installed
 desktop in its parent folder using the desktop runtime configuration.
+Desktop startup options such as --load-result <folder> and --startup-diagnostics
+<log-file> also select the GUI through the CLI launcher without requiring an
+extra --mo2-launcher argument. Explicit CLI commands/conversion arguments still
+take precedence. A manager's --profile metadata alone is not a conversion command.
+Framework-dependent launches via dotnet SlideSmith.dll search beside that
+application, not beside the system dotnet host.
+The CLI launcher remains running until its selected desktop child exits and
+returns that child's exit code, rather than ending after the startup probe.
 This packaging removes the native self-extraction step, but live MO2/USVFS
 compatibility must still be checked on Windows.
 

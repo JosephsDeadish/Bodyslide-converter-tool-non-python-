@@ -398,7 +398,7 @@ public sealed class MainForm : Form
         Width = 1240;
         Height = 920;
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(980, 760);
+        MinimumSize = new Size(800, 640);
 
         _batchRunner = new BatchConversionRunner(StandaloneConversionModules.CreateDefault());
         _inspector = StandaloneConversionModules.CreateInspector();
@@ -449,7 +449,9 @@ public sealed class MainForm : Form
 
         var dropPanel = new Panel
         {
-            Height = 56,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            MinimumSize = new Size(0, 56),
             Dock = DockStyle.Top,
             BorderStyle = BorderStyle.FixedSingle,
             AllowDrop = true,
@@ -458,7 +460,9 @@ public sealed class MainForm : Form
         dropPanel.DragDrop += OnDragDrop;
         var dropLabel = new Label
         {
-            Dock = DockStyle.Fill,
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            Padding = new Padding(12),
             TextAlign = ContentAlignment.MiddleCenter,
             Text = "Drag and drop a .nif, plugin (.esp/.esm/.esl), archive (.zip/.7z/.rar/.tar/.tar.gz/.tgz), or armor folder here",
             AllowDrop = true,
@@ -546,7 +550,7 @@ public sealed class MainForm : Form
         _openInputButton = new Button
         {
             Name = "openInputButton",
-            Text = "Open",
+            Text = "Open input",
             AutoSize = true,
             Enabled = false,
             Margin = new Padding(6, 0, 0, 0),
@@ -582,35 +586,32 @@ public sealed class MainForm : Form
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var modeHeaderRow = new TableLayoutPanel
+        var modeHeaderRow = new FlowLayoutPanel
         {
             AutoSize = true,
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            WrapContents = true,
             Margin = new Padding(0, 0, 0, 6),
         };
-        modeHeaderRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        modeHeaderRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         var modeHeaderLabel = new Label
         {
             AutoSize = true,
             Margin = new Padding(0, 0, 0, 6),
             Text = "2. Choose the destination body directly, or use a preset."
         };
-        modeHeaderRow.Controls.Add(modeHeaderLabel, 0, 0);
+        modeHeaderRow.Controls.Add(modeHeaderLabel);
         var creatorSupportButton = new Button
         {
             Name = "creatorSupportButton",
             Text = "❤ Support creator",
             AutoSize = true,
-            MinimumSize = new Size(170, 34),
-            Font = new Font(Font, FontStyle.Bold),
+            MinimumSize = new Size(0, 34),
             Margin = new Padding(8, 0, 0, 0),
         };
         creatorSupportButton.Click += (_, _) => OpenCreatorSupportLink();
         creatorSupportButton.MouseEnter += (_, _) =>
             _optionToolTip.SetToolTip(creatorSupportButton, GetRandomCreatorSupportTooltip());
-        modeHeaderRow.Controls.Add(creatorSupportButton, 1, 0);
+        modeHeaderRow.Controls.Add(creatorSupportButton);
         modeRow.Controls.Add(modeHeaderRow, 0, 0);
         modeRow.SetColumnSpan(modeHeaderRow, 2);
         var modeSelectorPanel = new FlowLayoutPanel
@@ -719,7 +720,7 @@ public sealed class MainForm : Form
         {
             AutoSize = true,
             Margin = new Padding(0, 6, 0, 0),
-            Text = "FROM body = what the original armor was built for. TO body = what you want the converted output to fit.",
+            Text = "Source body = original armor body. Destination body = converted output body.",
         };
         modeRow.Controls.Add(_modeStatusLabel, 0, 4);
         modeRow.SetColumnSpan(_modeStatusLabel, 2);
@@ -730,7 +731,7 @@ public sealed class MainForm : Form
             Padding = new Padding(8, 6, 8, 6),
             BorderStyle = BorderStyle.FixedSingle,
             Font = new Font(Font, FontStyle.Bold),
-            Text = "FROM body: (auto)  →  TO body: (not selected)",
+            Text = "Source body: (auto)  →  Destination body: (not selected)",
         };
         modeRow.Controls.Add(_bodySelectionSummaryLabel, 0, 5);
         modeRow.SetColumnSpan(_bodySelectionSummaryLabel, 2);
@@ -795,7 +796,7 @@ public sealed class MainForm : Form
         leftOptions.Controls.Add(_presetBatchTextBox, 1, 2);
         _targetSelectionLabel = new Label
         {
-            Text = "TO body from preset",
+            Text = "Destination from preset",
             Anchor = AnchorStyles.Left,
             AutoSize = true,
         };
@@ -958,7 +959,7 @@ public sealed class MainForm : Form
         {
             _presetComboBox.SelectedIndex = 0;
         }
-        _destinationSetupGroupBox = CreateAutoSizeSection("Destination body (TO)", leftOptions);
+        _destinationSetupGroupBox = CreateAutoSizeSection("Destination body", leftOptions);
         _conversionOptionsPanel.Controls.Add(_destinationSetupGroupBox, 0, 0);
 
         var rightOptions = new TableLayoutPanel
@@ -993,7 +994,7 @@ public sealed class MainForm : Form
         _profileComboBox.SelectedIndex = 0;
         rightOptions.Controls.Add(_profileComboBox, 1, 1);
 
-        rightOptions.Controls.Add(new Label { Text = "Source body (FROM)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+        rightOptions.Controls.Add(new Label { Text = "Source body", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
         _sourceComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -1121,7 +1122,7 @@ public sealed class MainForm : Form
                 }
             }
         }
-        _sourceHintsGroupBox = CreateAutoSizeSection("Source body (FROM)", rightOptions);
+        _sourceHintsGroupBox = CreateAutoSizeSection("Source body", rightOptions);
         _conversionOptionsPanel.Controls.Add(_sourceHintsGroupBox, 1, 0);
         _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Conversion settings", _conversionOptionsPanel), 0, 3);
 
@@ -1211,12 +1212,13 @@ public sealed class MainForm : Form
         var customProfilesPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            ColumnCount = 2,
+            ColumnCount = 1,
             AutoSize = true,
             Margin = new Padding(0, 6, 0, 0),
         };
         customProfilesPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        customProfilesPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        customProfilesPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        customProfilesPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 92f));
         customProfilesPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         customProfilesPanel.Controls.Add(new Label
         {
@@ -1249,9 +1251,10 @@ public sealed class MainForm : Form
         var customProfileActions = new FlowLayoutPanel
         {
             AutoSize = true,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            Margin = new Padding(8, 0, 0, 0),
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            Margin = new Padding(0, 6, 0, 0),
         };
         _openCustomProfileButton = new Button { Text = "Open profile", AutoSize = true, Enabled = false };
         _openCustomProfileButton.Click += (_, _) => OpenSelectedCustomProfile();
@@ -1262,7 +1265,7 @@ public sealed class MainForm : Form
         customProfileActions.Controls.Add(_openCustomProfileButton);
         customProfileActions.Controls.Add(_removeCustomProfileButton);
         customProfileActions.Controls.Add(_clearCustomProfilesButton);
-        customProfilesPanel.Controls.Add(customProfileActions, 1, 1);
+        customProfilesPanel.Controls.Add(customProfileActions, 0, 2);
         _customProfilesGroupBox = CreateAutoSizeSection("Custom profiles", customProfilesPanel);
         _topLayoutPanel.Controls.Add(_customProfilesGroupBox, 0, 6);
 
@@ -1301,7 +1304,7 @@ public sealed class MainForm : Form
             Name = "convertButton",
             Text = "Start conversion",
             AutoSize = true,
-            MinimumSize = new Size(220, 34),
+            MinimumSize = new Size(180, 34),
             Margin = new Padding(0, 0, 12, 0),
             Font = new Font(Font, FontStyle.Bold),
         };
@@ -1366,7 +1369,7 @@ public sealed class MainForm : Form
         _openBatchReportButton = new Button
         {
             Name = "openBatchReportButton",
-            Text = "Batch report",
+            Text = "Open batch report",
             AutoSize = true,
             MinimumSize = new Size(110, 34),
             Enabled = false,
@@ -1562,9 +1565,9 @@ public sealed class MainForm : Form
         _inspectNowButton = new Button
         {
             Name = "inspectNowButton",
-            Text = "Inspect now",
+            Text = "Inspect input now",
             AutoSize = true,
-            MinimumSize = new Size(130, 36),
+            MinimumSize = new Size(130, 34),
         };
         _inspectNowButton.Click += async (_, _) => await InspectInputAsync(showDialogs: true, switchToInspectTab: true, automaticTrigger: false);
         inspectActions.Controls.Add(_inspectNowButton);
@@ -1740,6 +1743,7 @@ public sealed class MainForm : Form
         _mainSplitContainer.Panel2.Controls.Add(CreateSection("Convert, results and diagnostics", bottomPanel));
         ConfigureResponsiveControls(this);
         _mainSplitContainer.Panel1.SizeChanged += (_, _) => UpdateSetupWidth();
+        _conversionOptionsPanel.SizeChanged += (_, _) => UpdateResponsiveLayout();
         UpdateSetupWidth();
 
         RefreshModeState();
@@ -1757,7 +1761,7 @@ public sealed class MainForm : Form
         RefreshCustomProfilesList();
         UpdatePathActionStates();
         UpdateOutputHint();
-        ClearInspectionTab("Select an input file, folder, or archive above, then click Inspect now here to check it before converting.");
+        ClearInspectionTab("Select an input file, folder, or archive above, then click Inspect input now to check it before converting.");
         PopulateSummaryTab(Array.Empty<DesktopWorkflowSummaryRow>());
         PopulateReportsTab(Array.Empty<DesktopWorkflowReportMetric>());
         PopulateCacheTab([], null);
@@ -1769,9 +1773,16 @@ public sealed class MainForm : Form
         ApplyTheme(_currentTheme);
         UpdateResponsiveLayout();
         UpdateMainSplitLayout();
-        AppendLog("Ready. Choose armor/clothing input, confirm FROM body (what the armor was made for) and TO body (what you want to build), then click Convert.");
+        AppendLog("Ready. Choose armor/clothing input, confirm the source and destination bodies, then click Start conversion.");
         SizeChanged += (_, _) =>
         {
+            UpdateResponsiveLayout();
+            UpdateMainSplitLayout();
+            UpdateListViewColumnLayouts();
+        };
+        DpiChanged += (_, _) =>
+        {
+            UpdateSetupWidth();
             UpdateResponsiveLayout();
             UpdateMainSplitLayout();
             UpdateListViewColumnLayouts();
@@ -1872,9 +1883,13 @@ public sealed class MainForm : Form
         var guidanceWasPresent = _resultsTabControl.TabPages.Contains(_guidanceTabPage);
         var userAdjustedSplit = _userAdjustedMainSplit;
         var userPreferredSplit = _userPreferredMainSplitDistance;
+        var allowUserSplitOverride = _allowUserMainSplitOverride;
+        var targetSelection = _targetComboBox.SelectedIndex;
+        var targetText = _targetComboBox.Text;
         var cacheInspectionInitialized = _cacheInspectionInitialized;
         try
         {
+            _allowUserMainSplitOverride = false;
             _userAdjustedMainSplit = false;
             _cacheInspectionInitialized = true;
             _showAdvancedOptionsCheckBox.Checked = false;
@@ -1904,7 +1919,9 @@ public sealed class MainForm : Form
             foreach (var size in new[]
                      {
                          MinimumSize,
+                         new Size(ScaleLayoutValue(1024), ScaleLayoutValue(768)),
                          new Size(ScaleLayoutValue(1240), ScaleLayoutValue(920)),
+                         new Size(ScaleLayoutValue(1560), ScaleLayoutValue(960)),
                          originalSize,
                      }.Distinct())
             {
@@ -1920,12 +1937,36 @@ public sealed class MainForm : Form
                         UpdateResponsiveLayout();
                         UpdateMainSplitLayout();
                         PerformLayout();
+                        var expectedColumns = _conversionOptionsPanel.DisplayRectangle.Width < ScaleLayoutValue(1100) ? 1 : 2;
+                        if (_conversionOptionsPanel.ColumnCount != expectedColumns)
+                        {
+                            throw new InvalidOperationException("Conversion settings must use the available width when choosing their column layout.");
+                        }
                         foreach (var pathBox in new[] { _inputTextBox, _outputTextBox })
                         {
                             if (pathBox.Width < ScaleLayoutValue(200) || pathBox.Right > pathBox.Parent!.ClientSize.Width)
                             {
                                 throw new InvalidOperationException("Input/output path fields are clipped or too narrow.");
                             }
+                        }
+                        foreach (var control in new Control[]
+                                 {
+                                     _presetComboBox, _targetComboBox, _presetTargetTextBox,
+                                     _sourceComboBox, _profileComboBox, _physicsComboBox,
+                                     _worldModeComboBox, _skeletonNifTextBox, _cachePathTextBox,
+                                     _customProfilesListView, _loadCustomProfileButton, _saveProfileButton,
+                                     _bodySelectionSummaryLabel,
+                                     Controls.Find("creatorSupportButton", true).Single(),
+                                 })
+                        {
+                            if (control.Visible)
+                            {
+                                VerifySetupHorizontalBounds(control);
+                            }
+                        }
+                        if (_inspectInputButton.Text != _inspectNowButton.Text)
+                        {
+                            throw new InvalidOperationException("Input inspection actions must use the same label.");
                         }
                         foreach (var scrollToBottom in new[] { false, true })
                         {
@@ -1995,11 +2036,27 @@ public sealed class MainForm : Form
             _usePresetRadio.Checked = usingPreset;
             _useCustomTargetRadio.Checked = !usingPreset;
             _showAdvancedOptionsCheckBox.Checked = showAdvanced;
+            var suppressTargetSelectionChanged = _suppressTargetSelectionChanged;
+            try
+            {
+                _suppressTargetSelectionChanged = true;
+                _targetComboBox.SelectedIndex = targetSelection;
+                _targetComboBox.Text = targetText;
+            }
+            finally
+            {
+                _suppressTargetSelectionChanged = suppressTargetSelectionChanged;
+            }
+            UpdateTargetDetails();
+            UpdatePhysicsDetails();
+            UpdateBodySelectionSummary();
+            UpdateOutputHint();
             _userAdjustedMainSplit = userAdjustedSplit;
             _userPreferredMainSplitDistance = userPreferredSplit;
             _cacheInspectionInitialized = cacheInspectionInitialized;
             UpdateMainSplitLayout();
             _mainSplitContainer.Panel1.AutoScrollPosition = new Point(-setupScrollPosition.X, -setupScrollPosition.Y);
+            _allowUserMainSplitOverride = allowUserSplitOverride;
         }
     }
 
@@ -2014,6 +2071,29 @@ public sealed class MainForm : Form
                 !_resultsTabControl.ClientRectangle.Contains(header))
             {
                 throw new InvalidOperationException($"Result tab '{tab.Text}' is not accessible.");
+            }
+            foreach (var actions in tab.Controls.OfType<FlowLayoutPanel>())
+            {
+                foreach (var button in actions.Controls.OfType<Button>())
+                {
+                    VerifyVisibleClientBounds(button, _mainSplitContainer.Panel2);
+                }
+            }
+        }
+    }
+
+    private void VerifySetupHorizontalBounds(Control control)
+    {
+        for (var parent = control.Parent; parent is not null; parent = parent.Parent)
+        {
+            var bounds = parent.RectangleToClient(control.RectangleToScreen(control.ClientRectangle));
+            if (bounds.Left < 0 || bounds.Right > parent.ClientSize.Width)
+            {
+                throw new InvalidOperationException($"{control.Name} is horizontally clipped by {parent.GetType().Name}.");
+            }
+            if (parent == _topLayoutPanel)
+            {
+                break;
             }
         }
     }
@@ -2142,8 +2222,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        var useSingleColumn = ClientSize.Width < ScaleLayoutValue(1500) ||
-                              _conversionOptionsPanel.DisplayRectangle.Width < ScaleLayoutValue(1100);
+        var useSingleColumn = _conversionOptionsPanel.DisplayRectangle.Width < ScaleLayoutValue(1100);
         if (_usesSingleColumnConversionLayout == useSingleColumn)
         {
             return;
@@ -3211,7 +3290,7 @@ public sealed class MainForm : Form
         {
             MessageBox.Show(
                 this,
-                "Could not auto-map a TO body from the current FROM body hint yet. Pick a target manually or inspect input first for better source detection.",
+                "Could not choose a destination from the current source body hint yet. Choose a destination body or inspect input first for better source detection.",
                 "Auto-map destination body",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -3233,7 +3312,7 @@ public sealed class MainForm : Form
         UpdateTargetDetails();
         UpdatePhysicsDetails();
         UpdateOutputHint();
-        AppendLog($"Auto-mapped TO body '{mappedTarget}' from FROM body hint '{sourceHint ?? "(auto)"}'.");
+        AppendLog($"Auto-mapped destination body '{mappedTarget}' from source body hint '{sourceHint ?? "(auto)"}'.");
     }
 
     private static string? ResolveAutoMappedTargetFromSource(string? sourceHint)
@@ -3314,11 +3393,11 @@ public sealed class MainForm : Form
         _targetBatchTextBox.Enabled = !usingPreset;
         _targetSelectionLabel.Text = usingPreset
             ? "Destination from preset"
-            : "Destination body (TO)";
+            : "Destination body";
         _targetBatchLabel.Text = "Additional bodies";
         _modeStatusLabel.Text = usingPreset
-            ? "Preset mode is active. The selected preset chooses the TO body below for you. Switch to Manual mode above if you want to change the TO body yourself."
-            : "Manual mode is active. Use the TO body box below to choose the converted output body. FROM body stays in the Source hints section.";
+            ? "The preset chooses the destination body. Select Choose destination body to change it yourself."
+            : "Choose the destination body below. The source body identifies the original armor body.";
         if (usingPreset && TryGetSelectedPreset(out var preset))
         {
             _presetTargetTextBox.Text = preset.TargetBody;
@@ -3375,7 +3454,7 @@ public sealed class MainForm : Form
 
         _modeStatusLabel.Text = showAdvanced
             ? "Advanced settings are visible. Hiding them does not reset your choices."
-            : "Source (FROM) = original armor body. Destination (TO) = converted output body. Advanced settings are hidden, not reset.";
+            : "Source body = original armor body. Destination body = converted output body. Advanced settings are hidden, not reset.";
         UpdateMainSplitLayout();
     }
 
@@ -3472,7 +3551,7 @@ public sealed class MainForm : Form
 
         if (!usingPreset && selectedTargets.Count == 0)
         {
-            MessageBox.Show(this, "Please select at least one destination body (TO body).", "Missing destination body", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "Please select at least one destination body.", "Missing destination body", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -4165,7 +4244,7 @@ public sealed class MainForm : Form
                 detection.Confidence < AutoDetectedSourceConfidenceFloor &&
                 !string.IsNullOrWhiteSpace(detection.Body))
             {
-                AppendLog($"Auto-detect confidence too low ({detection.Confidence:P0}) to lock source body hint. Review Inspect details and set FROM body manually if needed.");
+                AppendLog($"Auto-detect confidence too low ({detection.Confidence:P0}) to lock source body hint. Review Inspect details and set the source body manually if needed.");
             }
             return;
         }
@@ -5052,7 +5131,7 @@ public sealed class MainForm : Form
         if (summaryRows.Count == 0)
         {
             _summaryListView.Items.Add(new ListViewItem(["Summary", "No conversion output loaded."]));
-            _summaryListView.Items.Add(new ListViewItem(["What to do next", "Choose an input, use Inspect now in Inspect, select a TO body or preset, then start conversion."]));
+            _summaryListView.Items.Add(new ListViewItem(["What to do next", "Choose an input, click Inspect input now, select a destination body or preset, then click Start conversion."]));
         }
         foreach (var row in DesktopUserPresentation.BuildOverview(summaryRows))
         {
@@ -5336,10 +5415,10 @@ public sealed class MainForm : Form
                 _inspectListView.Items.Add(new ListViewItem([property, value]));
 
             Add("Input", inspection.InputPath);
-            Add("FROM body (source selection)", IsSourceAutoSelection() ? "(auto-detect)" : _sourceComboBox.Text.Trim());
+            Add("Source body", IsSourceAutoSelection() ? "(auto-detect)" : _sourceComboBox.Text.Trim());
             if (!string.IsNullOrWhiteSpace(inspection.RequestedTargetBody))
             {
-                Add("TO body (destination selection)", inspection.RequestedTargetBody);
+                Add("Destination body", inspection.RequestedTargetBody);
             }
 
             Add("Detected body", $"{inspection.Detection.Body} ({inspection.Detection.Confidence:P1})");
@@ -6001,7 +6080,7 @@ public sealed class MainForm : Form
             resolvedToBody = "(not selected)";
         }
 
-        _bodySelectionSummaryLabel.Text = $"FROM body: {resolvedFromBody}  →  TO body: {resolvedToBody}";
+        _bodySelectionSummaryLabel.Text = $"Source body: {resolvedFromBody}  →  Destination body: {resolvedToBody}";
     }
 
     private void ClearAutoDetectedSourceHint(bool refreshDetails)
@@ -6093,7 +6172,7 @@ public sealed class MainForm : Form
         _optionToolTip.SetToolTip(_profileComboBox,
             "Optional shape override for the converted output. Leave Auto unless you specifically want a different slider/deformation profile.");
         _optionToolTip.SetToolTip(_sourceComboBox,
-            "What body the original armor was built for. Leave Auto unless detection gets it wrong. This FROM body hint does not choose the output body.");
+            "What body the original armor was built for. Leave Auto unless detection gets it wrong. This source body hint does not choose the destination body.");
         _optionToolTip.SetToolTip(_physicsComboBox,
             "Controls the converted output physics, not the source armor.\n" +
             "Auto = use the preset/body default.\n" +

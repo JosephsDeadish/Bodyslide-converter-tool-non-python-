@@ -3,6 +3,31 @@ namespace Bodyslide.Core.Tests;
 public sealed class DesktopLaunchPathResolverTests
 {
     [Theory]
+    [InlineData("dotnet.exe")]
+    [InlineData("dotnet")]
+    public void FrameworkDependentLauncherDiscoversDesktopBesideApplicationNotDotnetHost(string hostName)
+    {
+        var root = Path.GetFullPath(Path.Combine("launch-regression", "manager bundle"));
+        var cliDirectory = Path.Combine(root, "cli");
+        var hostPath = Path.GetFullPath(Path.Combine("launch-regression", "sdk", hostName));
+
+        var launcherDirectory = DesktopLaunchPathResolver.GetLauncherDirectory(hostPath, cliDirectory + Path.DirectorySeparatorChar);
+        var directories = DesktopLaunchPathResolver.GetLikelyDesktopCandidateDirectories(launcherDirectory);
+
+        Assert.Equal(cliDirectory, launcherDirectory);
+        Assert.Contains(Path.Combine(root, "desktop"), directories);
+        Assert.DoesNotContain(Path.GetDirectoryName(hostPath)!, directories);
+    }
+
+    [Fact]
+    public void AppHostLauncherKeepsPhysicalExecutableDirectory()
+    {
+        var executableDirectory = Path.GetFullPath(Path.Combine("launch-regression", "installed"));
+        Assert.Equal(executableDirectory, DesktopLaunchPathResolver.GetLauncherDirectory(
+            Path.Combine(executableDirectory, "SlideSmith-CLI.exe"), Path.GetFullPath("assembly-extraction")));
+    }
+
+    [Theory]
     [InlineData("includedFrameworks", false)]
     [InlineData("includedFrameworks", true)]
     [InlineData("frameworks", false)]
@@ -151,6 +176,17 @@ public sealed class DesktopLaunchPathResolverTests
         Assert.Contains(Path.GetDirectoryName(executableDirectory)!, directories);
         Assert.Contains(Path.Combine(executableDirectory, "desktop"), directories);
         Assert.Contains(Path.Combine(Path.GetDirectoryName(executableDirectory)!, "desktop"), directories);
+    }
+
+    [Fact]
+    public void TrailingDirectorySeparatorDoesNotHideSiblingDesktopFolder()
+    {
+        var root = Path.GetFullPath(Path.Combine("launch-regression", "bundle"));
+        var directories = DesktopLaunchPathResolver.GetLikelyDesktopCandidateDirectories(
+            Path.Combine(root, "cli") + Path.DirectorySeparatorChar);
+
+        Assert.Contains(root, directories);
+        Assert.Contains(Path.Combine(root, "desktop"), directories);
     }
 
     [Fact]

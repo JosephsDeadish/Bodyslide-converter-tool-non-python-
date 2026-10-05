@@ -7,6 +7,14 @@ internal static class DesktopLaunchPathResolver
     private const string DesktopTargetFramework = "net10.0-windows";
     private static readonly string[] DesktopConfigurations = ["Debug", "Release"];
 
+    internal static string GetLauncherDirectory(string processPath, string applicationBaseDirectory)
+    {
+        var hostName = Path.GetFileNameWithoutExtension(processPath);
+        return hostName.Equals("dotnet", StringComparison.OrdinalIgnoreCase)
+            ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(applicationBaseDirectory))
+            : Path.GetDirectoryName(Path.GetFullPath(processPath))!;
+    }
+
     internal static IReadOnlyList<string> GetDesktopCandidates(
         IReadOnlyList<string> directories, bool useDll)
     {
@@ -105,7 +113,7 @@ internal static class DesktopLaunchPathResolver
             return [];
         }
 
-        var normalizedExecutableDirectory = Path.GetFullPath(executableDirectory);
+        var normalizedExecutableDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(executableDirectory));
         var parentDirectory = Path.GetDirectoryName(normalizedExecutableDirectory);
 
         var candidateDirectories = new List<string>

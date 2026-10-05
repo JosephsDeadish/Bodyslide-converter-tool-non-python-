@@ -3,6 +3,87 @@ namespace Bodyslide.Core.Tests;
 public sealed class StandaloneStartupRoutingTests
 {
     [Theory]
+    [InlineData("MO2_INSTANCE")]
+    [InlineData("USVFS_PARAMETERS")]
+    [InlineData("VORTEX_PROFILE_ID")]
+    public void ManagerProfileMetadataDoesNotSelectCliWithoutConversionIntent(string environmentVariable)
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--profile", "Default", "--game", "SkyrimSE"],
+            executablePath: null,
+            workingDirectory: null,
+            hasEnvironmentVariable: name => name == environmentVariable);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ExplicitCliLaunchDetected);
+
+        var conversion = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--profile", "Default", "--input", "armor.nif", "--target", "CBBE"],
+            executablePath: null,
+            workingDirectory: null,
+            hasEnvironmentVariable: name => name == environmentVariable);
+        Assert.False(conversion.ShouldAttemptDesktopHandoff);
+        Assert.True(conversion.ExplicitCliLaunchDetected);
+    }
+
+    [Theory]
+    [InlineData("--load-result", "results")]
+    [InlineData("--result=results", null)]
+    [InlineData("--startup-diagnostics", "startup.log")]
+    [InlineData("--strict-launcher-mode=true", null)]
+    [InlineData("--smoke-test", null)]
+    public void DesktopStartupOptionsWorkWithoutManagerEnvironment(string option, string? value)
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            value is null ? [option] : [option, value],
+            executablePath: null,
+            workingDirectory: null,
+            hasEnvironmentVariable: _ => false);
+
+        Assert.True(decision.ShouldAttemptDesktopHandoff);
+        Assert.False(decision.ExplicitCliLaunchDetected);
+        Assert.Equal("desktop startup option detected", decision.RoutingReason);
+
+        var cliDecision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            value is null ? [option, "--self-check"] : [option, value, "--self-check"],
+            executablePath: null,
+            workingDirectory: null,
+            hasEnvironmentVariable: _ => false);
+        Assert.False(cliDecision.ShouldAttemptDesktopHandoff);
+        Assert.True(cliDecision.ExplicitCliLaunchDetected);
+    }
+
+    [Fact]
+    public void StandaloneProfileWithoutManagerContextRemainsCli()
+    {
+        var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
+            ["--profile", "vertex-projection"], null, null, _ => false);
+        Assert.True(decision.ExplicitCliLaunchDetected);
+        Assert.False(decision.ShouldAttemptDesktopHandoff);
+    }
+
+    [Theory]
+    [InlineData("--smoke-test")]
+    [InlineData("--SMOKE-TEST=true")]
+    [InlineData("-smoke-test")]
+    [InlineData("/smoke-test")]
+    public void SmokeTestOptionStillRecognizesSupportedOptionSpellings(string option)
+    {
+        Assert.True(StandaloneStartupRouting.HasOption([option], "smoke-test"));
+    }
+
+    [Theory]
+    [InlineData("--startup-diagnostics", "/smoke-test")]
+    [InlineData("--load-result", "/smoke-test")]
+    [InlineData("--mo2-path", "/smoke-test")]
+    [InlineData("--profile", "/smoke-test")]
+    public void SmokeTestOptionIsNotDetectedInsideSeparatePathValues(string option, string value)
+    {
+        Assert.False(StandaloneStartupRouting.HasOption([option, value], "smoke-test"));
+        Assert.True(StandaloneStartupRouting.HasOption([option, value, "--smoke-test"], "smoke-test"));
+    }
+
+    [Theory]
     [InlineData("--input", @"D:\MO2\mods\Armor\armor.nif")]
     [InlineData("--input=", @"D:\MO2\mods\Armor\armor.nif")]
     [InlineData("--input:", "/home/test/vortex/mods/armor.nif")]

@@ -48,13 +48,17 @@ public static class StandaloneStartupRouting
         hasEnvironmentVariable ??= static name =>
             !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
 
-        var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
         var launcherSignal = IsExplicitLauncherSignal(args, hasEnvironmentVariable);
         var modManagerLaunch = IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
+        var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args, modManagerLaunch);
         // Strict launcher mode is currently diagnostics-only; it preserves the same
         // handoff decision but records a stricter routing reason for launcher logs.
-        var shouldAttemptDesktopHandoff = !explicitCliLaunch && (args.Count == 0 || launcherSignal || modManagerLaunch);
-        var routingReason = BuildRoutingReason(strictLauncherMode, shouldAttemptDesktopHandoff, launcherSignal, modManagerLaunch, explicitCliLaunch);
+        var desktopStartupOption = EnumerateStandaloneOptions(args).Any(static option =>
+            option.ToLowerInvariant() is "load-result" or "result" or "startup-diagnostics" or "strict-launcher-mode" or "smoke-test");
+        var shouldAttemptDesktopHandoff = !explicitCliLaunch &&
+            (args.Count == 0 || launcherSignal || modManagerLaunch || desktopStartupOption);
+        var routingReason = BuildRoutingReason(strictLauncherMode, shouldAttemptDesktopHandoff, launcherSignal,
+            modManagerLaunch, explicitCliLaunch, desktopStartupOption);
 
         return new StandaloneDesktopLaunchDecision(
             shouldAttemptDesktopHandoff,
@@ -164,8 +168,11 @@ public static class StandaloneStartupRouting
         !string.IsNullOrWhiteSpace(arg) &&
         arg.Trim().StartsWith("moshortcut://", StringComparison.OrdinalIgnoreCase);
 
-    public static bool HasExplicitStandaloneCliSwitch(IReadOnlyList<string> args) =>
-        HasStandaloneCommandSwitch(args) || HasStandaloneConversionSwitches(args) || HasStandalonePositionalConversionUsage(args);
+    public static bool HasExplicitStandaloneCliSwitch(IReadOnlyList<string> args, bool modManagerLaunch = false) =>
+        HasStandaloneCommandSwitch(args) || HasStandaloneConversionSwitches(args, modManagerLaunch) || HasStandalonePositionalConversionUsage(args);
+
+    public static bool HasOption(IReadOnlyList<string> args, string optionName) =>
+        EnumerateStandaloneOptions(args).Any(option => option.Equals(optionName, StringComparison.OrdinalIgnoreCase));
 
     public static bool IsExplicitLauncherSignal(IReadOnlyList<string> args, Func<string, bool> hasEnvironmentVariable) =>
         HasLauncherSignal(args, hasEnvironmentVariable);
@@ -295,7 +302,8 @@ public static class StandaloneStartupRouting
         bool shouldAttemptDesktopHandoff,
         bool launcherSignal,
         bool modManagerLaunch,
-        bool explicitCliLaunch)
+        bool explicitCliLaunch,
+        bool desktopStartupOption)
     {
         if (explicitCliLaunch)
         {
@@ -321,6 +329,11 @@ public static class StandaloneStartupRouting
                 return "strict-launcher-mode: mod-manager launch detected";
             }
 
+            if (desktopStartupOption)
+            {
+                return "strict-launcher-mode: desktop startup option detected";
+            }
+
             return "strict-launcher-mode: no args";
         }
 
@@ -337,6 +350,11 @@ public static class StandaloneStartupRouting
         if (modManagerLaunch)
         {
             return "mod-manager launch detected";
+        }
+
+        if (desktopStartupOption)
+        {
+            return "desktop startup option detected";
         }
 
         return "default desktop handoff";
@@ -358,9 +376,9 @@ public static class StandaloneStartupRouting
                    option.Equals("body-reference", StringComparison.OrdinalIgnoreCase);
         });
 
-    private static bool HasStandaloneConversionSwitches(IReadOnlyList<string> args)
+    private static bool HasStandaloneConversionSwitches(IReadOnlyList<string> args, bool modManagerLaunch)
     {
-        var hasModManagerLauncherArgument = args.Any(IsModManagerLauncherArgument);
+        var hasModManagerLauncherArgument = modManagerLaunch || args.Any(IsModManagerLauncherArgument);
         var hasTarget = false;
         var hasConversionModifier = false;
 

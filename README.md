@@ -105,6 +105,15 @@ too, including candidate discovery and immediate process failures.
 `--startup-diagnostics <path>` selects another location. Windows smoke
 checks show the window and run the message loop before closing.
 
+For a launch that appears to do nothing, compare the timestamp of a **fresh**
+startup log with the attempted launch. No new entry does not establish a managed
+application bug: collect MO2's `mo_interface`/USVFS log and the Windows application
+error (if present) to distinguish a missing runtime, native host/injection failure,
+or an incorrect executable path. A `window shown` entry instead points to a
+different failure than a log ending before window construction. Test the same
+complete desktop folder directly and through MO2; do not disable Windows security
+or bypass MO2 injection as a substitute for verifying virtual asset visibility.
+
 For duplicate-key or unexpectedly slow/large conversions, retain the complete
 exception and `conversion-timings.json`, and record the source/output byte sizes,
 mesh count, target body, and whether the input is an installed mod or an uninstalled
@@ -132,6 +141,9 @@ Start conversion, Cancel, Load result and output options stay outside the scroll
 setup, above progress and results. Report, file, preview, cache and diagnostic
 actions are grouped in their corresponding tabs instead of one crowded toolbar;
 custom-profile actions stay beside the profile list. Result tab headers wrap.
+Source/destination terminology is shared by selectors, summaries and inspection
+guidance. Setup sections and action rows wrap at narrower widths; the minimum
+window is 800×640, with scrolling for setup rather than hiding conversion actions.
 The Windows layout smoke check verifies control bounds at minimum/default sizes
 in both basic/advanced and preset/manual modes, including when setup is scrolled.
 Extraction also rejects duplicate normalized file destinations instead of silently
