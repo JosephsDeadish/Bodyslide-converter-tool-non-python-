@@ -2009,6 +2009,10 @@ public sealed class MainForm : Form
                          (_copyMo2SetupButton, _catalogTabPage),
                      })
             {
+                _resultsTabControl.SelectedTab = tab;
+                _resultsTabControl.PerformLayout();
+                tab.PerformLayout();
+                button.Parent?.PerformLayout();
                 if (button.Parent?.Parent != tab)
                 {
                     throw new InvalidOperationException($"{button.Name} must be grouped in its contextual result tab.");
