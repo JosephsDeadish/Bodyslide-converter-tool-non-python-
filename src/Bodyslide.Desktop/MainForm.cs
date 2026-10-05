@@ -205,7 +205,7 @@ public sealed class MainForm : Form
 
     private const int MainSplitPreferredDistance = 560;
     private const int MainSplitPanel1Minimum = 360;
-    private const int MainSplitPanel2Minimum = 340;
+    private const int MainSplitPanel2Minimum = 460;
     private const int MaxLogCharacters = 120000;
     private const int TrimmedLogCharacters = 90000;
     private const int MaxLoggedStepsPerResult = 80;
