@@ -2066,6 +2066,7 @@ public sealed class MainForm : Form
         {
             _resultsTabControl.SelectedTab = tab;
             _resultsTabControl.PerformLayout();
+            tab.PerformLayout();
             var header = _resultsTabControl.GetTabRect(_resultsTabControl.TabPages.IndexOf(tab));
             if (!tab.Visible || header.Width <= 0 || header.Height <= 0 ||
                 !_resultsTabControl.ClientRectangle.Contains(header))
@@ -2074,6 +2075,7 @@ public sealed class MainForm : Form
             }
             foreach (var actions in tab.Controls.OfType<FlowLayoutPanel>())
             {
+                actions.PerformLayout();
                 foreach (var button in actions.Controls.OfType<Button>())
                 {
                     VerifyVisibleClientBounds(button, _mainSplitContainer.Panel2);
@@ -2109,7 +2111,7 @@ public sealed class MainForm : Form
             var bounds = parent.RectangleToClient(control.RectangleToScreen(control.ClientRectangle));
             if (!parent.ClientRectangle.Contains(bounds))
             {
-                throw new InvalidOperationException($"{control.Name} is clipped by {parent.GetType().Name}.");
+                throw new InvalidOperationException($"{control.Name} is clipped by {parent.GetType().Name}: bounds={bounds}, client={parent.ClientRectangle}.");
             }
             if (parent == container)
             {
