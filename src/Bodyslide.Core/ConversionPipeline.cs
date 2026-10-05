@@ -21881,6 +21881,7 @@ internal static class ConversionReadmeGenerator
 /// </summary>
 internal static class DdsTextureDerivation
 {
+    internal const int MaximumDerivationPixels = 4096 * 4096;
     private const int DdsHeaderSize   = 128; // 4 magic + 124 DDS_HEADER
     private const int DwHeightOffset  = 12;  // inside DDS_HEADER, relative to magic start
     private const int DwWidthOffset   = 16;
@@ -21915,21 +21916,20 @@ internal static class DdsTextureDerivation
     /// Works on BGRA8 uncompressed DDS only; compressed sources return <c>false</c>.
     /// The operation is: roughness = 1 − luma(specular) where luma = 0.114·B + 0.587·G + 0.299·R.
     /// </summary>
-    public static bool TryDeriveRoughnessFromSpecular(byte[] specularDds, out byte[] roughnessDds)
+    public static bool TryDeriveRoughnessFromSpecular(byte[] specularDds, out byte[] roughnessDds, CancellationToken cancellationToken = default)
     {
         roughnessDds = [];
-        if (!TryReadDimensions(specularDds, out var w, out var h)) return false;
-        if (!IsUncompressed(specularDds)) return false;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CanDerive(specularDds, out var w, out var h)) return false;
 
         int pixelCount = w * h;
         if (specularDds.Length < DdsHeaderSize + pixelCount * 4) return false;
 
-        // Clone header, then derive pixel data.
-        roughnessDds = new byte[DdsHeaderSize + pixelCount * 4];
-        Buffer.BlockCopy(specularDds, 0, roughnessDds, 0, DdsHeaderSize);
+        roughnessDds = CreateDerivedDds(w, h);
 
         for (var i = 0; i < pixelCount; i++)
         {
+            if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
             var src = DdsHeaderSize + i * 4;
             byte b = specularDds[src];
             byte g = specularDds[src + 1];
@@ -21955,19 +21955,22 @@ internal static class DdsTextureDerivation
     /// height[x,y] ≈ cumulative sum of X-slope across scanlines, normalised to [0,255].
     /// Works on BGRA8 uncompressed DDS only; compressed sources return <c>false</c>.
     /// </summary>
-    public static bool TryDeriveHeightFromNormal(byte[] normalDds, out byte[] heightDds)
+    public static bool TryDeriveHeightFromNormal(byte[] normalDds, out byte[] heightDds, CancellationToken cancellationToken = default)
     {
         heightDds = [];
-        if (!TryReadDimensions(normalDds, out var w, out var h)) return false;
-        if (!IsUncompressed(normalDds)) return false;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CanDerive(normalDds, out var w, out var h)) return false;
 
         int pixelCount = w * h;
         if (normalDds.Length < DdsHeaderSize + pixelCount * 4) return false;
 
         // Accumulate the X (red channel after BGRA swap: offset +2) gradient per row.
         var height = new float[pixelCount];
+        var min = float.MaxValue;
+        var max = float.MinValue;
         for (var y = 0; y < h; y++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var rowBase = DdsHeaderSize + y * w * 4;
             var running = 0f;
             for (var x = 0; x < w; x++)
@@ -21977,19 +21980,19 @@ internal static class DdsTextureDerivation
                 var rByte = normalDds[rowBase + x * 4 + 2];
                 running += (rByte - 128) / 128f;
                 height[y * w + x] = running;
+                min = Math.Min(min, running);
+                max = Math.Max(max, running);
             }
         }
 
         // Normalise to [0,255].
-        var min = height.Min();
-        var max = height.Max();
         var range = max - min;
 
-        heightDds = new byte[DdsHeaderSize + pixelCount * 4];
-        Buffer.BlockCopy(normalDds, 0, heightDds, 0, DdsHeaderSize);
+        heightDds = CreateDerivedDds(w, h);
 
         for (var i = 0; i < pixelCount; i++)
         {
+            if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
             var val = range > 0f ? (byte)Math.Round((height[i] - min) / range * 255f) : (byte)0x80;
             var dst = DdsHeaderSize + i * 4;
             heightDds[dst]     = val;
@@ -22021,20 +22024,20 @@ internal static class DdsTextureDerivation
     /// except for intentionally emissive details.
     /// </para>
     /// </summary>
-    public static bool TryDeriveGlowFromDiffuse(byte[] diffuseDds, out byte[] glowDds, byte glowThreshold = 204)
+    public static bool TryDeriveGlowFromDiffuse(byte[] diffuseDds, out byte[] glowDds, byte glowThreshold = 204, CancellationToken cancellationToken = default)
     {
         glowDds = [];
-        if (!TryReadDimensions(diffuseDds, out var w, out var h)) return false;
-        if (!IsUncompressed(diffuseDds)) return false;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CanDerive(diffuseDds, out var w, out var h)) return false;
 
         int pixelCount = w * h;
         if (diffuseDds.Length < DdsHeaderSize + pixelCount * 4) return false;
 
-        glowDds = new byte[DdsHeaderSize + pixelCount * 4];
-        Buffer.BlockCopy(diffuseDds, 0, glowDds, 0, DdsHeaderSize);
+        glowDds = CreateDerivedDds(w, h);
 
         for (var i = 0; i < pixelCount; i++)
         {
+            if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
             var src = DdsHeaderSize + i * 4;
             byte b = diffuseDds[src];
             byte g = diffuseDds[src + 1];
@@ -22060,12 +22063,32 @@ internal static class DdsTextureDerivation
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
-    private static bool IsUncompressed(byte[] ddsBytes)
+    internal static bool CanDerive(byte[] ddsBytes, out int width, out int height)
     {
-        if (ddsBytes.Length < DdsHeaderSize) return false;
-        var fourCc = BitConverter.ToUInt32(ddsBytes, DwFourCcOffset);
-        // FourCC == 0 means uncompressed (BGRA/RGBA); any known compression code ≠ 0.
-        return fourCc == 0;
+        if (!TryReadDimensions(ddsBytes, out width, out height)) return false;
+        return (long)width * height <= MaximumDerivationPixels &&
+            BitConverter.ToUInt32(ddsBytes, 4) == 124 &&
+            BitConverter.ToUInt32(ddsBytes, 76) == 32 &&
+            BitConverter.ToUInt32(ddsBytes, DwFourCcOffset) == 0 &&
+            (BitConverter.ToUInt32(ddsBytes, 80) & 0x41) == 0x41 &&
+            BitConverter.ToUInt32(ddsBytes, 88) == 32 &&
+            BitConverter.ToUInt32(ddsBytes, 92) == 0x00FF0000 &&
+            BitConverter.ToUInt32(ddsBytes, 96) == 0x0000FF00 &&
+            BitConverter.ToUInt32(ddsBytes, 100) == 0x000000FF &&
+            BitConverter.ToUInt32(ddsBytes, 104) == 0xFF000000 &&
+            BitConverter.ToUInt32(ddsBytes, 112) == 0;
+    }
+
+    private static byte[] CreateDerivedDds(int width, int height)
+    {
+        // Only the base level is emitted, so do not inherit source mipmap/cubemap metadata.
+        var header = LocalExportService.BuildSolidColorDds(0, 0, 0, 255);
+        var result = new byte[DdsHeaderSize + width * height * 4];
+        Buffer.BlockCopy(header, 0, result, 0, DdsHeaderSize);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(12, 4), height);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(16, 4), width);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(20, 4), width * 4);
+        return result;
     }
 }
 
@@ -22352,6 +22375,10 @@ internal sealed class LocalExportService(
             outputFiles.Add(raceCompatibilityPath);
         }
 
+        if (request.GenerateBodySlideFiles)
+        {
+            morphTransferContext = CreateMorphTransferContext(armor.MeshFiles, writtenNifs, analysis, request.TargetBody);
+        }
         var payloadReuse = request.GenerateBodySlideFiles
             ? BuildPayloadReuseSummary(
                 bodySlideProject.Sliders,
@@ -22465,8 +22492,6 @@ internal sealed class LocalExportService(
                 await CopyFileAsync(writtenNif, shapeDataNifPath, cancellationToken);
                 outputFiles.Add(shapeDataNifPath);
             }
-
-            morphTransferContext = CreateMorphTransferContext(armor.MeshFiles, writtenNifs, analysis, request.TargetBody);
 
             // Write BSD slider data files (.bsd) — one per slider for low-weight and high-weight morphs.
             // The BSD binary format encodes per-slider vertex displacement deltas used by BodySlide.
@@ -23734,7 +23759,7 @@ internal sealed class LocalExportService(
                         {
                             var normalBytes = await ReadDerivableDdsAsync(normalPath, cancellationToken);
                             if (normalBytes is not null)
-                                DdsTextureDerivation.TryDeriveHeightFromNormal(normalBytes, out derivedParallax);
+                                DdsTextureDerivation.TryDeriveHeightFromNormal(normalBytes, out derivedParallax, cancellationToken);
                         }
                         catch (IOException) { derivedParallax = null; }
                     }
@@ -23759,7 +23784,7 @@ internal sealed class LocalExportService(
                         {
                             var diffuseBytes = await ReadDerivableDdsAsync(texturePath, cancellationToken);
                             if (diffuseBytes is not null)
-                                DdsTextureDerivation.TryDeriveGlowFromDiffuse(diffuseBytes, out derivedGlow);
+                                DdsTextureDerivation.TryDeriveGlowFromDiffuse(diffuseBytes, out derivedGlow, cancellationToken: cancellationToken);
                         }
                         catch (IOException) { derivedGlow = null; }
                     }
@@ -23785,7 +23810,7 @@ internal sealed class LocalExportService(
                         {
                             var specBytes = await ReadDerivableDdsAsync(specularPath, cancellationToken);
                             if (specBytes is not null)
-                                DdsTextureDerivation.TryDeriveRoughnessFromSpecular(specBytes, out derivedRoughness);
+                                DdsTextureDerivation.TryDeriveRoughnessFromSpecular(specBytes, out derivedRoughness, cancellationToken);
                         }
                         catch (IOException) { derivedRoughness = null; }
                     }
@@ -23815,9 +23840,7 @@ internal sealed class LocalExportService(
         var header = new byte[128];
         var read = await stream.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, cancellationToken);
         if (read < header.Length ||
-            !DdsTextureDerivation.TryReadDimensions(header, out var width, out var height) ||
-            BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(84, 4)) != 0 ||
-            BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(88, 4)) != 32)
+            !DdsTextureDerivation.CanDerive(header, out var width, out var height))
         {
             return null;
         }
@@ -39827,7 +39850,7 @@ internal sealed class LocalExportService(
 
             void TrackPayloadReuseVariant(string sliderKey, string variantName, bool isHighWeight)
             {
-                if (TryGetReusableMorphPayload(
+                if (TrySelectReusableMorphPayload(
                         reusableSourceMorphPayloads,
                         sliderKey,
                         isHighWeight,
@@ -40218,6 +40241,34 @@ internal sealed class LocalExportService(
             out bool wasRetargeted,
             out bool usedExtremeAdaptation)
         {
+            if (!TrySelectReusableMorphPayload(
+                    reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount,
+                    morphTransferContext, out payload, out wasRetargeted, out usedExtremeAdaptation))
+            {
+                return false;
+            }
+            if (wasRetargeted)
+            {
+                payload = payload with
+                {
+                    VertexCount = vertexCount,
+                    PayloadKind = $"{payload.PayloadKind}-retargeted",
+                    Deltas = RetargetMorphPayload(sliderName, payload.Deltas, vertexCount, morphTransferContext)
+                };
+            }
+            return true;
+        }
+
+        private static bool TrySelectReusableMorphPayload(
+            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
+            string sliderName,
+            bool isHighWeight,
+            int vertexCount,
+            MorphTransferContext? morphTransferContext,
+            out SourceMorphPayload payload,
+            out bool wasRetargeted,
+            out bool usedExtremeAdaptation)
+        {
             payload = default!;
             wasRetargeted = false;
             usedExtremeAdaptation = false;
@@ -40251,12 +40302,7 @@ internal sealed class LocalExportService(
                 return false;
             }
 
-            payload = candidate with
-            {
-                VertexCount = vertexCount,
-                PayloadKind = $"{candidate.PayloadKind}-retargeted",
-                Deltas = RetargetMorphPayload(sliderName, candidate.Deltas, vertexCount, morphTransferContext)
-            };
+            payload = candidate;
             wasRetargeted = true;
             return true;
         }

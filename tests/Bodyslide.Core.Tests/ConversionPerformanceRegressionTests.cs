@@ -10,6 +10,106 @@ namespace Bodyslide.Core.Tests;
 [Collection("NonParallel")]
 public sealed class ConversionPerformanceRegressionTests
 {
+    [Fact]
+    public void PayloadReuseSummary_DoesNotAllocateRetargetedVertexArrays()
+    {
+        var sliders = Enumerable.Range(0, 20).Select(index => $"Slider{index}").ToArray();
+        var payloads = sliders.ToDictionary(slider => slider, slider =>
+            new SourceMorphPayloadVariants(
+                new SourceMorphPayload(slider, false, "bsd", 2, [(1f, 0f, 0f), (2f, 0f, 0f)]),
+                new SourceMorphPayload(slider, true, "bsd", 2, [(2f, 0f, 0f), (3f, 0f, 0f)])));
+        var method = GetMethod("BuildPayloadReuseSummary");
+        method.Invoke(null, [sliders, payloads, 100_000, null]);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var summary = (MorphPayloadReuseSummary)method.Invoke(null, [sliders, payloads, 100_000, null])!;
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(40, summary.RequestedVariantCount);
+        Assert.Equal(40, summary.RetargetedVariantCount);
+        Assert.Equal(0, summary.FallbackVariantCount);
+        Assert.True(allocated < 1_000_000, $"Metadata-only summary allocated {allocated} bytes.");
+    }
+
+    [Theory]
+    [InlineData("height")]
+    [InlineData("glow")]
+    [InlineData("roughness")]
+    public void DerivedDds_EmitsValidSingleLevelHeader(string kind)
+    {
+        var source = LocalExportService.BuildSolidColorDds(32, 64, 192, 255, 8, 4);
+        BinaryPrimitives.WriteUInt32LittleEndian(source.AsSpan(8, 4), 0x2100F);
+        BinaryPrimitives.WriteUInt32LittleEndian(source.AsSpan(28, 4), 4);
+        BinaryPrimitives.WriteUInt32LittleEndian(source.AsSpan(108, 4), 0x401008);
+
+        Assert.True(DeriveTexture(kind, source, out var result));
+        Assert.Equal(128 + 8 * 4 * 4, result.Length);
+        Assert.Equal(8u, BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(16, 4)));
+        Assert.Equal(4u, BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(12, 4)));
+        Assert.Equal(32u, BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(20, 4)));
+        Assert.Equal(1u, BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(28, 4)));
+        Assert.Equal(0u, BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(8, 4)) & 0x20000);
+        Assert.Equal(0x1000u, BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(108, 4)));
+        Assert.Equal(0u, BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(112, 4)));
+    }
+
+    [Theory]
+    [InlineData(88, 24u)]
+    [InlineData(92, 0xFFu)]
+    [InlineData(112, 0x200u)]
+    public void DerivedDds_RejectsUnsupportedPixelOrSurfaceLayouts(int offset, uint value)
+    {
+        var source = LocalExportService.BuildSolidColorDds(32, 64, 192, 255);
+        BinaryPrimitives.WriteUInt32LittleEndian(source.AsSpan(offset, 4), value);
+        foreach (var kind in new[] { "height", "glow", "roughness" })
+        {
+            Assert.False(DeriveTexture(kind, source, out var result));
+            Assert.Empty(result);
+        }
+    }
+
+    [Theory]
+    [InlineData("height")]
+    [InlineData("glow")]
+    [InlineData("roughness")]
+    public void DerivedDds_HonorsCancellation(string kind)
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var source = LocalExportService.BuildSolidColorDds(32, 64, 192, 255);
+        Assert.ThrowsAny<OperationCanceledException>(() => DeriveTexture(kind, source, out _, cancelled.Token));
+    }
+
+    [Fact]
+    public async Task DerivableDdsRead_RejectsOversizedSourceBeforeAllocatingItsPixels()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var path = Path.Combine(root, "oversized.dds");
+            var header = LocalExportService.BuildSolidColorDds(0, 0, 0, 255)[..128];
+            BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(12, 4), 8192);
+            BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(16, 4), 8192);
+            Assert.False(DdsTextureDerivation.CanDerive(header, out _, out _));
+            File.WriteAllBytes(path, header);
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Write))
+                stream.SetLength(128L + 8192L * 8192 * 4);
+            var result = await (Task<byte[]?>)GetMethod("ReadDerivableDdsAsync")
+                .Invoke(null, [path, CancellationToken.None])!;
+            Assert.Null(result);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    private static bool DeriveTexture(string kind, byte[] source, out byte[] result, CancellationToken cancellationToken = default)
+    {
+        return kind switch
+        {
+            "height" => DdsTextureDerivation.TryDeriveHeightFromNormal(source, out result, cancellationToken),
+            "glow" => DdsTextureDerivation.TryDeriveGlowFromDiffuse(source, out result, cancellationToken: cancellationToken),
+            _ => DdsTextureDerivation.TryDeriveRoughnessFromSpecular(source, out result, cancellationToken)
+        };
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]

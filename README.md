@@ -154,6 +154,13 @@ variant or repair the source archive rather than relying on entry order.
 Constant missing-texture fallbacks use compact 4×4 DDS maps instead of expanding
 every channel to the diffuse texture's resolution. Detail-derived maps retain
 their detail; a compact neutral fallback is not a substitute for authored textures.
+Optional auxiliary-map derivation accepts only BGRA8, ordinary 2D DDS sources
+up to 16,777,216 pixels (64 MiB of base-level pixels). Larger or unsupported
+sources use the neutral fallback without loading their pixel payload for derivation;
+original textures are still copied unchanged. Derived DDS files contain a valid
+single-level header, and derivation checks cancellation during processing.
+Morph-reuse diagnostics use the same topology context as binary export and classify
+reuse/fallback without generating and discarding full retargeted vertex arrays.
 Morph diagnostics in `morphs.json` and the conversion manifest retain slider,
 weight, format, vertex-count and delta-count metadata rather than duplicating
 per-vertex source payload arrays. Full deltas remain available to BodySlide
@@ -734,7 +741,7 @@ Implemented from issue scope:
 
 - **weight-variant synthesis** — when only one half of a `_0`/`_1` pair is present (e.g. only `armor_0.nif` without `armor_1.nif`, or vice versa), the missing variant is now **auto-generated** rather than skipped; regional morph factors are weight-scaled (×1.5 delta for the high-weight `_1`, ×0.5 delta for the low-weight `_0`) so the game engine can interpolate body weight without mesh collapse, visible clipping, or NPC weight-breaking; emits `weight-variants:synthesized=N` in `conversion.log`
 
-- **flat/aux texture stub generation** — when a diffuse texture (e.g. `iron_d.dds`) has no matching `_n.dds` companion, a flat tangent-space normal map stub is auto-generated at the **same pixel dimensions** as the source diffuse (falling back to 4×4 if dimensions can't be read); missing auxiliary maps (`_s` specular, `_p` parallax/height, `_g` glow, `_r` roughness) are also generated at matching dimensions; when a companion specular map exists, roughness is **derived** from it via BT.601 luminance inversion (bright specular → low roughness) rather than always using a neutral grey stub; when a normal map exists, the parallax/height map is **derived** from it via per-scanline X-gradient integration (Frankot–Chellappa approximation) rather than always using a flat-black stub; when a diffuse texture is present, a glow/emissive map is **derived** from it via per-pixel BT.601 luminance threshold — only pixels whose perceived brightness reaches ≥80 % (luma ≥ 204/255) contribute to the glow channel, matching the Skyrim `_g.dds` convention where only intentionally emissive materials emit light; all stubs use uncompressed BGRA8 DDS payloads and can be replaced by authored maps at any time; emits `normal-stubs:generated=N` and `aux-stubs:...` entries in `conversion.log`
+- **flat/aux texture stub generation** — missing normal and auxiliary maps use compact 4×4 neutral BGRA8 DDS fallbacks. Supported BGRA8 sources within the auxiliary derivation budget can supply roughness from specular luminance, approximate height from normal-map gradients, or heuristic glow from bright diffuse pixels. Nonconstant derived maps retain source dimensions but contain only their base level; constant results are compacted. These heuristics do not recover authored surface detail or prove that bright pixels should glow. Original textures remain unchanged; generated maps can be replaced by authored maps. Emits `normal-stubs:generated=N` and `aux-stubs:...` entries in `conversion.log`.
 
 - **skeleton NIF parsing** — `BasicSkeletonMappingService` now reads any `skeleton*.nif` files from the armor's body reference list and parses their string table to extract actual bone names; the source skeleton label (`xpmsse-vanilla`, `xpmsse-physics`, or `fo4-biped`) is inferred from physics-marker bones (`NPC *Breast*`, `*Butt*`, `*Belly*`, `*Pec*`, `*Lat*`) and Bip01 prefixes, giving accurate bone-mapping reports in `skeleton-compatibility.json` without relying solely on hardcoded lists
 

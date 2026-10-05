@@ -30870,6 +30870,11 @@ public sealed class OutputCompletenessTests
             Assert.False(reused);
             Assert.False(Assert.IsType<bool>(args[6]));
             Assert.True(Assert.IsType<bool>(args[7]));
+            var summaryMethod = typeof(LocalExportService).GetMethod("BuildPayloadReuseSummary", BindingFlags.NonPublic | BindingFlags.Static)!;
+            var summary = Assert.IsType<MorphPayloadReuseSummary>(
+                summaryMethod.Invoke(null, [new[] { "Belly" }, reusable, 20, context]));
+            Assert.Equal(0, summary.RetargetedVariantCount);
+            Assert.Contains("Belly", summary.FallbackVariants!);
         }
         finally
         {
