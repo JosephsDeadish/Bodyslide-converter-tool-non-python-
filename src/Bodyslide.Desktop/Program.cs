@@ -12,7 +12,7 @@ internal static class Program
     {
         if (StandaloneStartupRouting.HasOption(args, "smoke-test"))
         {
-            return RunSmokeTest();
+            return RunSmokeTest(args);
         }
 
         try
@@ -52,10 +52,12 @@ internal static class Program
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
     }
 
-    private static int RunSmokeTest()
+    private static int RunSmokeTest(string[] args)
     {
+        var diagnosticsPath = ResolveStartupDiagnosticsPath(args);
         try
         {
+            WriteStartupDiagnostics(diagnosticsPath, "desktop-smoke: starting");
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
             ApplicationConfiguration.Initialize();
             using var form = new MainForm();
@@ -69,14 +71,17 @@ internal static class Program
             Application.Run(form);
             if (summary is null)
             {
+                WriteStartupDiagnostics(diagnosticsPath, "desktop-smoke: failed: the window was not shown.");
                 Console.Error.WriteLine("SlideSmith desktop smoke test failed: the window was not shown.");
                 return 1;
             }
             Console.WriteLine(DesktopSmokeTestContract.Serialize(summary));
+            WriteStartupDiagnostics(diagnosticsPath, DesktopSmokeTestContract.Serialize(summary));
             return summary.Status == DesktopSmokeTestContract.ReadyStatus ? 0 : 1;
         }
         catch (Exception ex)
         {
+            WriteStartupDiagnostics(diagnosticsPath, $"desktop-smoke: failed: {ex}");
             Console.Error.WriteLine($"SlideSmith desktop smoke test failed: {ex}");
             return 1;
         }

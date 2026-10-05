@@ -151,6 +151,7 @@ jobs:
         run: |
           $desktopProcess = Start-Process -FilePath (Resolve-Path artifacts/win-x64/SlideSmith.exe).Path -ArgumentList '--smoke-test' -Wait -PassThru
           if ($desktopProcess.ExitCode -ne 0) {
+            Get-Content (Join-Path $env:LOCALAPPDATA "SlideSmith/startup-launch-diagnostics.log") -ErrorAction SilentlyContinue
             throw "Packaged Windows desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
           }
           & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
@@ -231,6 +232,7 @@ jobs:
           }
           $desktopProcess = Start-Process -FilePath (Join-Path $installPath "SlideSmith.exe") -WorkingDirectory $installPath -ArgumentList '--smoke-test' -Wait -PassThru
           if ($desktopProcess.ExitCode -ne 0) {
+            Get-Content (Join-Path $env:LOCALAPPDATA "SlideSmith/startup-launch-diagnostics.log") -ErrorAction SilentlyContinue
             throw "Installed Windows bundle desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
           }
 
@@ -344,6 +346,7 @@ jobs:
         run: |
           $desktopProcess = Start-Process -FilePath (Resolve-Path artifacts/win-x64/SlideSmith.exe).Path -ArgumentList '--smoke-test' -Wait -PassThru
           if ($desktopProcess.ExitCode -ne 0) {
+            Get-Content (Join-Path $env:LOCALAPPDATA "SlideSmith/startup-launch-diagnostics.log") -ErrorAction SilentlyContinue
             throw "Packaged Windows desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
           }
           & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
@@ -410,6 +413,7 @@ jobs:
           }
           $desktopProcess = Start-Process -FilePath (Join-Path $installPath "SlideSmith.exe") -WorkingDirectory $installPath -ArgumentList '--smoke-test' -Wait -PassThru
           if ($desktopProcess.ExitCode -ne 0) {
+            Get-Content (Join-Path $env:LOCALAPPDATA "SlideSmith/startup-launch-diagnostics.log") -ErrorAction SilentlyContinue
             throw "Installed Windows bundle desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
           }
           if (!(Test-Path (Join-Path $extractPath "fomod/ModuleConfig.xml"))) {
