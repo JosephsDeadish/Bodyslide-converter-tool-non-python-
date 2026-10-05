@@ -1996,8 +1996,8 @@ public sealed class MainForm : Form
             }
             foreach (var (button, tab) in new[]
                      {
-                         (_clearLogButton, _logTextBox.Parent!),
-                         (_copyCurrentViewButton, _logTextBox.Parent!),
+                         (_clearLogButton, (TabPage)_logTextBox.Parent!),
+                         (_copyCurrentViewButton, (TabPage)_logTextBox.Parent!),
                          (_openPreviewButton, _previewTabPage),
                          (_openReportButton, _reportsTabPage),
                          (_openBatchReportButton, _reportsTabPage),
