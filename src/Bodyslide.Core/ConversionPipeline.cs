@@ -6938,6 +6938,8 @@ internal static class CustomBodyProfileSupport
         var field = NormalizeTransformationField(dto.TransformationField);
         var gender = string.Equals(dto.Gender, "male", StringComparison.OrdinalIgnoreCase) ? "male" : "female";
         var physicsProfile = string.IsNullOrWhiteSpace(dto.PhysicsProfile) ? "none" : dto.PhysicsProfile.Trim();
+        var vertexCountMin = Math.Max(0, dto.VertexCountMin);
+        var vertexCountMax = Math.Max(vertexCountMin, dto.VertexCountMax);
         var heightToWidthRatioMin = NormalizeRatio(dto.HeightToWidthRatioMin, DefaultHeightToWidthRatioMin);
         var depthToWidthRatioMin = NormalizeRatio(dto.DepthToWidthRatioMin, DefaultDepthToWidthRatioMin);
 
@@ -6946,8 +6948,8 @@ internal static class CustomBodyProfileSupport
             detectionTokens,
             NormalizeStringList(dto.TextureTokens),
             NormalizeStringList(dto.PhysicsTokens),
-            Math.Max(0, dto.VertexCountMin),
-            Math.Max(dto.VertexCountMin, dto.VertexCountMax),
+            vertexCountMin,
+            vertexCountMax,
             field,
             NormalizeNullableStringList(dto.SliderNames),
             NormalizeNullableStringList(dto.PhysicsBones),

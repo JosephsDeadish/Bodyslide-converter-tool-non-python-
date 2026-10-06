@@ -1,0 +1,58 @@
+{
+  "Title": "Remaining strict/universal proof gaps checklist",
+  "SourceReport": "conversion-matrix-proof.json",
+  "TargetBody": "3BA",
+  "ProofCoverage": "artifact-backed-with-major-gaps",
+  "StrictProofReady": false,
+  "RemainingGaps": [
+    {
+      "Category": "blocking-gap",
+      "Description": "Blocking gap: Custom skeleton coverage still depends on sparse inference or leaves unsupported bones unresolved.",
+      "Source": "BlockingGaps"
+    },
+    {
+      "Category": "blocking-gap",
+      "Description": "Blocking gap: Target-body support metadata is not yet direct enough to treat this output as universally proven.",
+      "Source": "BlockingGaps"
+    },
+    {
+      "Category": "blocking-gap",
+      "Description": "Blocking gap: Topology transfer still shows radical-divergence or boundary-stability risk across hard-case focus regions.",
+      "Source": "BlockingGaps"
+    },
+    {
+      "Category": "proof-execution",
+      "Description": "Complete proof execution imports (current status: planned-only).",
+      "Source": "ProofExecutionStatus"
+    },
+    {
+      "Category": "missing-proof-axis",
+      "Description": "Missing proof axis: body-support",
+      "Source": "MissingProofAxes"
+    },
+    {
+      "Category": "missing-proof-axis",
+      "Description": "Missing proof axis: custom-skeleton",
+      "Source": "MissingProofAxes"
+    },
+    {
+      "Category": "missing-proof-axis",
+      "Description": "Missing proof axis: topology-transfer",
+      "Source": "MissingProofAxes"
+    }
+  ],
+  "ReviewArtifacts": [
+    "conversion-quality.json",
+    "desktop-workflow-automation.json",
+    "in-game-validation.json",
+    "live-game-execution.json",
+    "preview-workbench.html",
+    "runtime-observation-bundle.template.json",
+    "runtime-validation-harness.json",
+    "runtime-validation-plan.json",
+    "skeleton-compatibility.json",
+    "topology-correspondence.json",
+    "windows-ui-e2e-automation.json"
+  ],
+  "GeneratedAt": "2026-10-06T22:58:43.6309404+00:00"
+}

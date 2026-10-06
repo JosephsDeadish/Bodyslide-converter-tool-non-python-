@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SlideSmith Preview — nordic_cuirass_0 → 3BA</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; padding: 24px; margin: 0; }
+    h1   { color: #c9a84c; margin-bottom: 4px; }
+    h3   { color: #9ab; }
+    .subtitle { color: #888; font-size: .9rem; margin-bottom: 24px; }
+    .layout  { display: flex; gap: 32px; flex-wrap: wrap; align-items: flex-start; }
+    .body-fig { background: #16213e; border-radius: 12px; padding: 16px; }
+    .legend  { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; font-size: .75rem; }
+    .legend-item { display: flex; align-items: center; gap: 4px; }
+    .dot     { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .panels  { display: flex; flex-direction: column; gap: 14px; }
+    .panel   { background: #16213e; border-radius: 8px; padding: 14px 18px; }
+    table    { border-collapse: collapse; font-size: .85rem; }
+    th, td   { padding: 5px 10px; border: 1px solid #2a3a4a; }
+    th       { background: #1a2a3a; color: #9ab; font-weight: 600; }
+    .val-high { color: #ff6b6b; font-weight: 700; }
+    .val-med  { color: #ffd93d; }
+    .val-low  { color: #6bcb77; }
+    .controls { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 10px; align-items: center; font-size: .85rem; }
+    .controls label { color: #9ab; }
+    .controls input[type="range"], .controls select { width: 100%; }
+    .slider-table td:nth-child(2) { width: 180px; }
+    .mono { font-family: Consolas, monospace; font-size: .8rem; }
+    .panel button { background: #2a3a4a; color: #fff; border: 1px solid #3a4a5a; border-radius: 4px; padding: 6px 10px; cursor: pointer; }
+  </style>
+</head>
+<body data-testid="preview-workbench-root">
+  <script id="preview-automation-model" type="application/json">{"ArmorName":"nordic_cuirass_0","TargetBody":"3BA","SelectedProfile":"3BA","Regions":["arms","belly","breasts","butt","calves","chest","legs","pelvis","shoulders","thighs","waist"],"Profiles":["Current conversion","3BA","Aquatic Humanoid","Avian Humanoid","BHUNP","Canine Humanoid","CBBE","COCO CBBE","COCO UUNP","Draconic Humanoid","Equine Humanoid","Feline Humanoid","Goat Humanoid","Hagraven","HIMBO","Insectoid Humanoid","SAM","SAM Light","Serpentine Humanoid","SOS","Spriggan","TBD","TNG","UBE","UNP","UNPB","UUNP","Vanilla","Vanilla Beast","NordicPackReference"],"Artifacts":["preview-workbench.html","conversion-quality.json","in-game-validation.json"]}</script>
+<h1>SlideSmith Preview</h1>
+<p class="subtitle">nordic_cuirass_0 → 3BA &nbsp;·&nbsp; plate &nbsp;·&nbsp; ⚠ 1/8 poses at risk &nbsp;·&nbsp; <span style="color:#ff6b6b">High-risk: chest</span> &nbsp;·&nbsp; interactive preview controls enabled</p>
+<div class="layout" data-testid="preview-layout">
+  <div class="body-fig" data-testid="preview-body-figure">
+    <svg id="preview-body-svg" data-testid="preview-body-svg" width="200" height="320" viewBox="0 0 200 320" xmlns="http://www.w3.org/2000/svg">
+      <g id="preview-body-root">
+        <rect x="76" y="54" width="48" height="262" rx="10" fill="#2a2a4a" stroke="#555" stroke-width="1"/>
+        <circle cx="100" cy="20" r="18" fill="#2a2a4a" stroke="#555" stroke-width="1"/>
+        <rect x="42" y="72" width="12" height="72" rx="5" fill="#2a2a4a" stroke="#555" stroke-width="1"/>
+        <rect x="146" y="72" width="12" height="72" rx="5" fill="#2a2a4a" stroke="#555" stroke-width="1"/>
+        <rect id="region-box-arms" data-testid="preview-region-box-arms" data-region="arms" x="42" y="72" width="30" height="72" rx="4" fill="#2ecc71" opacity="0.45" stroke="#2ecc71" stroke-width="0.5"/>
+        <text id="region-label-arms" x="57" y="112" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">Arms</text>
+        <rect id="region-box-belly" data-testid="preview-region-box-belly" data-region="belly" x="78" y="116" width="44" height="30" rx="4" fill="#2ecc71" opacity="0.45" stroke="#2ecc71" stroke-width="0.5"/>
+        <text id="region-label-belly" x="100" y="135" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">Belly</text>
+        <rect id="region-box-breasts" data-testid="preview-region-box-breasts" data-region="breasts" x="78" y="54" width="44" height="36" rx="4" fill="#2ecc71" opacity="0.46" stroke="#2ecc71" stroke-width="0.5"/>
+        <text id="region-label-breasts" x="100" y="76" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">Breast</text>
+        <rect id="region-box-butt" data-testid="preview-region-box-butt" data-region="butt" x="76" y="146" width="48" height="28" rx="4" fill="#2ecc71" opacity="0.45" stroke="#2ecc71" stroke-width="0.5"/>
+        <text id="region-label-butt" x="100" y="164" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">Butt</text>
+        <rect id="region-box-calves" data-testid="preview-region-box-calves" data-region="calves" x="77" y="232" width="44" height="60" rx="4" fill="#2ecc71" opacity="0.45" stroke="#2ecc71" stroke-width="0.5"/>
+        <text id="region-label-calves" x="99" y="266" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">Calves</text>
+        <rect id="region-box-chest" data-testid="preview-region-box-chest" data-region="chest" x="76" y="54" width="48" height="36" rx="4" fill="#2ecc71" opacity="0.46" stroke="#2ecc71" stroke-width="0.5"/>
+        <text id="region-label-chest" x="100" y="76" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">Chest</text>
+        <rect id="region-box-legs" data-testid="preview-region-box-legs" data-region="legs" x="77" y="174" width="44" height="118" rx="4" fill="#2ecc71" opacity="0.45" stroke="#2ecc71" stroke-width="0.5"/>
+        <text id="region-label-legs" x="99" y="237" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">Legs</text>
+        <rect id="region-box-pelvis" data-testid="preview-region-box-pelvis" data-region="pelvis" x="76" y="146" width="48" height="28" rx="4" fill="#2ecc71" opacity="0.45" stroke="#2ecc71" stroke-width="0.5"/>
+        <text id="region-label-pelvis" x="100" y="164" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">Pelvis</text>
+        <rect id="region-box-shoulders" data-testid="preview-region-box-shoulders" data-region="shoulders" x="50" y="54" width="32" height="18" rx="4" fill="#2ecc71" opacity="0.45" stroke="#2ecc71" stroke-width="0.5"/>
+        <text id="region-label-shoulders" x="66" y="67" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">Sho</text>
+        <rect id="region-box-thighs" data-testid="preview-region-box-thighs" data-region="thighs" x="77" y="174" width="44" height="58" rx="4" fill="#2ecc71" opacity="0.45" stroke="#2ecc71" stroke-width="0.5"/>
+        <text id="region-label-thighs" x="99" y="207" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">Thighs</text>
+        <rect id="region-box-waist" data-testid="preview-region-box-waist" data-region="waist" x="80" y="90" width="40" height="26" rx="4" fill="#2ecc71" opacity="0.45" stroke="#2ecc71" stroke-width="0.5"/>
+        <text id="region-label-waist" x="100" y="107" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">Waist</text>
+      </g>
+
+    </svg>
+      <div class="legend">
+        <div class="legend-item"><div class="dot" style="background:#3a7bd5"></div><span>Compact</span></div>
+        <div class="legend-item"><div class="dot" style="background:#27ae60"></div><span>Normal</span></div>
+        <div class="legend-item"><div class="dot" style="background:#f1c40f"></div><span>Mild</span></div>
+        <div class="legend-item"><div class="dot" style="background:#e67e22"></div><span>Expanded</span></div>
+        <div class="legend-item"><div class="dot" style="background:#e74c3c"></div><span>High</span></div>
+      </div>
+    </div>
+    <div class="panels" data-testid="preview-panels">
+      <div class="panel" data-testid="preview-live-controls-panel">
+        <h3 style="margin-top:0">Live Controls</h3>
+        <div class="controls">
+          <label for="body-profile-select">Swap body</label>
+          <select id="body-profile-select" data-testid="body-profile-select"><option value="Current conversion">Current conversion</option><option value="3BA" selected>3BA</option><option value="Aquatic Humanoid">Aquatic Humanoid</option><option value="Avian Humanoid">Avian Humanoid</option><option value="BHUNP">BHUNP</option><option value="Canine Humanoid">Canine Humanoid</option><option value="CBBE">CBBE</option><option value="COCO CBBE">COCO CBBE</option><option value="COCO UUNP">COCO UUNP</option><option value="Draconic Humanoid">Draconic Humanoid</option><option value="Equine Humanoid">Equine Humanoid</option><option value="Feline Humanoid">Feline Humanoid</option><option value="Goat Humanoid">Goat Humanoid</option><option value="Hagraven">Hagraven</option><option value="HIMBO">HIMBO</option><option value="Insectoid Humanoid">Insectoid Humanoid</option><option value="SAM">SAM</option><option value="SAM Light">SAM Light</option><option value="Serpentine Humanoid">Serpentine Humanoid</option><option value="SOS">SOS</option><option value="Spriggan">Spriggan</option><option value="TBD">TBD</option><option value="TNG">TNG</option><option value="UBE">UBE</option><option value="UNP">UNP</option><option value="UNPB">UNPB</option><option value="UUNP">UUNP</option><option value="Vanilla">Vanilla</option><option value="Vanilla Beast">Vanilla Beast</option><option value="NordicPackReference">NordicPackReference</option></select>
+          <span class="mono" id="body-profile-value">3BA</span>
+
+          <label for="view-rotation-slider">Rotate view</label>
+          <input id="view-rotation-slider" data-testid="view-rotation-slider" type="range" min="-45" max="45" step="1" value="0">
+          <span class="mono" id="view-rotation-value">0°</span>
+
+          <label for="global-scale-slider">Adjust sliders</label>
+          <input id="global-scale-slider" data-testid="global-scale-slider" type="range" min="0.70" max="1.30" step="0.01" value="1.00">
+          <span class="mono" id="global-scale-value">1.00x</span>
+        </div>
+        <div style="margin-top:10px">
+          <button id="reset-preview-controls" data-testid="reset-preview-controls" type="button">Reset controls</button>
+        </div>
+      </div>
+      <div class="panel" data-testid="preview-regional-morphing-panel">
+        <h3 style="margin-top:0">Regional Morphing</h3>
+        <table data-testid="preview-regional-morphing-table">
+          <tr><th>Region</th><th>Factor</th></tr>
+          <tr><td>arms</td><td id="factor-arms" class="val-low">1.0019</td></tr>
+          <tr><td>belly</td><td id="factor-belly" class="val-low">1.0016</td></tr>
+          <tr><td>breasts</td><td id="factor-breasts" class="val-low">1.0072</td></tr>
+          <tr><td>butt</td><td id="factor-butt" class="val-low">1.0034</td></tr>
+          <tr><td>calves</td><td id="factor-calves" class="val-low">1.0018</td></tr>
+          <tr><td>chest</td><td id="factor-chest" class="val-low">1.0073</td></tr>
+          <tr><td>legs</td><td id="factor-legs" class="val-low">1.0026</td></tr>
+          <tr><td>pelvis</td><td id="factor-pelvis" class="val-low">1.0012</td></tr>
+          <tr><td>shoulders</td><td id="factor-shoulders" class="val-low">1.0007</td></tr>
+          <tr><td>thighs</td><td id="factor-thighs" class="val-low">1.0013</td></tr>
+          <tr><td>waist</td><td id="factor-waist" class="val-low">0.9985</td></tr>
+        </table>
+      </div>
+      <div class="panel" data-testid="preview-region-tuning-panel">
+        <h3 style="margin-top:0">Per-Region Tuning</h3>
+        <table class="slider-table" data-testid="preview-region-tuning-table">
+          <tr><th>Region</th><th>Slider</th><th>Value</th></tr>
+      <tr>
+        <td>arms</td>
+        <td><input type="range" id="region-slider-arms" data-region-slider="true" data-region="arms" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+        <td id="region-slider-value-arms">1.00x</td>
+      </tr>
+      <tr>
+        <td>belly</td>
+        <td><input type="range" id="region-slider-belly" data-region-slider="true" data-region="belly" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+        <td id="region-slider-value-belly">1.00x</td>
+      </tr>
+      <tr>
+        <td>breasts</td>
+        <td><input type="range" id="region-slider-breasts" data-region-slider="true" data-region="breasts" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+        <td id="region-slider-value-breasts">1.00x</td>
+      </tr>
+      <tr>
+        <td>butt</td>
+        <td><input type="range" id="region-slider-butt" data-region-slider="true" data-region="butt" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+        <td id="region-slider-value-butt">1.00x</td>
+      </tr>
+      <tr>
+        <td>calves</td>
+        <td><input type="range" id="region-slider-calves" data-region-slider="true" data-region="calves" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+        <td id="region-slider-value-calves">1.00x</td>
+      </tr>
+      <tr>
+        <td>chest</td>
+        <td><input type="range" id="region-slider-chest" data-region-slider="true" data-region="chest" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+        <td id="region-slider-value-chest">1.00x</td>
+      </tr>
+      <tr>
+        <td>legs</td>
+        <td><input type="range" id="region-slider-legs" data-region-slider="true" data-region="legs" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+        <td id="region-slider-value-legs">1.00x</td>
+      </tr>
+      <tr>
+        <td>pelvis</td>
+        <td><input type="range" id="region-slider-pelvis" data-region-slider="true" data-region="pelvis" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+        <td id="region-slider-value-pelvis">1.00x</td>
+      </tr>
+      <tr>
+        <td>shoulders</td>
+        <td><input type="range" id="region-slider-shoulders" data-region-slider="true" data-region="shoulders" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+        <td id="region-slider-value-shoulders">1.00x</td>
+      </tr>
+      <tr>
+        <td>thighs</td>
+        <td><input type="range" id="region-slider-thighs" data-region-slider="true" data-region="thighs" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+        <td id="region-slider-value-thighs">1.00x</td>
+      </tr>
+      <tr>
+        <td>waist</td>
+        <td><input type="range" id="region-slider-waist" data-region-slider="true" data-region="waist" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+        <td id="region-slider-value-waist">1.00x</td>
+      </tr>
+        </table>
+      </div>
+      <div class="panel" data-testid="preview-bodyslide-slider-panel">
+        <h3 style="margin-top:0">BodySlide Sliders</h3>
+        <p style="font-size:.85rem;margin:0">Belly, Butt, BreastsShape, BreastsSmall, BreastsLarge, WaistWidth, HipWidth, Thighs, Calves, Arms, Shoulders, NarrowWaist, BreastsPhysics, ButtPhysics, BellyPhysics</p>
+      </div>
+      <div class="panel" data-testid="preview-physics-panel">
+        <h3 style="margin-top:0">Physics Nodes</h3>
+        <p style="font-size:.85rem">NPC Belly, NPC L Breast, NPC L Breast01, NPC L Breast02, NPC L Butt, NPC L Thigh, NPC R Breast, NPC R Breast01, NPC R Breast02, NPC R Butt, NPC R Thigh</p>
+      </div>
+      <div class="panel">
+        <h3 style="margin-top:0">Conversion Readiness &amp; Next Actions</h3>
+        <p style="font-size:.85rem;margin:0 0 6px"><strong>Status:</strong> <span style="color:#ff6b6b;font-weight:700">FAIL</span> <span style="color:#9ab">(high-risk)</span> · <strong>Score:</strong> 0</p>
+        <p style="font-size:.8rem;color:#9ab;margin:0 0 10px">Issues: 4 high · 3 medium · 1 low</p>
+        <p style="font-size:.85rem;margin:0 0 10px">This loaded conversion output is blocked. Fix conversion issues, re-run, and validate the regenerated output again.</p>
+        <table><tr><th>Severity</th><th>Issue</th><th>What happened</th></tr>
+          <tr><td>HIGH</td><td>manual-cleanup-likely</td><td>Automatic conversion reached a high-risk combination of topology drift, sparse skeleton inference, or sensitive oral/genital/beast appendage coverage. Manual Outfit Studio cleanup is still likely before release.</td></tr>
+          <tr><td>HIGH</td><td>topology-mismatch-risk</td><td>Converted mesh topology or UV layout drifted significantly from the source. (island-routing-drift:s1-&gt;t1,loops=0-&gt;0,holes=0-&gt;0,boundary=2-&gt;2,interior=23-&gt;9,nonmanifold=0-&gt;0, island-routing-extra:t4, island-routing-extra:t5, island-routing-extra:t6, island-routing-extra:t7)</td></tr>
+          <tr><td>HIGH</td><td>unsafe-skeleton-remap</td><td>Automatic skeleton remap safety is unsafe for &#39;aquatic-humanoid&#39; → &#39;xpmsse-physics&#39; (unsupported-bones:113/218, candidate-gap:0, unsupported-ratio:0.52, remap-safety:unsafe).</td></tr>
+          <tr><td>HIGH</td><td>unsupported-bones</td><td>113 source bone(s) had no target equivalent.</td></tr>
+          <tr><td>MEDIUM</td><td>incomplete-source-fallback</td><td>Source BodySlide assets were incomplete, so fallback slider reconstruction was used: morph-payloads. Inferred source body: CBBE.</td></tr>
+          <tr><td>MEDIUM</td><td>low-body-match</td><td>Generated morphs matched 70 % of the source body signature.</td></tr>
+          <tr><td>MEDIUM</td><td>low-detection-confidence</td><td>Detected source body confidence is only 53 %.</td></tr>
+          <tr><td>LOW</td><td>missing-normal-maps</td><td>2 diffuse texture(s) were missing authored normal maps and needed generated stubs.</td></tr>
+        </table>
+        <h4 style="margin:12px 0 8px;color:#9bb7f2">Recommended next actions</h4>
+        <ul style="font-size:.85rem;padding-left:18px;margin:0">
+          <li>Open preview-workbench.html, conversion-quality.json, skeleton-compatibility.json, and the generated ShapeData in Outfit Studio, then plan manual cleanup for extreme topology drift, sparse custom skeletons, or sensitive oral/genital/beast appendage regions before release.</li>
+          <li>Open preview-workbench.html and conversion-quality.json, inspect the converted mesh in Outfit Studio for UV drift, missing geometry, seam splits, and hole/window loop shape drift, then plan manual cleanup if the source and target topologies differ too much.</li>
+          <li>Open skeleton-compatibility.json, conversion-quality.json, and preview-workbench.html, treat the automatic skeleton remap as unsafe, and switch to a closer framework/profile or manual Outfit Studio cleanup before release.</li>
+          <li>Open skeleton-compatibility.json, install the skeleton expected by the target body, and patch outfit weights/bone names for any unsupported custom-rig bones.</li>
+          <li>Locate the original BodySlide OSP/TRI/BSD/reference assets for this outfit, place them beside the mod or under BodySlide/ShapeData, then re-run so conversion-quality.json no longer reports source-asset fallback.</li>
+          <li>Open conversion-quality.json and preview-workbench.html, confirm the detected/source body is correct, then re-run with an explicit source-body override or better reference assets if the armor was matched to the wrong body family.</li>
+        </ul>
+        <p style="font-size:.8rem;color:#9ab;margin:10px 0 0">Use README.txt and conversion-quality.json for full follow-up details before release.</p>
+      </div>
+      <div class="panel" style="margin-top:16px">
+        <h3 style="margin-top:0;color:#e67e22">⚠ Pose Clipping Risk</h3>
+        <table><tr><th>Pose</th><th>At-Risk Regions</th></tr>
+          <tr><td>Combat-Idle</td><td style="color:#ffd93d">chest</td></tr>
+        </table>
+      </div>
+      <div class="panel">
+        <h3 style="margin-top:0">Auto-Correction Pass</h3>
+        <p style="color:#888;font-size:.85rem">No correction applied — no clipping detected or correction not required.</p>
+      </div>
+      <div class="panel">
+        <h3 style="margin-top:0">Texture Analysis</h3>
+        <table><tr><th>Type</th><th>Count</th></tr>
+          <tr><td>Diffuse</td><td>2</td></tr>
+          <tr><td>Normal</td><td>0</td></tr>
+        </table>
+        <p style="color:#ffd93d;font-size:.85rem;margin-top:8px">⚠ 2 normal map(s) missing — surface detail may degrade after conversion.</p>
+      </div>
+      <div class="panel" data-testid="preview-world-physics-panel">
+        <h3 style="margin-top:0">World / Dropped-Item Physics</h3>
+        <p style="font-size:.85rem;margin:0 0 6px"><strong>Drop mode:</strong> rigid-proxy</p>
+        <p style="font-size:.85rem;margin:0 0 6px"><strong>Collision shape:</strong> convex-hull</p>
+        <p style="color:#6bcb77;font-size:.85rem;margin:0 0 8px">✓ Source physics detected</p>
+        <ul style="font-size:.85rem;padding-left:18px;margin:0">
+          <li>Use rigid-body world physics for dropped items; actor SMP/CBPC does not run on world objects.</li>
+          <li>Prefer a simplified proxy collision shape for stability.</li>
+          <li>Use the generated *_ground.nif as the dropped-item world model.</li>
+        </ul>
+      </div>
+      </div>
+  </div>
+  <script>
+    const baseFactors = {"arms":1.0019128,"belly":1.0016170400000002,"breasts":1.0072292,"butt":1.0034216,"calves":1.00182188,"chest":1.0073128,"legs":1.002562,"pelvis":1.00117068,"shoulders":1.0007355599999999,"thighs":1.00134902,"waist":0.99846264};
+    const previewProfiles = {"Current conversion":{"arms":1.0019128,"belly":1.0016170400000002,"breasts":1.0072292,"butt":1.0034216,"calves":1.00182188,"chest":1.0073128,"legs":1.002562,"pelvis":1.00117068,"shoulders":1.0007355599999999,"thighs":1.00134902,"waist":0.99846264},"3BA":{"chest":1.12,"waist":0.95,"pelvis":1.06,"legs":1.04,"shoulders":1.01,"breasts":1.13,"butt":1.08,"belly":1.03,"arms":1.02,"thighs":1.05,"calves":1.03},"Aquatic Humanoid":{"chest":0.99,"waist":0.94,"pelvis":1.04,"legs":1,"shoulders":1.04,"breasts":0.94,"butt":1.02,"belly":1.05,"arms":1.01,"thighs":1.01,"calves":0.98},"Avian Humanoid":{"chest":0.97,"waist":0.94,"pelvis":1,"legs":0.99,"shoulders":1.08,"breasts":0.95,"butt":0.99,"belly":1.01,"arms":1.09,"thighs":0.98,"calves":0.97},"BHUNP":{"chest":1.1,"waist":0.94,"pelvis":1.07,"legs":1.04,"shoulders":1.01,"breasts":1.11,"butt":1.07,"belly":1.03,"arms":1.01,"thighs":1.05,"calves":1.03},"Canine Humanoid":{"chest":1.01,"waist":0.96,"pelvis":1.05,"legs":1.05,"shoulders":1.02,"breasts":0.97,"butt":1.04,"belly":1.01,"arms":1,"thighs":1.06,"calves":1.07},"CBBE":{"chest":1.08,"waist":0.96,"pelvis":1.05,"legs":1.03,"shoulders":1.01,"breasts":1.09,"butt":1.06,"belly":1.02,"arms":1.01,"thighs":1.04,"calves":1.02},"COCO CBBE":{"chest":1.11,"waist":0.94,"pelvis":1.07,"legs":1.04,"shoulders":1.02,"breasts":1.12,"butt":1.09,"belly":1.03,"arms":1.02,"thighs":1.05,"calves":1.03},"COCO UUNP":{"chest":1.1,"waist":0.94,"pelvis":1.08,"legs":1.04,"shoulders":1.02,"breasts":1.11,"butt":1.08,"belly":1.03,"arms":1.02,"thighs":1.05,"calves":1.03},"Draconic Humanoid":{"chest":1.03,"waist":0.94,"pelvis":1.04,"legs":1.02,"shoulders":1.08,"breasts":0.96,"butt":1.03,"belly":1.02,"arms":1.06,"thighs":1.02,"calves":1},"Equine Humanoid":{"chest":1.01,"waist":0.98,"pelvis":1.04,"legs":1.07,"shoulders":1.02,"breasts":0.99,"butt":1.04,"belly":1.01,"arms":0.99,"thighs":1.06,"calves":1.08},"Feline Humanoid":{"chest":1,"waist":0.95,"pelvis":1.04,"legs":1.04,"shoulders":1.01,"breasts":0.98,"butt":1.03,"belly":1.01,"arms":0.99,"thighs":1.05,"calves":1.06},"Goat Humanoid":{"chest":0.98,"waist":0.97,"pelvis":1.03,"legs":1.05,"shoulders":1,"breasts":0.97,"butt":1.01,"belly":1,"arms":0.99,"thighs":1.04,"calves":1.06},"Hagraven":{"chest":0.95,"waist":0.93,"pelvis":1,"legs":0.99,"shoulders":1.07,"breasts":0.92,"butt":0.98,"belly":1.01,"arms":1.08,"thighs":0.99,"calves":0.97},"HIMBO":{"chest":1.1,"waist":1.02,"pelvis":1.04,"legs":1.06,"shoulders":1.12,"breasts":1.08,"butt":1.05,"belly":1.03,"arms":1.1,"thighs":1.07,"calves":1.05},"Insectoid Humanoid":{"chest":0.98,"waist":0.93,"pelvis":1.02,"legs":1.01,"shoulders":1.06,"breasts":0.9,"butt":0.98,"belly":1.08,"arms":1.04,"thighs":1,"calves":0.99},"SAM":{"chest":1.08,"waist":1.01,"pelvis":1.03,"legs":1.05,"shoulders":1.1,"breasts":1.05,"butt":1.04,"belly":1.02,"arms":1.08,"thighs":1.06,"calves":1.04},"SAM Light":{"chest":1.05,"waist":1,"pelvis":1.02,"legs":1.04,"shoulders":1.07,"breasts":1.03,"butt":1.03,"belly":1.01,"arms":1.05,"thighs":1.04,"calves":1.03},"Serpentine Humanoid":{"chest":1,"waist":0.92,"pelvis":1.06,"legs":0.95,"shoulders":1.01,"breasts":0.99,"butt":1.05,"belly":1.02,"arms":1,"thighs":0.96,"calves":0.94},"SOS":{"chest":1.05,"waist":1,"pelvis":1.02,"legs":1.04,"shoulders":1.06,"breasts":1.03,"butt":1.03,"belly":1.01,"arms":1.05,"thighs":1.04,"calves":1.03},"Spriggan":{"chest":0.94,"waist":0.91,"pelvis":0.98,"legs":1.01,"shoulders":1.05,"breasts":0.9,"butt":0.97,"belly":1,"arms":1.06,"thighs":1,"calves":1.01},"TBD":{"chest":1.06,"waist":0.96,"pelvis":1.04,"legs":1.02,"shoulders":1,"breasts":1.07,"butt":1.04,"belly":1.02,"arms":1,"thighs":1.03,"calves":1.02},"TNG":{"chest":1.09,"waist":1.01,"pelvis":1.04,"legs":1.05,"shoulders":1.11,"breasts":1.06,"butt":1.04,"belly":1.03,"arms":1.09,"thighs":1.06,"calves":1.04},"UBE":{"chest":1.06,"waist":0.97,"pelvis":1.03,"legs":1.02,"shoulders":1.01,"breasts":1.06,"butt":1.03,"belly":1.02,"arms":1.01,"thighs":1.03,"calves":1.02},"UNP":{"chest":1.04,"waist":0.97,"pelvis":1.02,"legs":1.01,"shoulders":1,"breasts":1.04,"butt":1.02,"belly":1.01,"arms":1,"thighs":1.02,"calves":1.01},"UNPB":{"chest":1.06,"waist":0.95,"pelvis":1.04,"legs":1.02,"shoulders":1,"breasts":1.07,"butt":1.04,"belly":1.02,"arms":1,"thighs":1.03,"calves":1.02},"UUNP":{"chest":1.08,"waist":0.95,"pelvis":1.05,"legs":1.03,"shoulders":1.01,"breasts":1.09,"butt":1.06,"belly":1.02,"arms":1.01,"thighs":1.04,"calves":1.02},"Vanilla":{"chest":1,"waist":1,"pelvis":1,"legs":1,"shoulders":1,"breasts":1,"butt":1,"belly":1,"arms":1,"thighs":1,"calves":1},"Vanilla Beast":{"chest":1,"waist":1,"pelvis":1.01,"legs":1,"shoulders":1,"breasts":1,"butt":1.01,"belly":1.01,"arms":1,"thighs":1.01,"calves":1},"NordicPackReference":{"chest":1.02,"waist":0.99,"pelvis":1.02,"legs":1.01,"shoulders":1,"breasts":1.02,"butt":1.01,"belly":1.01,"arms":1,"thighs":1.01,"calves":1.01}};
+    const regionDomIds = {"arms":"arms","belly":"belly","breasts":"breasts","butt":"butt","calves":"calves","chest":"chest","legs":"legs","pelvis":"pelvis","shoulders":"shoulders","thighs":"thighs","waist":"waist"};
+    const regionNames = Object.keys(baseFactors);
+
+    let profileFactors = { ...baseFactors };
+    let globalScale = 1.0;
+    const regionAdjustments = Object.fromEntries(regionNames.map(region => [region, 1.0]));
+
+    const profileSelect = document.getElementById('body-profile-select');
+    const profileValue = document.getElementById('body-profile-value');
+    const rotationSlider = document.getElementById('view-rotation-slider');
+    const rotationValue = document.getElementById('view-rotation-value');
+    const globalScaleSlider = document.getElementById('global-scale-slider');
+    const globalScaleValue = document.getElementById('global-scale-value');
+    const resetButton = document.getElementById('reset-preview-controls');
+    const bodyRoot = document.getElementById('preview-body-root');
+
+    function morphColour(factor) {
+      if (factor < 0.90) return '#3a7bd5';
+      if (factor < 0.97) return '#27ae60';
+      if (factor < 1.05) return '#2ecc71';
+      if (factor < 1.12) return '#f1c40f';
+      if (factor < 1.20) return '#e67e22';
+      return '#e74c3c';
+    }
+
+    function valueClass(factor) {
+      if (factor > 1.20) return 'val-high';
+      if (factor > 1.08) return 'val-med';
+      return 'val-low';
+    }
+
+    function opacityFor(factor) {
+      return Math.max(0.4, Math.min(0.85, 0.45 + Math.abs(factor - 1.0) * 1.2));
+    }
+
+    function effectiveFactor(region) {
+      const base = Number(profileFactors[region] ?? baseFactors[region] ?? 1.0);
+      const global = Number(globalScale);
+      const local = Number(regionAdjustments[region] ?? 1.0);
+      return base * global * local;
+    }
+
+    function setRotation(degrees) {
+      bodyRoot.setAttribute('transform', `rotate(${degrees} 100 160)`);
+      rotationValue.textContent = `${degrees}°`;
+    }
+
+    function renderPreview() {
+      for (const region of regionNames) {
+        const factor = effectiveFactor(region);
+        const domId = regionDomIds[region];
+        const box = document.getElementById(`region-box-${domId}`);
+        const factorCell = document.getElementById(`factor-${domId}`);
+        const sliderValue = document.getElementById(`region-slider-value-${domId}`);
+
+        if (box) {
+          const color = morphColour(factor);
+          box.setAttribute('fill', color);
+          box.setAttribute('stroke', color);
+          box.setAttribute('opacity', opacityFor(factor).toFixed(2));
+        }
+
+        if (factorCell) {
+          factorCell.textContent = factor.toFixed(4);
+          factorCell.className = valueClass(factor);
+        }
+
+        if (sliderValue) {
+          sliderValue.textContent = `${Number(regionAdjustments[region]).toFixed(2)}x`;
+        }
+      }
+
+      globalScaleValue.textContent = `${Number(globalScale).toFixed(2)}x`;
+    }
+
+    profileSelect.addEventListener('change', () => {
+      const selected = profileSelect.value;
+      profileFactors = { ...(previewProfiles[selected] ?? baseFactors) };
+      profileValue.textContent = selected;
+      renderPreview();
+    });
+
+    rotationSlider.addEventListener('input', () => {
+      setRotation(Number(rotationSlider.value));
+    });
+
+    globalScaleSlider.addEventListener('input', () => {
+      globalScale = Number(globalScaleSlider.value);
+      renderPreview();
+    });
+
+    for (const slider of document.querySelectorAll('input[data-region-slider="true"]')) {
+      slider.addEventListener('input', () => {
+        const region = slider.getAttribute('data-region');
+        if (!region) return;
+        regionAdjustments[region] = Number(slider.value);
+        renderPreview();
+      });
+    }
+
+    resetButton.addEventListener('click', () => {
+      profileSelect.value = '3BA';
+      profileFactors = { ...(previewProfiles[profileSelect.value] ?? baseFactors) };
+      profileValue.textContent = profileSelect.value;
+      rotationSlider.value = '0';
+      setRotation(0);
+      globalScaleSlider.value = '1.00';
+      globalScale = 1.0;
+
+      for (const slider of document.querySelectorAll('input[data-region-slider="true"]')) {
+        const region = slider.getAttribute('data-region');
+        if (!region) continue;
+        slider.value = '1.00';
+        regionAdjustments[region] = 1.0;
+      }
+
+      renderPreview();
+    });
+
+    setRotation(0);
+    renderPreview();
+  </script>
+</body>
+</html>

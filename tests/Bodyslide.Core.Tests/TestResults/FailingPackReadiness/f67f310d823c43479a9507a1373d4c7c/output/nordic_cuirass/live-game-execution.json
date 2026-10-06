@@ -1,0 +1,3131 @@
+{
+  "TargetBody": "3BA",
+  "ValidationGate": "FAIL",
+  "PlannedIntegrationCoverage": "external-live-game-harness",
+  "IntegrationCoverage": "external-live-game-harness",
+  "BlockingProofAxes": [
+    "live-game-execution",
+    "plugin-modstack",
+    "body-support",
+    "strict-layout"
+  ],
+  "MatrixCombinationsTargeted": [
+    "body-skeleton-plugin-runtime",
+    "body-hardcase-runtime",
+    "hardcase-skeleton-master"
+  ],
+  "RequiresWindowsHost": true,
+  "RequiresExternalHarness": true,
+  "RequiresSkseOrEquivalentLauncher": true,
+  "RequiresDeployedModManagerLoadOrder": true,
+  "DeploymentArtifacts": [
+    "conversion-matrix-proof.json",
+    "runtime-validation-plan.json",
+    "runtime-validation-harness.json",
+    "runtime-observation-bundle.template.json",
+    "live-game-execution.json",
+    "topology-correspondence.json",
+    "mod-stack-cross-validation.json",
+    "plugin-patches.json",
+    "race-compatibility.json",
+    "skeleton-compatibility.json",
+    "preview-workbench.html",
+    "desktop-workflow-automation.json",
+    "windows-ui-e2e-automation.json"
+  ],
+  "LaunchSequence": [
+    "deploy-converted-output-to-modded-profile",
+    "verify-plugin-enable-order",
+    "launch-skse-or-game-loader",
+    "load-validation-save",
+    "dispatch-runtime-scenarios",
+    "capture-host-observations",
+    "persist-release-gate-result"
+  ],
+  "RequiredHostCapabilities": [
+    "windows-host-control",
+    "mod-manager-profile-selection",
+    "skse-or-game-launcher-control",
+    "validation-save-selection",
+    "runtime-scenario-dispatch",
+    "animation-dispatch-telemetry",
+    "host-observation-capture",
+    "skeleton-probe-capture",
+    "mesh-collision-probe-capture",
+    "ownership-layout-snapshot-capture",
+    "skeleton-remap-trace-capture",
+    "release-gate-persistence"
+  ],
+  "ObservationChannels": [
+    "screenshot-capture",
+    "render-preview-capture",
+    "load-order-state-snapshot",
+    "runtime-log-capture",
+    "bone-transform-tracking",
+    "mesh-collision-probe",
+    "partition-slot-snapshot",
+    "ownership-layout-snapshot",
+    "skeleton-remap-trace",
+    "animation-dispatch-trace",
+    "manual-observation-notes"
+  ],
+  "ValidationSaveProfiles": [
+    "neutral-smoke-test-save",
+    "topology-workbench-validation-save",
+    "custom-skeleton-remap-validation-save",
+    "combat-stress-save",
+    "world-grounding-validation-save",
+    "standard-load-order-validation-save"
+  ],
+  "LimitationNotes": [
+    "Runtime validation now exports a machine-readable external harness contract so preflight and scenario dispatch can be automated outside the app.",
+    "A real live-game pass still requires an external harness or scripted test environment in the final modded game install.",
+    "Blocking runtime probes still require host-side observation or assertion capture on the final skeleton, body, and load-order combination.",
+    "Live-game execution integration is exported as an external harness contract; the app still does not embed or ship an in-process Skyrim runtime runner.",
+    "Windows host automation must provide game-launch control, save selection, and observation capture outside SlideSmith itself."
+  ],
+  "ProofExecution": {
+    "Axis": "live-game-execution",
+    "PlannedStatus": "external-live-game-harness",
+    "ExecutedStatus": "planned-only",
+    "ImportedResultAvailable": false,
+    "StrictProofSatisfied": false,
+    "PlannedItemCount": 24,
+    "ExecutedItemCount": 0,
+    "MissingItemCount": 24,
+    "MissingItems": [],
+    "EvidenceArtifacts": [],
+    "HostDetails": [],
+    "Notes": [
+      "External live-game execution has not been imported yet."
+    ]
+  },
+  "HarnessBundleManifestPath": "/home/runner/work/Bodyslide-converter-tool-non-python-/Bodyslide-converter-tool-non-python-/tests/Bodyslide.Core.Tests/TestResults/FailingPackReadiness/f67f310d823c43479a9507a1373d4c7c/output/nordic_cuirass/proof-harness-bundle.json",
+  "ProofResultBundlePath": "/home/runner/work/Bodyslide-converter-tool-non-python-/Bodyslide-converter-tool-non-python-/tests/Bodyslide.Core.Tests/TestResults/FailingPackReadiness/f67f310d823c43479a9507a1373d4c7c/output/nordic_cuirass/proof-result-bundle.json",
+  "BootstrapContract": {
+    "HarnessKind": "skyrim-live-game-external-runner",
+    "ContractVersion": "1.0",
+    "RequiredInputs": [
+      "live-game-execution.json",
+      "runtime-validation-plan.json",
+      "runtime-validation-harness.json",
+      "conversion-matrix-proof.json",
+      "mod-stack-cross-validation.json",
+      "preview-workbench.html",
+      "runtime-observation-bundle.template.json"
+    ],
+    "LaunchActions": [
+      "deploy-converted-output-to-modded-profile",
+      "verify-plugin-enable-order",
+      "launch-skse-or-game-loader",
+      "load-validation-save",
+      "dispatch-runtime-scenarios",
+      "capture-host-observations",
+      "persist-release-gate-result"
+    ],
+    "SuccessSignals": [
+      "windows-host-connected",
+      "validation-save-loaded",
+      "runtime-scenarios-dispatched",
+      "host-observations-captured",
+      "release-gate-result-persisted"
+    ],
+    "ResultArtifacts": [
+      "live-game-execution.json",
+      "runtime-validation-plan.json",
+      "runtime-validation-harness.json",
+      "conversion-matrix-proof.json",
+      "runtime-observation-bundle",
+      "runtime-observation-bundle.template.json",
+      "release-gate-result"
+    ]
+  },
+  "ObservationBundleContract": {
+    "Status": "pending-external-harness",
+    "HarnessKind": "skyrim-live-game-external-runner",
+    "ContractVersion": "1.0",
+    "RequiredGlobalSignals": [
+      "windows-host-connected",
+      "validation-save-loaded",
+      "runtime-scenarios-dispatched",
+      "host-observations-captured",
+      "release-gate-result-persisted"
+    ],
+    "RequiredOutputArtifacts": [
+      "runtime-observation-bundle.json",
+      "conversion-matrix-proof.json",
+      "live-game-execution.json",
+      "runtime-validation-plan.json",
+      "release-gate-result"
+    ],
+    "HostEvidenceArtifacts": [
+      "host-summary.txt",
+      "screenshots/",
+      "runtime-logs/",
+      "load-order-snapshot.txt",
+      "bone-transform-traces/",
+      "skeleton-remap-traces/",
+      "collision-probes/",
+      "partition-slot-snapshots/",
+      "topology-island-snapshots/",
+      "animation-dispatch-trace.json"
+    ],
+    "Scenarios": [
+      {
+        "Scenario": "Open preview-workbench.html, conversion-quality.json, topology-correspondence.json, and desktop-workflow-automation.json for 3BA before starting live runtime checks.",
+        "ValidationSaveProfile": "topology-workbench-validation-save",
+        "RequiredSuccessSignals": [
+          "mesh-collision-probes-captured",
+          "preview-contract-loaded",
+          "region-morphing-within-bounds",
+          "related-artifacts-readable",
+          "runtime-plan-loaded"
+        ],
+        "BlockingFailureSignals": [
+          "focus-region-instability",
+          "non-manifold-boundary-regression"
+        ],
+        "EvidenceArtifacts": [
+          "desktop-workflow-automation.json",
+          "topology-correspondence.json",
+          "preview-workbench.html",
+          "conversion-quality.json"
+        ],
+        "BlocksRelease": false,
+        "FocusRegions": [
+          "belly",
+          "breasts",
+          "butt",
+          "chest",
+          "pelvis",
+          "thighs"
+        ]
+      },
+      {
+        "Scenario": "Topology correspondence and body-fit heuristics still indicate manual cleanup risk for 3BA. Review the flagged focus regions before trusting the runtime result.",
+        "ValidationSaveProfile": "topology-workbench-validation-save",
+        "RequiredSuccessSignals": [
+          "bone-deformation-stable",
+          "cleanup-observation-captured",
+          "mesh-collision-probes-captured",
+          "region-morphing-within-bounds",
+          "related-artifacts-readable"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "non-manifold-boundary-regression",
+          "pose-penetration-detected",
+          "semantic-fit-regression"
+        ],
+        "EvidenceArtifacts": [
+          "topology-correspondence.json",
+          "conversion-quality.json",
+          "preview-workbench.html",
+          "skeleton-compatibility.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "arms",
+          "belly",
+          "breasts",
+          "butt",
+          "chest",
+          "pelvis",
+          "shoulders",
+          "thighs"
+        ]
+      },
+      {
+        "Scenario": "Baseline body-fit validation for 3BA using the core regions: belly, breasts, butt, chest, pelvis, thighs",
+        "ValidationSaveProfile": "neutral-smoke-test-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "mesh-collision-probes-captured",
+          "outfit-equipped",
+          "region-morphing-within-bounds",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "preview-workbench.html",
+          "conversion-quality.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "belly",
+          "breasts",
+          "butt",
+          "chest",
+          "pelvis",
+          "thighs"
+        ]
+      },
+      {
+        "Scenario": "Lower-body morphing or hotspot evidence was detected for: belly, butt, pelvis, thighs",
+        "ValidationSaveProfile": "neutral-smoke-test-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "outfit-equipped",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "pose-simulation-report.json",
+          "preview-workbench.html",
+          "in-game-validation.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "belly",
+          "butt",
+          "pelvis",
+          "thighs"
+        ]
+      },
+      {
+        "Scenario": "Extended oral/throat topology requires articulation checks for: mouth",
+        "ValidationSaveProfile": "topology-workbench-validation-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "bone-deformation-stable",
+          "outfit-equipped",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "skeleton-compatibility.json",
+          "preview-workbench.html",
+          "in-game-validation.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "mouth"
+        ]
+      },
+      {
+        "Scenario": "Validate jaw and tongue deformation continuity for oral regions on 3BA: mouth",
+        "ValidationSaveProfile": "neutral-smoke-test-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "bone-deformation-stable",
+          "outfit-equipped",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "pose-simulation-report.json",
+          "skeleton-compatibility.json",
+          "in-game-validation.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "mouth"
+        ]
+      },
+      {
+        "Scenario": "Topology correspondence remains heuristic-heavy for 3BA. Signals: topology-mismatch-risk, topology-islands:16, hole-boundary-warning, runtime-stress-signals.",
+        "ValidationSaveProfile": "topology-workbench-validation-save",
+        "RequiredSuccessSignals": [
+          "cleanup-observation-captured",
+          "mesh-collision-probes-captured",
+          "ownership-layout-preserved",
+          "region-morphing-within-bounds",
+          "related-artifacts-readable"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "ownership-layout-regression",
+          "pose-penetration-detected",
+          "semantic-fit-regression"
+        ],
+        "EvidenceArtifacts": [
+          "conversion-quality.json",
+          "preview-workbench.html",
+          "morphs.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "arms",
+          "belly",
+          "breasts",
+          "butt",
+          "chest",
+          "pelvis",
+          "shoulders",
+          "thighs"
+        ]
+      },
+      {
+        "Scenario": "Hard-case topology family \u0027layered-openwork\u0027 was detected for 3BA; verify seams, openings, windows, and multipart edge continuity under pose changes.",
+        "ValidationSaveProfile": "topology-workbench-validation-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "mesh-collision-probes-captured",
+          "outfit-equipped",
+          "ownership-layout-preserved",
+          "region-morphing-within-bounds",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "non-manifold-boundary-regression",
+          "ownership-layout-regression",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "topology-correspondence.json",
+          "preview-workbench.html",
+          "conversion-quality.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "arms",
+          "belly",
+          "breasts",
+          "butt",
+          "chest",
+          "pelvis",
+          "shoulders",
+          "thighs"
+        ]
+      },
+      {
+        "Scenario": "Topology layout family \u0027openwork-layered\u0027 requires deeper ownership review for 3BA; inspect 8 island(s) and 0 ownership/layout warning(s) before treating the hardest-case transfer as strict-proof-ready.",
+        "ValidationSaveProfile": "topology-workbench-validation-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "mesh-collision-probes-captured",
+          "outfit-equipped",
+          "ownership-layout-preserved",
+          "region-morphing-within-bounds",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "non-manifold-boundary-regression",
+          "ownership-layout-regression",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "topology-correspondence.json",
+          "conversion-quality.json",
+          "preview-workbench.html"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "arms",
+          "belly",
+          "breasts",
+          "butt",
+          "chest",
+          "pelvis",
+          "shoulders",
+          "thighs"
+        ]
+      },
+      {
+        "Scenario": "Winged topology coverage was detected for 3BA: wing",
+        "ValidationSaveProfile": "topology-workbench-validation-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "bone-deformation-stable",
+          "outfit-equipped",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "preview-workbench.html",
+          "skeleton-compatibility.json",
+          "in-game-validation.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "wing"
+        ]
+      },
+      {
+        "Scenario": "Custom race or appendage-sensitive coverage detected for 3BA: genitals, tail, wing",
+        "ValidationSaveProfile": "neutral-smoke-test-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "bone-deformation-stable",
+          "outfit-equipped",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "race-compatibility.json",
+          "skeleton-compatibility.json",
+          "preview-workbench.html"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "genitals",
+          "tail",
+          "wing"
+        ]
+      },
+      {
+        "Scenario": "Sensitive oral/genital topology was detected for 3BA; verify collision, clipping, and contact-driven articulation across isolated body islands.",
+        "ValidationSaveProfile": "topology-workbench-validation-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "bone-deformation-stable",
+          "outfit-equipped",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "physics-instability",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "preview-workbench.html",
+          "skeleton-compatibility.json",
+          "world-physics.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "genitals",
+          "mouth"
+        ]
+      },
+      {
+        "Scenario": "Genital/groin-sensitive regions were detected for 3BA; verify collision ownership, clipping resistance, and load-order-safe plugin patch placement.",
+        "ValidationSaveProfile": "neutral-smoke-test-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "outfit-equipped",
+          "partition-slot-intact",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "partition-slot-regression",
+          "physics-instability",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "world-physics.json",
+          "plugin-patches.json",
+          "pose-simulation-report.json",
+          "in-game-validation.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "genitals"
+        ]
+      },
+      {
+        "Scenario": "Unsupported or sparsely inferred bones still need live verification: SAM Genitals, SAM Foreskin, HDT Mouth, SOS GenitalsBase, SOS Genitals01, SOS Genitals02",
+        "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+        "RequiredSuccessSignals": [
+          "bone-deformation-stable",
+          "mesh-collision-probes-captured",
+          "preview-contract-loaded",
+          "region-morphing-within-bounds",
+          "related-artifacts-readable",
+          "runtime-plan-loaded"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "pose-penetration-detected",
+          "skeleton-remap-regression"
+        ],
+        "EvidenceArtifacts": [
+          "skeleton-compatibility.json",
+          "conversion-quality.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "branch",
+          "genitals",
+          "mane",
+          "mouth",
+          "tail",
+          "wing"
+        ]
+      },
+      {
+        "Scenario": "Source skeleton \u0027aquatic-humanoid\u0027 sits near a rig-family crossover; alternate rig-family candidates remain close: ube-extended (1), insectoid-humanoid (1). Automatic remap safety remains unsafe.",
+        "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+        "RequiredSuccessSignals": [
+          "bone-deformation-stable",
+          "partition-slot-intact",
+          "preview-contract-loaded",
+          "related-artifacts-readable",
+          "runtime-plan-loaded"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "partition-slot-regression",
+          "pose-penetration-detected",
+          "skeleton-remap-regression"
+        ],
+        "EvidenceArtifacts": [
+          "skeleton-compatibility.json",
+          "mod-stack-cross-validation.json",
+          "runtime-validation-plan.json",
+          "live-game-execution.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "branch",
+          "genitals",
+          "mane",
+          "mouth",
+          "tail",
+          "wing"
+        ]
+      },
+      {
+        "Scenario": "Automatic conversion still left high-risk topology, sparse rig, or sensitive appendage concerns for 3BA",
+        "ValidationSaveProfile": "topology-workbench-validation-save",
+        "RequiredSuccessSignals": [
+          "bone-deformation-stable",
+          "cleanup-observation-captured",
+          "mesh-collision-probes-captured",
+          "region-morphing-within-bounds",
+          "related-artifacts-readable"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "pose-penetration-detected",
+          "semantic-fit-regression"
+        ],
+        "EvidenceArtifacts": [
+          "preview-workbench.html",
+          "conversion-quality.json",
+          "skeleton-compatibility.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "branch",
+          "genitals",
+          "mane",
+          "mouth",
+          "tail",
+          "wing"
+        ]
+      },
+      {
+        "Scenario": "Follower/beast/custom-rig skeleton variance was detected for 3BA; rig-family signals: aquatic-humanoid, ube-extended, insectoid-humanoid; requested physics profile \u0027smp\u002Bcbpc\u0027 with collision mode \u0027rigid-proxy\u0027, and runtime physics profile output was generated. Reconfirm chain routing and collision ownership across mixed framework states (no race-compatibility warnings were raised).",
+        "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "bone-deformation-stable",
+          "outfit-equipped",
+          "partition-slot-intact",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "partition-slot-regression",
+          "physics-instability",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "skeleton-compatibility.json",
+          "world-physics.json",
+          "runtime-validation-plan.json",
+          "live-game-execution.json",
+          "mod-stack-cross-validation.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "branch",
+          "genitals",
+          "mane",
+          "mouth",
+          "tail",
+          "wing"
+        ]
+      },
+      {
+        "Scenario": "Physics profile \u0027smp\u002Bcbpc\u0027 is active while skeleton remap uncertainty remains (unsupported bones=113, sparseInference=False). Validate live chain routing and collision ownership under stress poses.",
+        "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "bone-deformation-stable",
+          "outfit-equipped",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "physics-instability",
+          "pose-penetration-detected",
+          "skeleton-remap-regression"
+        ],
+        "EvidenceArtifacts": [
+          "skeleton-compatibility.json",
+          "world-physics.json",
+          "pose-simulation-report.json",
+          "runtime-validation-plan.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "branch",
+          "genitals",
+          "mane",
+          "mouth",
+          "tail",
+          "wing"
+        ]
+      },
+      {
+        "Scenario": "Skeleton-family crossover signals (aquatic-humanoid, ube-extended, insectoid-humanoid) were detected while physics profile \u0027smp\u002Bcbpc\u0027 is active. Validate chain ownership, collision routing, and save/reload stability across framework crossover states.",
+        "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "bone-deformation-stable",
+          "outfit-equipped",
+          "partition-slot-intact",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "partition-slot-regression",
+          "physics-instability",
+          "pose-penetration-detected",
+          "skeleton-remap-regression"
+        ],
+        "EvidenceArtifacts": [
+          "skeleton-compatibility.json",
+          "world-physics.json",
+          "runtime-validation-plan.json",
+          "live-game-execution.json",
+          "mod-stack-cross-validation.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "branch",
+          "genitals",
+          "mane",
+          "mouth",
+          "tail",
+          "wing"
+        ]
+      },
+      {
+        "Scenario": "Difficult rig-family signals and active physics profile \u0027smp\u002Bcbpc\u0027 require stress verification of chain ownership, damping stability, and collision routing under dense animation changes.",
+        "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "bone-deformation-stable",
+          "outfit-equipped",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "physics-instability",
+          "pose-penetration-detected",
+          "skeleton-remap-regression"
+        ],
+        "EvidenceArtifacts": [
+          "skeleton-compatibility.json",
+          "world-physics.json",
+          "pose-simulation-report.json",
+          "runtime-validation-plan.json",
+          "live-game-execution.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "wing"
+        ]
+      },
+      {
+        "Scenario": "Runtime physics output is active for profile \u0027smp\u002Bcbpc\u0027. Verify live collision, damping, and bounce follow-through.",
+        "ValidationSaveProfile": "neutral-smoke-test-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "bone-deformation-stable",
+          "outfit-equipped",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "bone-transform-instability",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "physics-instability",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "world-physics.json",
+          "skeleton-compatibility.json",
+          "preview-workbench.html"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "branch",
+          "genitals",
+          "mane",
+          "mouth",
+          "tail",
+          "wing"
+        ]
+      },
+      {
+        "Scenario": "World/drop validation is required for collision mode \u0027rigid-proxy\u0027 and heel profile \u0027flat\u0027",
+        "ValidationSaveProfile": "world-grounding-validation-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "outfit-equipped",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "focus-region-instability",
+          "physics-instability"
+        ],
+        "EvidenceArtifacts": [
+          "world-physics.json",
+          "preview-workbench.html"
+        ],
+        "BlocksRelease": false,
+        "FocusRegions": [
+          "feet",
+          "ground"
+        ]
+      },
+      {
+        "Scenario": "Validate heel IK, toe angle continuity, and sole contact stability for profile \u0027flat\u0027 before release.",
+        "ValidationSaveProfile": "world-grounding-validation-save",
+        "RequiredSuccessSignals": [
+          "animation-sequence-dispatched",
+          "outfit-equipped",
+          "related-artifacts-readable",
+          "runtime-observation-captured"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "physics-instability",
+          "pose-penetration-detected"
+        ],
+        "EvidenceArtifacts": [
+          "world-physics.json",
+          "pose-simulation-report.json",
+          "in-game-validation.json",
+          "preview-workbench.html"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "feet",
+          "heels",
+          "ankles",
+          "ground"
+        ]
+      },
+      {
+        "Scenario": "Do not treat 3BA as install-ready until the blocking runtime-validation steps have been completed and re-checked.",
+        "ValidationSaveProfile": "neutral-smoke-test-save",
+        "RequiredSuccessSignals": [
+          "related-artifacts-readable",
+          "release-gate-persisted"
+        ],
+        "BlockingFailureSignals": [
+          "blocking-step-unresolved",
+          "focus-region-instability",
+          "mesh-clipping-regression",
+          "pose-penetration-detected",
+          "release-gate-failed"
+        ],
+        "EvidenceArtifacts": [
+          "runtime-validation-plan.json",
+          "in-game-validation.json",
+          "desktop-workflow-automation.json"
+        ],
+        "BlocksRelease": true,
+        "FocusRegions": [
+          "branch",
+          "genitals",
+          "mane",
+          "mouth",
+          "tail",
+          "wing"
+        ]
+      }
+    ],
+    "Notes": [
+      "Validation save profiles expected: neutral-smoke-test-save, topology-workbench-validation-save, custom-skeleton-remap-validation-save, combat-stress-save, world-grounding-validation-save, standard-load-order-validation-save",
+      "External harness execution is required before this bundle can be promoted from template to proof."
+    ]
+  },
+  "ScenarioProfiles": [
+    {
+      "Name": "Open preview-workbench.html, conversion-quality.json, topology-correspondence.json, and desktop-workflow-automation.json for 3BA before starting live runtime checks.",
+      "ValidationSaveProfile": "topology-workbench-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "load-preview-workbench",
+        "load-runtime-plan"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "preview-contract-loaded",
+        "runtime-plan-loaded"
+      ],
+      "RelatedArtifacts": [
+        "desktop-workflow-automation.json",
+        "topology-correspondence.json",
+        "preview-workbench.html",
+        "conversion-quality.json"
+      ],
+      "BlocksRelease": false,
+      "ProofAxes": [
+        "topology-transfer",
+        "live-game-execution",
+        "desktop-e2e",
+        "runtime-automation"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "belly",
+        "breasts",
+        "butt",
+        "chest",
+        "pelvis",
+        "thighs"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "desktop-workflow-automation.json",
+        "topology-correspondence.json",
+        "preview-workbench.html",
+        "conversion-quality.json",
+        "runtime-observation-bundle.json",
+        "topology-island-snapshots/"
+      ]
+    },
+    {
+      "Name": "Topology correspondence and body-fit heuristics still indicate manual cleanup risk for 3BA. Review the flagged focus regions before trusting the runtime result.",
+      "ValidationSaveProfile": "topology-workbench-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "open-outfit-studio-review",
+        "capture-cleanup-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "cleanup-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "topology-correspondence.json",
+        "conversion-quality.json",
+        "preview-workbench.html",
+        "skeleton-compatibility.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "custom-skeleton",
+        "live-game-execution",
+        "runtime-automation"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "arms",
+        "belly",
+        "breasts",
+        "butt",
+        "chest",
+        "pelvis",
+        "shoulders",
+        "thighs"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "topology-correspondence.json",
+        "conversion-quality.json",
+        "preview-workbench.html",
+        "skeleton-compatibility.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/",
+        "topology-island-snapshots/"
+      ]
+    },
+    {
+      "Name": "Baseline body-fit validation for 3BA using the core regions: belly, breasts, butt, chest, pelvis, thighs",
+      "ValidationSaveProfile": "neutral-smoke-test-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "conversion-quality.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "live-game-execution",
+        "runtime-automation"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "belly",
+        "breasts",
+        "butt",
+        "chest",
+        "pelvis",
+        "thighs"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "preview-workbench.html",
+        "conversion-quality.json",
+        "runtime-observation-bundle.json"
+      ]
+    },
+    {
+      "Name": "Lower-body morphing or hotspot evidence was detected for: belly, butt, pelvis, thighs",
+      "ValidationSaveProfile": "neutral-smoke-test-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "pose-simulation-report.json",
+        "preview-workbench.html",
+        "in-game-validation.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "belly",
+        "butt",
+        "pelvis",
+        "thighs"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "pose-simulation-report.json",
+        "preview-workbench.html",
+        "in-game-validation.json",
+        "runtime-observation-bundle.json"
+      ]
+    },
+    {
+      "Name": "Extended oral/throat topology requires articulation checks for: mouth",
+      "ValidationSaveProfile": "topology-workbench-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "preview-workbench.html",
+        "in-game-validation.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "custom-skeleton",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "mouth"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "skeleton-compatibility.json",
+        "preview-workbench.html",
+        "in-game-validation.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/",
+        "topology-island-snapshots/"
+      ]
+    },
+    {
+      "Name": "Validate jaw and tongue deformation continuity for oral regions on 3BA: mouth",
+      "ValidationSaveProfile": "neutral-smoke-test-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "pose-simulation-report.json",
+        "skeleton-compatibility.json",
+        "in-game-validation.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "custom-skeleton",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "mouth"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace"
+      ],
+      "ProofDeliverables": [
+        "pose-simulation-report.json",
+        "skeleton-compatibility.json",
+        "in-game-validation.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/"
+      ]
+    },
+    {
+      "Name": "Topology correspondence remains heuristic-heavy for 3BA. Signals: topology-mismatch-risk, topology-islands:16, hole-boundary-warning, runtime-stress-signals.",
+      "ValidationSaveProfile": "topology-workbench-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "open-outfit-studio-review",
+        "capture-cleanup-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "cleanup-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "conversion-quality.json",
+        "preview-workbench.html",
+        "morphs.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "strict-layout",
+        "live-game-execution",
+        "runtime-automation"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "arms",
+        "belly",
+        "breasts",
+        "butt",
+        "chest",
+        "pelvis",
+        "shoulders",
+        "thighs"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "conversion-quality.json",
+        "preview-workbench.html",
+        "morphs.json",
+        "runtime-observation-bundle.json",
+        "topology-island-snapshots/"
+      ]
+    },
+    {
+      "Name": "Hard-case topology family \u0027layered-openwork\u0027 was detected for 3BA; verify seams, openings, windows, and multipart edge continuity under pose changes.",
+      "ValidationSaveProfile": "topology-workbench-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "topology-correspondence.json",
+        "preview-workbench.html",
+        "conversion-quality.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "strict-layout",
+        "live-game-execution",
+        "runtime-automation"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "arms",
+        "belly",
+        "breasts",
+        "butt",
+        "chest",
+        "pelvis",
+        "shoulders",
+        "thighs"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "topology-correspondence.json",
+        "preview-workbench.html",
+        "conversion-quality.json",
+        "runtime-observation-bundle.json",
+        "topology-island-snapshots/"
+      ]
+    },
+    {
+      "Name": "Topology layout family \u0027openwork-layered\u0027 requires deeper ownership review for 3BA; inspect 8 island(s) and 0 ownership/layout warning(s) before treating the hardest-case transfer as strict-proof-ready.",
+      "ValidationSaveProfile": "topology-workbench-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "topology-correspondence.json",
+        "conversion-quality.json",
+        "preview-workbench.html"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "strict-layout",
+        "live-game-execution",
+        "runtime-automation"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "arms",
+        "belly",
+        "breasts",
+        "butt",
+        "chest",
+        "pelvis",
+        "shoulders",
+        "thighs"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "topology-correspondence.json",
+        "conversion-quality.json",
+        "preview-workbench.html",
+        "runtime-observation-bundle.json",
+        "topology-island-snapshots/"
+      ]
+    },
+    {
+      "Name": "Winged topology coverage was detected for 3BA: wing",
+      "ValidationSaveProfile": "topology-workbench-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "skeleton-compatibility.json",
+        "in-game-validation.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "custom-skeleton",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "wing"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "preview-workbench.html",
+        "skeleton-compatibility.json",
+        "in-game-validation.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/",
+        "topology-island-snapshots/"
+      ]
+    },
+    {
+      "Name": "Custom race or appendage-sensitive coverage detected for 3BA: genitals, tail, wing",
+      "ValidationSaveProfile": "neutral-smoke-test-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "race-compatibility.json",
+        "skeleton-compatibility.json",
+        "preview-workbench.html"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "custom-skeleton",
+        "plugin-modstack",
+        "live-game-execution",
+        "runtime-automation"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "plugin-stack:plugin-free",
+        "plugin-family:plugin-free",
+        "master-chain:plugin-free",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "genitals",
+        "tail",
+        "wing"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "race-compatibility.json",
+        "skeleton-compatibility.json",
+        "preview-workbench.html",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/"
+      ]
+    },
+    {
+      "Name": "Sensitive oral/genital topology was detected for 3BA; verify collision, clipping, and contact-driven articulation across isolated body islands.",
+      "ValidationSaveProfile": "topology-workbench-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "skeleton-compatibility.json",
+        "world-physics.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "custom-skeleton",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "genitals",
+        "mouth"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "preview-workbench.html",
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/",
+        "topology-island-snapshots/"
+      ]
+    },
+    {
+      "Name": "Genital/groin-sensitive regions were detected for 3BA; verify collision ownership, clipping resistance, and load-order-safe plugin patch placement.",
+      "ValidationSaveProfile": "neutral-smoke-test-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "plugin-patches.json",
+        "pose-simulation-report.json",
+        "in-game-validation.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "plugin-modstack",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "plugin-stack:plugin-free",
+        "plugin-family:plugin-free",
+        "master-chain:plugin-free",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "genitals"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "load-order-state-snapshot",
+        "animation-dispatch-trace"
+      ],
+      "ProofDeliverables": [
+        "world-physics.json",
+        "plugin-patches.json",
+        "pose-simulation-report.json",
+        "in-game-validation.json",
+        "runtime-observation-bundle.json",
+        "load-order-state.json"
+      ]
+    },
+    {
+      "Name": "Unsupported or sparsely inferred bones still need live verification: SAM Genitals, SAM Foreskin, HDT Mouth, SOS GenitalsBase, SOS Genitals01, SOS Genitals02",
+      "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "load-preview-workbench",
+        "load-runtime-plan"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "preview-contract-loaded",
+        "runtime-plan-loaded"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "conversion-quality.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "custom-skeleton",
+        "live-game-execution",
+        "runtime-automation"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace"
+      ],
+      "ProofDeliverables": [
+        "skeleton-compatibility.json",
+        "conversion-quality.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/"
+      ]
+    },
+    {
+      "Name": "Source skeleton \u0027aquatic-humanoid\u0027 sits near a rig-family crossover; alternate rig-family candidates remain close: ube-extended (1), insectoid-humanoid (1). Automatic remap safety remains unsafe.",
+      "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "load-preview-workbench",
+        "load-runtime-plan"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "preview-contract-loaded",
+        "runtime-plan-loaded"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "mod-stack-cross-validation.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "custom-skeleton",
+        "plugin-modstack",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "plugin-stack:plugin-free",
+        "plugin-family:plugin-free",
+        "master-chain:plugin-free",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace"
+      ],
+      "ProofDeliverables": [
+        "skeleton-compatibility.json",
+        "mod-stack-cross-validation.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/"
+      ]
+    },
+    {
+      "Name": "Automatic conversion still left high-risk topology, sparse rig, or sensitive appendage concerns for 3BA",
+      "ValidationSaveProfile": "topology-workbench-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "open-outfit-studio-review",
+        "capture-cleanup-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "cleanup-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "conversion-quality.json",
+        "skeleton-compatibility.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "custom-skeleton",
+        "live-game-execution",
+        "runtime-automation"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "preview-workbench.html",
+        "conversion-quality.json",
+        "skeleton-compatibility.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/",
+        "topology-island-snapshots/"
+      ]
+    },
+    {
+      "Name": "Follower/beast/custom-rig skeleton variance was detected for 3BA; rig-family signals: aquatic-humanoid, ube-extended, insectoid-humanoid; requested physics profile \u0027smp\u002Bcbpc\u0027 with collision mode \u0027rigid-proxy\u0027, and runtime physics profile output was generated. Reconfirm chain routing and collision ownership across mixed framework states (no race-compatibility warnings were raised).",
+      "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json",
+        "mod-stack-cross-validation.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "custom-skeleton",
+        "plugin-modstack",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "plugin-stack:plugin-free",
+        "plugin-family:plugin-free",
+        "master-chain:plugin-free",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace"
+      ],
+      "ProofDeliverables": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json",
+        "mod-stack-cross-validation.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/"
+      ]
+    },
+    {
+      "Name": "Physics profile \u0027smp\u002Bcbpc\u0027 is active while skeleton remap uncertainty remains (unsupported bones=113, sparseInference=False). Validate live chain routing and collision ownership under stress poses.",
+      "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "runtime-validation-plan.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "custom-skeleton",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace"
+      ],
+      "ProofDeliverables": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "runtime-validation-plan.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/"
+      ]
+    },
+    {
+      "Name": "Skeleton-family crossover signals (aquatic-humanoid, ube-extended, insectoid-humanoid) were detected while physics profile \u0027smp\u002Bcbpc\u0027 is active. Validate chain ownership, collision routing, and save/reload stability across framework crossover states.",
+      "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json",
+        "mod-stack-cross-validation.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "custom-skeleton",
+        "plugin-modstack",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "plugin-stack:plugin-free",
+        "plugin-family:plugin-free",
+        "master-chain:plugin-free",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace"
+      ],
+      "ProofDeliverables": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json",
+        "mod-stack-cross-validation.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/"
+      ]
+    },
+    {
+      "Name": "Difficult rig-family signals and active physics profile \u0027smp\u002Bcbpc\u0027 require stress verification of chain ownership, damping stability, and collision routing under dense animation changes.",
+      "ValidationSaveProfile": "custom-skeleton-remap-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "custom-skeleton",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "wing"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace"
+      ],
+      "ProofDeliverables": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/"
+      ]
+    },
+    {
+      "Name": "Runtime physics output is active for profile \u0027smp\u002Bcbpc\u0027. Verify live collision, damping, and bounce follow-through.",
+      "ValidationSaveProfile": "neutral-smoke-test-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "skeleton-compatibility.json",
+        "preview-workbench.html"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "custom-skeleton",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "skeleton-mode:partial-remap",
+        "source-skeleton-family:arthropod-framework",
+        "skeleton-variant:direct:arthropod-framework",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "world-physics.json",
+        "skeleton-compatibility.json",
+        "preview-workbench.html",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/"
+      ]
+    },
+    {
+      "Name": "World/drop validation is required for collision mode \u0027rigid-proxy\u0027 and heel profile \u0027flat\u0027",
+      "ValidationSaveProfile": "world-grounding-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "preview-workbench.html"
+      ],
+      "BlocksRelease": false,
+      "ProofAxes": [
+        "topology-transfer",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "feet",
+        "ground"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "bone-transform-tracking",
+        "skeleton-remap-trace",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "world-physics.json",
+        "preview-workbench.html",
+        "runtime-observation-bundle.json",
+        "skeleton-remap-traces/",
+        "bone-transform-traces/"
+      ]
+    },
+    {
+      "Name": "Validate heel IK, toe angle continuity, and sole contact stability for profile \u0027flat\u0027 before release.",
+      "ValidationSaveProfile": "world-grounding-validation-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "in-game-validation.json",
+        "preview-workbench.html"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "topology-transfer",
+        "runtime-automation",
+        "live-game-execution"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "topology-family:multipart-or-layered",
+        "hard-case-family:layered-openwork",
+        "hard-case-variant:layered-openwork",
+        "topology-classification:heuristic-heavy",
+        "topology-layout-family:openwork-layered",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "feet",
+        "heels",
+        "ankles",
+        "ground"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture",
+        "render-preview-capture",
+        "ownership-layout-snapshot",
+        "mesh-collision-probe"
+      ],
+      "ProofDeliverables": [
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "in-game-validation.json",
+        "preview-workbench.html",
+        "runtime-observation-bundle.json"
+      ]
+    },
+    {
+      "Name": "Do not treat 3BA as install-ready until the blocking runtime-validation steps have been completed and re-checked.",
+      "ValidationSaveProfile": "neutral-smoke-test-save",
+      "DispatchActions": [
+        "verify-related-artifacts",
+        "persist-release-gate-result"
+      ],
+      "SuccessSignals": [
+        "related-artifacts-readable",
+        "release-gate-persisted"
+      ],
+      "RelatedArtifacts": [
+        "runtime-validation-plan.json",
+        "in-game-validation.json",
+        "desktop-workflow-automation.json"
+      ],
+      "BlocksRelease": true,
+      "ProofAxes": [
+        "runtime-automation",
+        "live-game-execution",
+        "desktop-e2e"
+      ],
+      "MatrixCoordinatesTargeted": [
+        "target-body:3BA",
+        "target-body-family:3BA",
+        "support-tier:experimental-manual-cleanup",
+        "runtime-physics:smp\u002Bcbpc-extended",
+        "runtime-automation:external-harness-ready",
+        "live-game:external-live-game-harness"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "ObservationChannels": [
+        "runtime-log-capture",
+        "screenshot-capture"
+      ],
+      "ProofDeliverables": [
+        "runtime-validation-plan.json",
+        "in-game-validation.json",
+        "desktop-workflow-automation.json",
+        "runtime-observation-bundle.json"
+      ]
+    }
+  ],
+  "Probes": [
+    {
+      "ProbeId": "desktop-review-preflight",
+      "Scenario": "Open preview-workbench.html, conversion-quality.json, topology-correspondence.json, and desktop-workflow-automation.json for 3BA before starting live runtime checks.",
+      "Priority": "Action",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "load-preview-workbench",
+        "load-runtime-plan"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "preview-contract-loaded",
+        "runtime-plan-loaded"
+      ],
+      "FailureSignals": [
+        "focus-region-instability"
+      ],
+      "RelatedArtifacts": [
+        "desktop-workflow-automation.json",
+        "topology-correspondence.json",
+        "preview-workbench.html",
+        "conversion-quality.json"
+      ],
+      "BlocksRelease": false
+    },
+    {
+      "ProbeId": "manual-cleanup-workbench-pass",
+      "Scenario": "Topology correspondence and body-fit heuristics still indicate manual cleanup risk for 3BA. Review the flagged focus regions before trusting the runtime result.",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "open-outfit-studio-review",
+        "capture-cleanup-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "cleanup-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "semantic-fit-regression"
+      ],
+      "RelatedArtifacts": [
+        "topology-correspondence.json",
+        "conversion-quality.json",
+        "preview-workbench.html",
+        "skeleton-compatibility.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "core-fit-sweep",
+      "Scenario": "Baseline body-fit validation for 3BA using the core regions: belly, breasts, butt, chest, pelvis, thighs",
+      "Priority": "Action",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "conversion-quality.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "lowerbody-compression-sweep",
+      "Scenario": "Lower-body morphing or hotspot evidence was detected for: belly, butt, pelvis, thighs",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability"
+      ],
+      "RelatedArtifacts": [
+        "pose-simulation-report.json",
+        "preview-workbench.html",
+        "in-game-validation.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "oral-articulation-sweep",
+      "Scenario": "Extended oral/throat topology requires articulation checks for: mouth",
+      "Priority": "Action",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "preview-workbench.html",
+        "in-game-validation.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "jaw-tongue-pose-stress-sweep",
+      "Scenario": "Validate jaw and tongue deformation continuity for oral regions on 3BA: mouth",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability"
+      ],
+      "RelatedArtifacts": [
+        "pose-simulation-report.json",
+        "skeleton-compatibility.json",
+        "in-game-validation.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "topology-correspondence-workbench-pass",
+      "Scenario": "Topology correspondence remains heuristic-heavy for 3BA. Signals: topology-mismatch-risk, topology-islands:16, hole-boundary-warning, runtime-stress-signals.",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "open-outfit-studio-review",
+        "capture-cleanup-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "cleanup-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "semantic-fit-regression"
+      ],
+      "RelatedArtifacts": [
+        "conversion-quality.json",
+        "preview-workbench.html",
+        "morphs.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "layered-openwork-seam-sweep",
+      "Scenario": "Hard-case topology family \u0027layered-openwork\u0027 was detected for 3BA; verify seams, openings, windows, and multipart edge continuity under pose changes.",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability"
+      ],
+      "RelatedArtifacts": [
+        "topology-correspondence.json",
+        "preview-workbench.html",
+        "conversion-quality.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "perisland-ownership-layout-sweep",
+      "Scenario": "Topology layout family \u0027openwork-layered\u0027 requires deeper ownership review for 3BA; inspect 8 island(s) and 0 ownership/layout warning(s) before treating the hardest-case transfer as strict-proof-ready.",
+      "Priority": "Action",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability"
+      ],
+      "RelatedArtifacts": [
+        "topology-correspondence.json",
+        "conversion-quality.json",
+        "preview-workbench.html"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "wing-fold-and-feather-sweep",
+      "Scenario": "Winged topology coverage was detected for 3BA: wing",
+      "Priority": "Action",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "skeleton-compatibility.json",
+        "in-game-validation.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "beast-locomotion-sweep",
+      "Scenario": "Custom race or appendage-sensitive coverage detected for 3BA: genitals, tail, wing",
+      "Priority": "Action",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability"
+      ],
+      "RelatedArtifacts": [
+        "race-compatibility.json",
+        "skeleton-compatibility.json",
+        "preview-workbench.html"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "sensitive-collision-and-articulation-sweep",
+      "Scenario": "Sensitive oral/genital topology was detected for 3BA; verify collision, clipping, and contact-driven articulation across isolated body islands.",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "physics-instability"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "skeleton-compatibility.json",
+        "world-physics.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "genital-groin-collision-stress-sweep",
+      "Scenario": "Genital/groin-sensitive regions were detected for 3BA; verify collision ownership, clipping resistance, and load-order-safe plugin patch placement.",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "physics-instability"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "plugin-patches.json",
+        "pose-simulation-report.json",
+        "in-game-validation.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "custom-skeleton-remap-sweep",
+      "Scenario": "Unsupported or sparsely inferred bones still need live verification: SAM Genitals, SAM Foreskin, HDT Mouth, SOS GenitalsBase, SOS Genitals01, SOS Genitals02",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "load-preview-workbench",
+        "load-runtime-plan"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "preview-contract-loaded",
+        "runtime-plan-loaded"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "skeleton-remap-regression"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "conversion-quality.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "skeleton-family-crossover-sweep",
+      "Scenario": "Source skeleton \u0027aquatic-humanoid\u0027 sits near a rig-family crossover; alternate rig-family candidates remain close: ube-extended (1), insectoid-humanoid (1). Automatic remap safety remains unsafe.",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "load-preview-workbench",
+        "load-runtime-plan"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "preview-contract-loaded",
+        "runtime-plan-loaded"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "skeleton-remap-regression"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "mod-stack-cross-validation.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "manual-cleanup-workbench-pass",
+      "Scenario": "Automatic conversion still left high-risk topology, sparse rig, or sensitive appendage concerns for 3BA",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "open-outfit-studio-review",
+        "capture-cleanup-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "cleanup-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "semantic-fit-regression"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "conversion-quality.json",
+        "skeleton-compatibility.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "follower-beast-customrig-physics-variance-sweep",
+      "Scenario": "Follower/beast/custom-rig skeleton variance was detected for 3BA; rig-family signals: aquatic-humanoid, ube-extended, insectoid-humanoid; requested physics profile \u0027smp\u002Bcbpc\u0027 with collision mode \u0027rigid-proxy\u0027, and runtime physics profile output was generated. Reconfirm chain routing and collision ownership across mixed framework states (no race-compatibility warnings were raised).",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "physics-instability"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json",
+        "mod-stack-cross-validation.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "skeleton-physics-chain-compatibility-sweep",
+      "Scenario": "Physics profile \u0027smp\u002Bcbpc\u0027 is active while skeleton remap uncertainty remains (unsupported bones=113, sparseInference=False). Validate live chain routing and collision ownership under stress poses.",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "skeleton-remap-regression",
+        "physics-instability"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "runtime-validation-plan.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "crossframework-skeleton-physics-sweep",
+      "Scenario": "Skeleton-family crossover signals (aquatic-humanoid, ube-extended, insectoid-humanoid) were detected while physics profile \u0027smp\u002Bcbpc\u0027 is active. Validate chain ownership, collision routing, and save/reload stability across framework crossover states.",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "skeleton-remap-regression",
+        "physics-instability"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json",
+        "mod-stack-cross-validation.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "difficult-skeletonphysics-chain-stress-sweep",
+      "Scenario": "Difficult rig-family signals and active physics profile \u0027smp\u002Bcbpc\u0027 require stress verification of chain ownership, damping stability, and collision routing under dense animation changes.",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "skeleton-remap-regression",
+        "physics-instability"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "physics-collision-sweep",
+      "Scenario": "Runtime physics output is active for profile \u0027smp\u002Bcbpc\u0027. Verify live collision, damping, and bounce follow-through.",
+      "Priority": "Action",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "physics-instability"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "skeleton-compatibility.json",
+        "preview-workbench.html"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "ground-and-drop-sweep",
+      "Scenario": "World/drop validation is required for collision mode \u0027rigid-proxy\u0027 and heel profile \u0027flat\u0027",
+      "Priority": "Info",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "focus-region-instability",
+        "physics-instability"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "preview-workbench.html"
+      ],
+      "BlocksRelease": false
+    },
+    {
+      "ProbeId": "heel-ik-and-groundcontact-sweep",
+      "Scenario": "Validate heel IK, toe angle continuity, and sole contact stability for profile \u0027flat\u0027 before release.",
+      "Priority": "Action",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "equip-converted-outfit",
+        "dispatch-animation-sequence",
+        "capture-runtime-observation"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "outfit-equipped",
+        "animation-sequence-dispatched",
+        "runtime-observation-captured"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "physics-instability"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "in-game-validation.json",
+        "preview-workbench.html"
+      ],
+      "BlocksRelease": true
+    },
+    {
+      "ProbeId": "release-gate-review",
+      "Scenario": "Do not treat 3BA as install-ready until the blocking runtime-validation steps have been completed and re-checked.",
+      "Priority": "High",
+      "LaunchActions": [
+        "verify-related-artifacts",
+        "persist-release-gate-result"
+      ],
+      "ExpectedSignals": [
+        "related-artifacts-readable",
+        "release-gate-persisted"
+      ],
+      "FailureSignals": [
+        "blocking-step-unresolved",
+        "focus-region-instability",
+        "release-gate-failed"
+      ],
+      "RelatedArtifacts": [
+        "runtime-validation-plan.json",
+        "in-game-validation.json",
+        "desktop-workflow-automation.json"
+      ],
+      "BlocksRelease": true
+    }
+  ]
+}

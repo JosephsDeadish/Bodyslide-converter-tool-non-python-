@@ -1,0 +1,110 @@
+{
+  "TargetBody": "3BA",
+  "SupportTier": "experimental-manual-cleanup",
+  "ConversionReadiness": {
+    "SupportTier": "experimental-manual-cleanup",
+    "Summary": "3BA currently fits the experimental/manual-cleanup tier: conversion can proceed=False, physics-ready=True, safe-animation=False, skeleton reliability=provisional, remap safety=unsafe, target-body support=direct.",
+    "CanConvert": false,
+    "CanPhysicsConvert": true,
+    "CanSafelyAnimate": false,
+    "SkeletonReliability": "provisional",
+    "SkeletonRemapSafety": "unsafe",
+    "TargetBodySupportReliability": "direct",
+    "RecommendedReleaseGate": "manual-cleanup"
+  },
+  "ManualCleanupLikely": true,
+  "RuntimeVerificationRequired": true,
+  "TopologyCorrespondence": {
+    "Classification": "heuristic-heavy",
+    "Confidence": 0.27,
+    "HeuristicHeavy": true,
+    "MatchingMode": "heuristic-island-regional",
+    "UsesTrueSemanticCorrespondence": false,
+    "CorrespondenceScope": "heuristic-only",
+    "SemanticVertexMatchingStatus": "heuristic-regional",
+    "SemanticAnchorProfile": null,
+    "SemanticAnchorCoverage": 0,
+    "MatchedFocusRegionCount": 0,
+    "CoveredFocusRegionCount": 0,
+    "LandmarkRegionCount": 0,
+    "ObservedTokenCount": 43,
+    "SemanticAnchorEvidence": [],
+    "UnmatchedFocusRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "RequiresManualSemanticReview": true,
+    "HardCaseFamily": "layered-openwork",
+    "StrictTransferReady": false,
+    "LimitationNotes": [
+      "Topology matching still relies on heuristic island, boundary, and regional correspondence rather than full authored semantic vertex correspondence.",
+      "Source and target topology diverged enough that automatic correspondence should be treated as advisory only.",
+      "Heuristic-heavy correspondence means radically different meshes still need manual Outfit Studio review before release.",
+      "No authored semantic anchor profile was available for this target body, so true landmark-backed correspondence is still unavailable."
+    ],
+    "Signals": [
+      "topology-mismatch-risk",
+      "topology-islands:16",
+      "hole-boundary-warning",
+      "runtime-stress-signals",
+      "hard-case-without-semantic-anchors",
+      "hard-case-needs-broad-anchor-coverage",
+      "radical-topology-risk",
+      "tightened-variance-threshold:0.22",
+      "boundary-risk:high",
+      "multi-island-topology:16",
+      "estimated-island-membership"
+    ],
+    "FocusRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "Recommendations": [
+      "Open preview-workbench.html and morphs.json, then compare arms, belly, breasts, butt against the converted mesh before trusting automatic correspondence.",
+      "Plan an Outfit Studio cleanup pass or closer source-body selection when radically different mesh semantics cannot be matched automatically.",
+      "Treat the reported topology correspondence as review guidance, not proof of true semantic mesh alignment."
+    ],
+    "RadicalTopologyRisk": true,
+    "CorrespondenceStability": "radical-divergence",
+    "BoundaryRisk": "high",
+    "HighVarianceRegionCount": 0,
+    "HighVarianceRegions": [],
+    "StabilitySignals": [
+      "tightened-variance-threshold:0.22",
+      "boundary-risk:high",
+      "multi-island-topology:16",
+      "estimated-island-membership"
+    ],
+    "StrictTransferBlockers": [
+      "classification:heuristic-heavy",
+      "semantic-anchor-scope:heuristic-only",
+      "unmatched-focus-regions:arms\u002Bbelly\u002Bbreasts\u002Bbutt",
+      "hard-case-family:layered-openwork",
+      "radical-topology-risk",
+      "boundary-risk:high"
+    ],
+    "OwnershipLayoutSignals": [
+      "island-count:16",
+      "estimated-island-membership",
+      "boundary-risk:high"
+    ]
+  },
+  "ReviewArtifacts": [
+    "preview-workbench.html",
+    "conversion-quality.json",
+    "in-game-validation.json",
+    "runtime-validation-plan.json"
+  ]
+}

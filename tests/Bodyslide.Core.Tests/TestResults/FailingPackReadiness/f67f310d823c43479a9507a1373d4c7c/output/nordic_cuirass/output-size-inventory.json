@@ -1,0 +1,35 @@
+{
+  "Complete": true,
+  "FileCount": 98,
+  "TotalBytes": 794587,
+  "ScanMilliseconds": 2,
+  "Categories": [
+    {
+      "Category": "meshes",
+      "FileCount": 9,
+      "Bytes": 3507
+    },
+    {
+      "Category": "morphs",
+      "FileCount": 33,
+      "Bytes": 32174
+    },
+    {
+      "Category": "other",
+      "FileCount": 12,
+      "Bytes": 12278
+    },
+    {
+      "Category": "reports",
+      "FileCount": 30,
+      "Bytes": 744116
+    },
+    {
+      "Category": "textures",
+      "FileCount": 14,
+      "Bytes": 2512
+    }
+  ],
+  "Warnings": [],
+  "Scope": "Physical output files; archive bytes are additional to unpacked files. Inventory excludes itself."
+}

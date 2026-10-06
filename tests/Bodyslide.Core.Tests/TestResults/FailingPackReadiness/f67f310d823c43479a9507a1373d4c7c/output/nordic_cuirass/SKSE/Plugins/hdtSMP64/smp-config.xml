@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="3BAArmorPhysics">
+  <bone name="NPC Belly" mass="1.65" stiffness="1.01" damping="0.69">
+    <angularLimit min="-7" max="7" restitution="0.08" />
+  </bone>
+  <bone name="NPC L Breast" mass="2.31" stiffness="0.87" damping="0.64">
+    <angularLimit min="-11.2" max="11.2" restitution="0.12" />
+  </bone>
+  <bone name="NPC L Breast01" mass="2.31" stiffness="0.87" damping="0.64">
+    <angularLimit min="-11.2" max="11.2" restitution="0.12" />
+  </bone>
+  <bone name="NPC L Breast02" mass="2.31" stiffness="0.87" damping="0.64">
+    <angularLimit min="-11.2" max="11.2" restitution="0.12" />
+  </bone>
+  <bone name="NPC L Butt" mass="2.04" stiffness="0.83" damping="0.67">
+    <angularLimit min="-9.8" max="9.8" restitution="0.14" />
+  </bone>
+  <bone name="NPC L Thigh" mass="2.04" stiffness="0.83" damping="0.67">
+    <angularLimit min="-9.8" max="9.8" restitution="0.14" />
+  </bone>
+  <bone name="NPC R Breast" mass="2.31" stiffness="0.87" damping="0.64">
+    <angularLimit min="-11.2" max="11.2" restitution="0.12" />
+  </bone>
+  <bone name="NPC R Breast01" mass="2.31" stiffness="0.87" damping="0.64">
+    <angularLimit min="-11.2" max="11.2" restitution="0.12" />
+  </bone>
+  <bone name="NPC R Breast02" mass="2.31" stiffness="0.87" damping="0.64">
+    <angularLimit min="-11.2" max="11.2" restitution="0.12" />
+  </bone>
+  <bone name="NPC R Butt" mass="2.04" stiffness="0.83" damping="0.67">
+    <angularLimit min="-9.8" max="9.8" restitution="0.14" />
+  </bone>
+  <bone name="NPC R Thigh" mass="2.04" stiffness="0.83" damping="0.67">
+    <angularLimit min="-9.8" max="9.8" restitution="0.14" />
+  </bone>
+</system>

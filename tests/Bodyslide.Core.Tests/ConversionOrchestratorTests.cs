@@ -34719,6 +34719,30 @@ public sealed class CustomBodyProfileSupportTests
     }
 
     [Fact]
+    public async Task ImportAsync_NormalizesNegativeCustomProfileVertexRange()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        await File.WriteAllBytesAsync(Path.Combine(tmpDir, "armor_0.nif"), new byte[64]);
+        await File.WriteAllTextAsync(
+            Path.Combine(tmpDir, "custom.slidesmith-body.json"),
+            """{"name":"Custom","vertexCountMin":-20,"vertexCountMax":-50}""");
+
+        try
+        {
+            var armor = await new LocalArmorImportService().ImportAsync(tmpDir, CancellationToken.None);
+            var profile = Assert.Single(armor.CustomBodyProfiles ?? []);
+
+            Assert.Equal(0, profile.VertexCountMin);
+            Assert.Equal(0, profile.VertexCountMax);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ImportAsync_IgnoresPreviouslyGeneratedOutputTrees()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

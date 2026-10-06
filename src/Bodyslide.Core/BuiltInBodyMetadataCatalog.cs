@@ -215,6 +215,8 @@ internal static class BuiltInBodyMetadataCatalog
         var name = dto.Name.Trim();
         var gender = string.Equals(dto.Gender, "male", StringComparison.OrdinalIgnoreCase) ? "male" : "female";
         var physics = string.IsNullOrWhiteSpace(dto.DefaultPhysics) ? "none" : dto.DefaultPhysics.Trim();
+        var vertexCountMin = Math.Max(0, dto.VertexCountMin);
+        var vertexCountMax = Math.Max(vertexCountMin, dto.VertexCountMax);
 
         return new BuiltInBodyMetadata(
             name,
@@ -230,8 +232,8 @@ internal static class BuiltInBodyMetadataCatalog
             NormalizeStringList(dto.DetectionTokens),
             NormalizeStringList(dto.TextureTokens),
             NormalizeStringList(dto.PhysicsTokens),
-            Math.Max(0, dto.VertexCountMin),
-            Math.Max(dto.VertexCountMin, dto.VertexCountMax),
+            vertexCountMin,
+            vertexCountMax,
             dto.HeightToWidthRatioMin,
             dto.HeightToWidthRatioMax,
             dto.DepthToWidthRatioMin,

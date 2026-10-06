@@ -1,0 +1,64 @@
+imported:meshes=2,textures=2,physics=1,bodyrefs=3
+custom-bodies:1
+weight-variants:pairs=1,incomplete=0
+vanilla-armor:unknown
+fallback-body:CBBE
+textures:missing-normals=2
+detected-body:CBBE@53 %
+body-evidence:reference:50 %,reference-mesh:50 %,bone-sig:60 %
+mesh-type:plate
+mesh-features:split+accessory+rigid
+mesh-topology:islands=8,interior-edges=142,non-manifold-edges=0,labels=estimated-edge-network+independent-islands+interior-edge-network+split-cage-candidate
+regions:chest+belly,method=bone-names
+cage:rigid-regional-cage
+conversion-delta:CBBE→3BA
+mesh-converted:cage+rigid-islands+normal-preservation
+rigid-islands:count=10,coverage=94 %,method=plate-anatomy-clustering
+weights:nearest-triangle+heatmap+normalized-smoothing+physics-weights
+smp-bones:NPC Belly+NPC L Breast01+NPC R Breast01
+physics-injection:NPC Belly+NPC L Breast+NPC L Breast01+NPC L Breast02+NPC L Butt+NPC L Thigh+NPC R Breast+NPC R Breast01+NPC R Breast02+NPC R Butt+NPC R Thigh
+weight-solver:fixed-over=28,fixed-under=5,disconnected=2
+normals:angle-weighted,recalculated=11932,groups=3
+skeleton:105-mapped,113-unsupported
+skeleton-warnings:unsupported-bones=SAM Genitals+SAM Foreskin+HDT Mouth+SOS GenitalsBase+SOS Genitals01+SOS Genitals02+SOS Foreskin+SOS Shaft+SOS Glans+SOS Scrotum+Vagina+VaginaDeep+Labia.L+Labia.R+Anus+AnusOuter+HDT Jaw+HDT JawLower+HDT JawUpper+HDT Tongue+HDT TongueMid+HDT TongueTip+HDT Throat+HDT ThroatLower+TNG Genitals+TNG Foreskin+TNG Shaft+TNG Glans+TNG Balls+NPC Tail+Tail1+Tail2+Tail3+Tail4+Tail5+CoilRoot+CoilMid+CoilTip+Horn.L+Horn.R+GoatHorn.L+GoatHorn.R+Wing.L+Wing.R+WingTip.L+WingTip.R+Feather.L+Feather.R+Branch.L+Branch.R+BranchMid.L+BranchMid.R+Vine.L+Vine.R+VineMid.L+VineMid.R+RootClaw.L+RootClaw.R+LeafFrond.L+LeafFrond.R+ManeRoot+ManeTip+Forelock+TailTip+Fetlock.L+Fetlock.R+TailSheath+BeastForeskin+BeastGlans+BeastKnot+BeastScrotum+BeastVagina+BeastAnus+JawLower+TongueMid+TongueTip+WingMid.L+WingMid.R+Feather01.L+Feather01.R+Feather02.L+Feather02.R+Feather03.L+Feather03.R+Talon.L+Talon.R+PawFront.L+PawFront.R+TailBarb+WingFinger01.L+WingFinger01.R+Antenna.L+Antenna.R+AntennaMid.L+AntennaMid.R+Mandible.L+Mandible.R+MandibleMid.L+MandibleMid.R+CarapaceWing.L+CarapaceWing.R+CarapaceWingMid.L+CarapaceWingMid.R+CarapaceWingTip.L+CarapaceWingTip.R+TailFin+TailFinTip+WhiskerMid.L+WhiskerMid.R+Frill.L+Frill.R+FrillMid.L+FrillMid.R
+morphs:low-weight:15-sliders/high-weight:15-sliders,sliders=15,match=70 %
+partitions:32:Body,33:Hands,37:Feet,38:Calves
+clipping:none
+correction:not-required
+voxel-collision:none
+pose-simulation:tested=8,at-risk-poses=1,high-risk=chest
+physics:smp+cbpc
+bodyslide:nordic_cuirass_3BA,15-sliders
+timings:conversion-timings.json
+normal-stubs:generated=2
+aux-stubs:specular=2,parallax=2,glow=2,roughness=2,subsurface=2
+stage-ms:export=1485
+stage-ms:skeleton-mapping=785
+stage-ms:morph-generation=212
+stage-ms:mesh-conversion=107
+stage-ms:body-detection=44
+stage-ms:texture-analysis=39
+stage-ms:import=31
+stage-ms:mesh-analysis=11
+stage-ms:physics-build=1
+stage-ms:weight-transfer=1
+stage-ms:bodyslide-project=0
+stage-ms:clipping-detection=0
+stage-ms:deformation-cage=0
+stage-ms:learning-cache-load=0
+stage-ms:mesh-correction=0
+stage-ms:normal-recalculation=0
+stage-ms:partition-rebuild=0
+stage-ms:plugin-analysis=0
+stage-ms:pose-simulation=0
+stage-ms:region-binding=0
+stage-ms:rigid-island-detection=0
+stage-ms:voxel-collision=0
+stage-ms:weight-solver=0
+stage-top:export:1485ms,skeleton-mapping:785ms,morph-generation:212ms
+phase-ms:export=1485
+phase-ms:convert=1106
+phase-ms:inspect=94
+phase-ms:import=31
+phase-top:export:1485ms,convert:1106ms,inspect:94ms
+pipeline-total-ms:2801

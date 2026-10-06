@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SliderGroups>
+  <Group name="SlideSmith">
+    <Member name="nordic_cuirass_3BA - nordic_cuirass" />
+  </Group>
+  <Group name="3BA">
+    <Member name="nordic_cuirass_3BA - nordic_cuirass" />
+  </Group>
+  <Group name="SlideSmith - 3BA">
+    <Member name="nordic_cuirass_3BA - nordic_cuirass" />
+  </Group>
+  <Group name="nordic_cuirass_3BA">
+    <Member name="nordic_cuirass_3BA - nordic_cuirass" />
+  </Group>
+</SliderGroups>

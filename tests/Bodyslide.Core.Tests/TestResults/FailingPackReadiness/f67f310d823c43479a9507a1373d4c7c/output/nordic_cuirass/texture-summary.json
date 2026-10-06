@@ -1,0 +1,38 @@
+{
+  "TotalCount": 2,
+  "DiffuseFiles": [
+    "nordic_boots.dds",
+    "nordic_cuirass.dds"
+  ],
+  "NormalFiles": [],
+  "MissingNormals": [
+    "nordic_boots.dds",
+    "nordic_cuirass.dds"
+  ],
+  "SpecularFiles": [],
+  "GlowFiles": [],
+  "ParallaxFiles": [],
+  "SubsurfaceFiles": [],
+  "MaterialTexturePaths": [],
+  "MissingSpecular": [
+    "nordic_boots.dds",
+    "nordic_cuirass.dds"
+  ],
+  "MissingParallax": [
+    "nordic_boots.dds",
+    "nordic_cuirass.dds"
+  ],
+  "MissingGlow": [
+    "nordic_boots.dds",
+    "nordic_cuirass.dds"
+  ],
+  "RoughnessFiles": [],
+  "MissingRoughness": [
+    "nordic_boots.dds",
+    "nordic_cuirass.dds"
+  ],
+  "MissingSubsurface": [
+    "nordic_boots.dds",
+    "nordic_cuirass.dds"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "LowMorph": "low-weight:15-sliders",
+  "HighMorph": "high-weight:15-sliders",
+  "BodySlideCompatible": true,
+  "BodySlideCompatibilityMeaning": "Generated project/morph scaffold compatibility only; not a verified BodySlide build or Skyrim-ready conversion.",
+  "SliderCount": 15,
+  "SourceBodyMatchRatio": 0.7,
+  "SourceBodyMatchRatioMeaning": "Heuristic weighting/profile confidence; not measured body-fit accuracy.",
+  "SourceMorphQuality": null,
+  "ReusableSourceMorphPayloads": {},
+  "SourceAssetSupport": {
+    "HasOsp": true,
+    "HasTriPayloads": false,
+    "HasBsdPayloads": false,
+    "HasReferenceAssets": true,
+    "UsedFallbackSliders": true,
+    "MissingAssets": [
+      "morph-payloads"
+    ],
+    "ReusablePayloadSliderCount": 0,
+    "InferredSourceBody": "CBBE",
+    "InferenceSignals": [
+      "body-reference:detection:caliente",
+      "body-reference:reference:femalebody_0",
+      "body-reference:texture:femalebody_0"
+    ],
+    "InferredDeformationProfile": null,
+    "HasOsdPayloads": false,
+    "FallbackInferredFromPathEvidenceCount": 1,
+    "DiscoveryMilliseconds": 11,
+    "DiscoveredFileCount": 1
+  }
+}

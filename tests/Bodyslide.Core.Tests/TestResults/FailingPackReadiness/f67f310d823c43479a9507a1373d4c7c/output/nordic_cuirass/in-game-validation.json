@@ -1,0 +1,699 @@
+{
+  "TargetBody": "3BA",
+  "ValidationStatus": "high-risk",
+  "ValidationGate": "FAIL",
+  "CoreBodyRegions": [
+    "belly",
+    "breasts",
+    "butt",
+    "chest",
+    "pelvis",
+    "thighs"
+  ],
+  "SensitiveRegions": [
+    "branch",
+    "genitals",
+    "mane",
+    "mouth",
+    "tail",
+    "wing"
+  ],
+  "ReviewArtifacts": [
+    "preview-workbench.html",
+    "conversion-quality.json",
+    "skeleton-compatibility.json",
+    "in-game-validation.json",
+    "CalienteTools/BodySlide/ShapeData/",
+    "pose-simulation-report.json",
+    "race-compatibility.json",
+    "plugin-patches.json",
+    "texture-summary.json"
+  ],
+  "SupportTier": "experimental-manual-cleanup",
+  "ConversionReadiness": {
+    "SupportTier": "experimental-manual-cleanup",
+    "Summary": "3BA currently fits the experimental/manual-cleanup tier: conversion can proceed=False, physics-ready=True, safe-animation=False, skeleton reliability=provisional, remap safety=unsafe, target-body support=direct.",
+    "CanConvert": false,
+    "CanPhysicsConvert": true,
+    "CanSafelyAnimate": false,
+    "SkeletonReliability": "provisional",
+    "SkeletonRemapSafety": "unsafe",
+    "TargetBodySupportReliability": "direct",
+    "RecommendedReleaseGate": "manual-cleanup"
+  },
+  "ManualCleanupLikely": true,
+  "RuntimeVerificationRequired": true,
+  "Caveats": [
+    "Radically different topology can still need manual Outfit Studio cleanup before release.",
+    "Extreme oral/genital/alien/custom appendage meshes remain the highest-risk automatic conversion path.",
+    "Generated validation guidance improves review for 3BA, but it is not a substitute for real in-game/runtime checks."
+  ],
+  "TopologyCorrespondence": {
+    "Classification": "heuristic-heavy",
+    "Confidence": 0.27,
+    "HeuristicHeavy": true,
+    "MatchingMode": "heuristic-island-regional",
+    "UsesTrueSemanticCorrespondence": false,
+    "CorrespondenceScope": "heuristic-only",
+    "SemanticVertexMatchingStatus": "heuristic-regional",
+    "SemanticAnchorProfile": null,
+    "SemanticAnchorCoverage": 0,
+    "MatchedFocusRegionCount": 0,
+    "CoveredFocusRegionCount": 0,
+    "LandmarkRegionCount": 0,
+    "ObservedTokenCount": 43,
+    "SemanticAnchorEvidence": [],
+    "UnmatchedFocusRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "RequiresManualSemanticReview": true,
+    "HardCaseFamily": "layered-openwork",
+    "StrictTransferReady": false,
+    "LimitationNotes": [
+      "Topology matching still relies on heuristic island, boundary, and regional correspondence rather than full authored semantic vertex correspondence.",
+      "Source and target topology diverged enough that automatic correspondence should be treated as advisory only.",
+      "Heuristic-heavy correspondence means radically different meshes still need manual Outfit Studio review before release.",
+      "No authored semantic anchor profile was available for this target body, so true landmark-backed correspondence is still unavailable."
+    ],
+    "Signals": [
+      "topology-mismatch-risk",
+      "topology-islands:16",
+      "hole-boundary-warning",
+      "runtime-stress-signals",
+      "hard-case-without-semantic-anchors",
+      "hard-case-needs-broad-anchor-coverage",
+      "radical-topology-risk",
+      "tightened-variance-threshold:0.22",
+      "boundary-risk:high",
+      "multi-island-topology:16",
+      "estimated-island-membership"
+    ],
+    "FocusRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "Recommendations": [
+      "Open preview-workbench.html and morphs.json, then compare arms, belly, breasts, butt against the converted mesh before trusting automatic correspondence.",
+      "Plan an Outfit Studio cleanup pass or closer source-body selection when radically different mesh semantics cannot be matched automatically.",
+      "Treat the reported topology correspondence as review guidance, not proof of true semantic mesh alignment."
+    ],
+    "RadicalTopologyRisk": true,
+    "CorrespondenceStability": "radical-divergence",
+    "BoundaryRisk": "high",
+    "HighVarianceRegionCount": 0,
+    "HighVarianceRegions": [],
+    "StabilitySignals": [
+      "tightened-variance-threshold:0.22",
+      "boundary-risk:high",
+      "multi-island-topology:16",
+      "estimated-island-membership"
+    ],
+    "StrictTransferBlockers": [
+      "classification:heuristic-heavy",
+      "semantic-anchor-scope:heuristic-only",
+      "unmatched-focus-regions:arms\u002Bbelly\u002Bbreasts\u002Bbutt",
+      "hard-case-family:layered-openwork",
+      "radical-topology-risk",
+      "boundary-risk:high"
+    ],
+    "OwnershipLayoutSignals": [
+      "island-count:16",
+      "estimated-island-membership",
+      "boundary-risk:high"
+    ]
+  },
+  "ScenarioMatrix": [
+    {
+      "Name": "Core fit sweep",
+      "Priority": "Action",
+      "Trigger": "Baseline body-fit validation for 3BA using the core regions: belly, breasts, butt, chest, pelvis, thighs",
+      "SuggestedAnimations": [
+        "idle",
+        "walk",
+        "turn",
+        "draw weapon"
+      ],
+      "FocusRegions": [
+        "belly",
+        "breasts",
+        "butt",
+        "chest",
+        "pelvis",
+        "thighs"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "conversion-quality.json"
+      ]
+    },
+    {
+      "Name": "Lower-body compression sweep",
+      "Priority": "High",
+      "Trigger": "Lower-body morphing or hotspot evidence was detected for: belly, butt, pelvis, thighs",
+      "SuggestedAnimations": [
+        "crouch",
+        "sit",
+        "sprint",
+        "jump"
+      ],
+      "FocusRegions": [
+        "belly",
+        "butt",
+        "pelvis",
+        "thighs"
+      ],
+      "RelatedArtifacts": [
+        "pose-simulation-report.json",
+        "preview-workbench.html",
+        "in-game-validation.json"
+      ]
+    },
+    {
+      "Name": "Oral articulation sweep",
+      "Priority": "Action",
+      "Trigger": "Extended oral/throat topology requires articulation checks for: mouth",
+      "SuggestedAnimations": [
+        "talk / phoneme",
+        "open mouth",
+        "combat yell",
+        "stagger"
+      ],
+      "FocusRegions": [
+        "mouth"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "preview-workbench.html",
+        "in-game-validation.json"
+      ]
+    },
+    {
+      "Name": "Jaw/tongue pose stress sweep",
+      "Priority": "High",
+      "Trigger": "Validate jaw and tongue deformation continuity for oral regions on 3BA: mouth",
+      "SuggestedAnimations": [
+        "phoneme set",
+        "open mouth",
+        "ragdoll / hit react",
+        "camera close-up"
+      ],
+      "FocusRegions": [
+        "mouth"
+      ],
+      "RelatedArtifacts": [
+        "pose-simulation-report.json",
+        "skeleton-compatibility.json",
+        "in-game-validation.json"
+      ]
+    },
+    {
+      "Name": "Topology correspondence workbench pass",
+      "Priority": "High",
+      "Trigger": "Topology correspondence remains heuristic-heavy for 3BA. Signals: topology-mismatch-risk, topology-islands:16, hole-boundary-warning, runtime-stress-signals.",
+      "SuggestedAnimations": [
+        "idle",
+        "crouch",
+        "jump",
+        "preview compare"
+      ],
+      "FocusRegions": [
+        "arms",
+        "belly",
+        "breasts",
+        "butt",
+        "chest",
+        "pelvis",
+        "shoulders",
+        "thighs"
+      ],
+      "RelatedArtifacts": [
+        "conversion-quality.json",
+        "preview-workbench.html",
+        "morphs.json"
+      ]
+    },
+    {
+      "Name": "Layered/openwork seam sweep",
+      "Priority": "High",
+      "Trigger": "Hard-case topology family \u0027layered-openwork\u0027 was detected for 3BA; verify seams, openings, windows, and multipart edge continuity under pose changes.",
+      "SuggestedAnimations": [
+        "idle",
+        "turn",
+        "crouch",
+        "jump / landing"
+      ],
+      "FocusRegions": [
+        "arms",
+        "belly",
+        "breasts",
+        "butt",
+        "chest",
+        "pelvis",
+        "shoulders",
+        "thighs"
+      ],
+      "RelatedArtifacts": [
+        "topology-correspondence.json",
+        "preview-workbench.html",
+        "conversion-quality.json"
+      ]
+    },
+    {
+      "Name": "Per-island ownership/layout sweep",
+      "Priority": "Action",
+      "Trigger": "Topology layout family \u0027openwork-layered\u0027 requires deeper ownership review for 3BA; inspect 8 island(s) and 0 ownership/layout warning(s) before treating the hardest-case transfer as strict-proof-ready.",
+      "SuggestedAnimations": [
+        "preview compare",
+        "equip",
+        "crouch",
+        "jump / landing"
+      ],
+      "FocusRegions": [
+        "arms",
+        "belly",
+        "breasts",
+        "butt",
+        "chest",
+        "pelvis",
+        "shoulders",
+        "thighs"
+      ],
+      "RelatedArtifacts": [
+        "topology-correspondence.json",
+        "conversion-quality.json",
+        "preview-workbench.html"
+      ]
+    },
+    {
+      "Name": "Wing fold and feather sweep",
+      "Priority": "Action",
+      "Trigger": "Winged topology coverage was detected for 3BA: wing",
+      "SuggestedAnimations": [
+        "turn in place",
+        "jump",
+        "sprint",
+        "landing / stagger"
+      ],
+      "FocusRegions": [
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "skeleton-compatibility.json",
+        "in-game-validation.json"
+      ]
+    },
+    {
+      "Name": "Beast locomotion sweep",
+      "Priority": "Action",
+      "Trigger": "Custom race or appendage-sensitive coverage detected for 3BA: genitals, tail, wing",
+      "SuggestedAnimations": [
+        "walk",
+        "turn in place",
+        "sprint",
+        "jump"
+      ],
+      "FocusRegions": [
+        "genitals",
+        "tail",
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "race-compatibility.json",
+        "skeleton-compatibility.json",
+        "preview-workbench.html"
+      ]
+    },
+    {
+      "Name": "Sensitive collision and articulation sweep",
+      "Priority": "High",
+      "Trigger": "Sensitive oral/genital topology was detected for 3BA; verify collision, clipping, and contact-driven articulation across isolated body islands.",
+      "SuggestedAnimations": [
+        "idle",
+        "walk",
+        "sit",
+        "stagger"
+      ],
+      "FocusRegions": [
+        "genitals",
+        "mouth"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "skeleton-compatibility.json",
+        "world-physics.json"
+      ]
+    },
+    {
+      "Name": "Genital/groin collision stress sweep",
+      "Priority": "High",
+      "Trigger": "Genital/groin-sensitive regions were detected for 3BA; verify collision ownership, clipping resistance, and load-order-safe plugin patch placement.",
+      "SuggestedAnimations": [
+        "idle",
+        "walk",
+        "sit",
+        "combat stagger",
+        "save / reload"
+      ],
+      "FocusRegions": [
+        "genitals"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "plugin-patches.json",
+        "pose-simulation-report.json",
+        "in-game-validation.json"
+      ]
+    },
+    {
+      "Name": "Custom skeleton remap sweep",
+      "Priority": "High",
+      "Trigger": "Unsupported or sparsely inferred bones still need live verification: SAM Genitals, SAM Foreskin, HDT Mouth, SOS GenitalsBase, SOS Genitals01, SOS Genitals02",
+      "SuggestedAnimations": [
+        "idle",
+        "walk",
+        "combat"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "conversion-quality.json"
+      ]
+    },
+    {
+      "Name": "Skeleton family crossover sweep",
+      "Priority": "High",
+      "Trigger": "Source skeleton \u0027aquatic-humanoid\u0027 sits near a rig-family crossover; alternate rig-family candidates remain close: ube-extended (1), insectoid-humanoid (1). Automatic remap safety remains unsafe.",
+      "SuggestedAnimations": [
+        "idle",
+        "walk",
+        "combat",
+        "save / reload"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "mod-stack-cross-validation.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json"
+      ]
+    },
+    {
+      "Name": "Manual cleanup workbench pass",
+      "Priority": "High",
+      "Trigger": "Automatic conversion still left high-risk topology, sparse rig, or sensitive appendage concerns for 3BA",
+      "SuggestedAnimations": [
+        "preview compare",
+        "Outfit Studio vertex cleanup"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "conversion-quality.json",
+        "skeleton-compatibility.json"
+      ]
+    },
+    {
+      "Name": "Follower/beast/custom-rig physics variance sweep",
+      "Priority": "High",
+      "Trigger": "Follower/beast/custom-rig skeleton variance was detected for 3BA; rig-family signals: aquatic-humanoid, ube-extended, insectoid-humanoid; requested physics profile \u0027smp\u002Bcbpc\u0027 with collision mode \u0027rigid-proxy\u0027, and runtime physics profile output was generated. Reconfirm chain routing and collision ownership across mixed framework states (no race-compatibility warnings were raised).",
+      "SuggestedAnimations": [
+        "full load-order launch",
+        "equip",
+        "walk",
+        "sprint",
+        "jump / landing",
+        "save / reload"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json",
+        "mod-stack-cross-validation.json"
+      ]
+    },
+    {
+      "Name": "Skeleton \u002B physics chain compatibility sweep",
+      "Priority": "High",
+      "Trigger": "Physics profile \u0027smp\u002Bcbpc\u0027 is active while skeleton remap uncertainty remains (unsupported bones=113, sparseInference=False). Validate live chain routing and collision ownership under stress poses.",
+      "SuggestedAnimations": [
+        "idle",
+        "walk",
+        "sprint",
+        "jump / landing",
+        "ragdoll / hit react"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "runtime-validation-plan.json"
+      ]
+    },
+    {
+      "Name": "Cross-framework skeleton \u002B physics sweep",
+      "Priority": "High",
+      "Trigger": "Skeleton-family crossover signals (aquatic-humanoid, ube-extended, insectoid-humanoid) were detected while physics profile \u0027smp\u002Bcbpc\u0027 is active. Validate chain ownership, collision routing, and save/reload stability across framework crossover states.",
+      "SuggestedAnimations": [
+        "full load-order launch",
+        "equip",
+        "sprint",
+        "jump / landing",
+        "ragdoll / hit react",
+        "save / reload"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json",
+        "mod-stack-cross-validation.json"
+      ]
+    },
+    {
+      "Name": "Difficult skeleton\u002Bphysics chain stress sweep",
+      "Priority": "High",
+      "Trigger": "Difficult rig-family signals and active physics profile \u0027smp\u002Bcbpc\u0027 require stress verification of chain ownership, damping stability, and collision routing under dense animation changes.",
+      "SuggestedAnimations": [
+        "equip",
+        "sprint",
+        "jump / landing",
+        "ragdoll / hit react",
+        "save / reload"
+      ],
+      "FocusRegions": [
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json"
+      ]
+    },
+    {
+      "Name": "Physics collision sweep",
+      "Priority": "Action",
+      "Trigger": "Runtime physics output is active for profile \u0027smp\u002Bcbpc\u0027. Verify live collision, damping, and bounce follow-through.",
+      "SuggestedAnimations": [
+        "idle",
+        "walk",
+        "jump",
+        "ragdoll / hit react"
+      ],
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "skeleton-compatibility.json",
+        "preview-workbench.html"
+      ]
+    },
+    {
+      "Name": "Ground and drop sweep",
+      "Priority": "Info",
+      "Trigger": "World/drop validation is required for collision mode \u0027rigid-proxy\u0027 and heel profile \u0027flat\u0027",
+      "SuggestedAnimations": [
+        "drop to ground",
+        "idle",
+        "walk"
+      ],
+      "FocusRegions": [
+        "feet",
+        "ground"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "preview-workbench.html"
+      ]
+    },
+    {
+      "Name": "Heel IK and ground-contact sweep",
+      "Priority": "Action",
+      "Trigger": "Validate heel IK, toe angle continuity, and sole contact stability for profile \u0027flat\u0027 before release.",
+      "SuggestedAnimations": [
+        "idle",
+        "walk",
+        "sprint",
+        "jump / landing"
+      ],
+      "FocusRegions": [
+        "feet",
+        "heels",
+        "ankles",
+        "ground"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "pose-simulation-report.json",
+        "in-game-validation.json",
+        "preview-workbench.html"
+      ]
+    }
+  ],
+  "Checklist": [
+    {
+      "Name": "Body fit smoke test",
+      "Priority": "Action",
+      "Details": "Equip the converted outfit on 3BA, then verify idle, walk, and turn animations for the main fit regions: belly, breasts, butt, chest, pelvis, thighs.",
+      "FocusRegions": [
+        "belly",
+        "breasts",
+        "butt",
+        "chest",
+        "pelvis",
+        "thighs"
+      ],
+      "RelatedArtifacts": [
+        "preview-workbench.html",
+        "conversion-quality.json"
+      ]
+    },
+    {
+      "Name": "Animation stress test",
+      "Priority": "High",
+      "Details": "Re-test crouch, sprint, jump, and combat poses for the flagged hotspot regions: chest.",
+      "FocusRegions": [
+        "chest"
+      ],
+      "RelatedArtifacts": [
+        "pose-simulation-report.json",
+        "preview-workbench.html",
+        "conversion-quality.json"
+      ]
+    },
+    {
+      "Name": "Sensitive topology pass",
+      "Priority": "Action",
+      "Details": "Inspect oral/genital/beast-specific motion and collision for: branch, genitals, mane, mouth, tail, wing.",
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "preview-workbench.html"
+      ]
+    },
+    {
+      "Name": "Physics runtime pass",
+      "Priority": "Action",
+      "Details": "Verify runtime physics chains, bounce, damping, and collision in-game. Generated configs: Use rigid-body world physics for dropped items; actor SMP/CBPC does not run on world objects., Prefer a simplified proxy collision shape for stability..",
+      "FocusRegions": [
+        "branch",
+        "genitals",
+        "mane",
+        "mouth",
+        "tail",
+        "wing"
+      ],
+      "RelatedArtifacts": [
+        "skeleton-compatibility.json",
+        "world-physics.json"
+      ]
+    },
+    {
+      "Name": "Ground contact and drop test",
+      "Priority": "Info",
+      "Details": "Drop the item, verify world collision mode \u0027rigid-proxy\u0027, and confirm ground contact / heel placement remain stable.",
+      "FocusRegions": [
+        "feet",
+        "ground"
+      ],
+      "RelatedArtifacts": [
+        "world-physics.json",
+        "preview-workbench.html"
+      ]
+    }
+  ]
+}

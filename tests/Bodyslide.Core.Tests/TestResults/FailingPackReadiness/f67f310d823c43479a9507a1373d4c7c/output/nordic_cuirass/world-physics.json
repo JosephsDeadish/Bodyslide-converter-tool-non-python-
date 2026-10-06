@@ -1,0 +1,13 @@
+{
+  "Mode": "rigid-proxy",
+  "CollisionShape": "convex-hull",
+  "SourcePhysicsDetected": true,
+  "RuntimePhysicsProfileGenerated": true,
+  "GroundMeshAvailable": true,
+  "Recommendations": [
+    "Use rigid-body world physics for dropped items; actor SMP/CBPC does not run on world objects.",
+    "Prefer a simplified proxy collision shape for stability.",
+    "Use the generated *_ground.nif as the dropped-item world model."
+  ],
+  "HeelAnalysis": null
+}
