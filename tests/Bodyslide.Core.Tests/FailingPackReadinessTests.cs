@@ -111,7 +111,7 @@ public sealed class FailingPackReadinessTests
         {
             var testDirectory = Path.GetDirectoryName(currentFilePath)!;
             var source = Path.Combine(testDirectory, "Fixtures", fixtureName);
-            Root = Path.Combine(testDirectory, "TestResults", "FailingPackReadiness", Guid.NewGuid().ToString("N"));
+            Root = Path.Combine(Path.GetTempPath(), "SlideSmith.Tests", "FailingPackReadiness", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Root);
             foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
             {
