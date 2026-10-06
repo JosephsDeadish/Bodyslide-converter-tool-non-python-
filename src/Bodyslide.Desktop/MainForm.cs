@@ -153,10 +153,12 @@ public sealed class MainForm : Form
     private CancellationTokenSource? _autoInspectDebounce;
     private CancellationTokenSource? _autoCacheInspectDebounce;
     private CancellationTokenSource? _activeCacheInspection;
+    private CancellationTokenSource? _previewLoadCancellation;
     private string? _lastOutputDirectory;
     private string? _lastPreviewPath;
     private string? _lastBatchReportPath;
     private WebView2? _previewWebView;
+    private Task<bool>? _previewWebViewInitializationTask;
     private readonly List<string> _customProfilePaths = [];
     private readonly DesktopLaunchOptions _launchOptions;
     private UiTheme _currentTheme;
@@ -1787,7 +1789,11 @@ public sealed class MainForm : Form
             UpdateMainSplitLayout();
             UpdateListViewColumnLayouts();
         };
-        FormClosing += (_, _) => SaveUiSettings(flush: true);
+        FormClosing += (_, _) =>
+        {
+            _previewLoadCancellation?.Cancel();
+            SaveUiSettings(flush: true);
+        };
         Shown += async (_, _) => await RefreshStartupReadinessAsync();
         Shown += async (_, _) =>
         {
@@ -5020,30 +5026,55 @@ public sealed class MainForm : Form
         }
     }
 
-    private async Task<bool> LoadPreviewInAppAsync(string? previewPath)
+    private async Task<bool> LoadPreviewInAppAsync(string? previewPath, CancellationToken cancellationToken)
     {
+        if (IsDisposed || Disposing || cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
         if (string.IsNullOrWhiteSpace(previewPath) || !File.Exists(previewPath))
         {
             ShowPreviewStatus("No preview report is currently available.");
             return false;
         }
 
-        if (!await EnsurePreviewWebViewReadyAsync())
-        {
-            ShowPreviewStatus("Embedded preview is unavailable (WebView2 runtime missing). Opening preview in your default browser.");
-            OpenPreviewExternally(previewPath);
-            return false;
-        }
-
         try
         {
+            if (!await EnsurePreviewWebViewReadyAsync(cancellationToken))
+            {
+                if (IsDisposed || Disposing || cancellationToken.IsCancellationRequested)
+                {
+                    return false;
+                }
+
+                ShowPreviewStatus("Embedded preview is unavailable (WebView2 runtime missing). Opening preview in your default browser.");
+                OpenPreviewExternally(previewPath);
+                return false;
+            }
+
+            if (IsDisposed || Disposing || cancellationToken.IsCancellationRequested ||
+                _previewWebView is null || _previewWebView.IsDisposed)
+            {
+                return false;
+            }
+
             _previewWebView!.Visible = true;
             _previewStatusLabel.Visible = false;
             _previewWebView.Source = new Uri(previewPath, UriKind.Absolute);
             return true;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
         catch (Exception ex)
         {
+            if (IsDisposed || Disposing || cancellationToken.IsCancellationRequested)
+            {
+                return false;
+            }
+
             ShowPreviewStatus($"Failed to load in-app preview: {ex.Message}");
             OpenPreviewExternally(previewPath);
             return false;
@@ -5052,31 +5083,50 @@ public sealed class MainForm : Form
 
     private async Task<bool> LoadPreviewInAppWithTimeoutAsync(string? previewPath)
     {
-        var loadTask = LoadPreviewInAppAsync(previewPath);
-        if (loadTask.IsCompleted)
+        _previewLoadCancellation?.Cancel();
+        using var timeoutSource = new CancellationTokenSource();
+        _previewLoadCancellation = timeoutSource;
+        try
         {
-            return await loadTask;
-        }
+            var loadTask = LoadPreviewInAppAsync(previewPath, timeoutSource.Token);
+            if (loadTask.IsCompleted)
+            {
+                return await loadTask;
+            }
 
-        var completedTask = await Task.WhenAny(loadTask, Task.Delay(PreviewLoadTimeout));
-        if (completedTask == loadTask)
+            var completedTask = await Task.WhenAny(loadTask, Task.Delay(PreviewLoadTimeout));
+            if (completedTask == loadTask)
+            {
+                return await loadTask;
+            }
+
+            timeoutSource.Cancel();
+            if (IsDisposed || Disposing)
+            {
+                return false;
+            }
+
+            ShowPreviewStatus("Embedded preview is taking too long to initialize. Conversion output is ready; open preview-workbench.html manually if needed.");
+            AppendLog("Preview initialization timed out; continuing without blocking the rest of the desktop workflow.");
+            return false;
+        }
+        finally
         {
-            return await loadTask;
+            if (ReferenceEquals(_previewLoadCancellation, timeoutSource))
+            {
+                _previewLoadCancellation = null;
+            }
         }
-
-        ShowPreviewStatus("Embedded preview is taking too long to initialize. Conversion output is ready; open preview-workbench.html manually if needed.");
-        AppendLog("Preview initialization timed out; continuing without blocking the rest of the desktop workflow.");
-        return false;
     }
 
-    private async Task<bool> EnsurePreviewWebViewReadyAsync()
+    private Task<bool> EnsurePreviewWebViewReadyAsync(CancellationToken cancellationToken)
     {
-        if (_previewWebView is not null)
+        if (IsDisposed || Disposing || cancellationToken.IsCancellationRequested)
         {
-            return true;
+            return Task.FromResult(false);
         }
 
-        try
+        if (_previewWebView is null)
         {
             _previewWebView = new WebView2
             {
@@ -5085,15 +5135,41 @@ public sealed class MainForm : Form
             };
             _previewPanel.Controls.Add(_previewWebView);
             _previewWebView.BringToFront();
-            await _previewWebView.EnsureCoreWebView2Async();
-            return true;
+            _previewWebViewInitializationTask = InitializePreviewWebViewAsync(_previewWebView);
+        }
+
+        var initializationTask = _previewWebViewInitializationTask;
+        return initializationTask is null
+            ? Task.FromResult(true)
+            : initializationTask.WaitAsync(cancellationToken);
+    }
+
+    private async Task<bool> InitializePreviewWebViewAsync(WebView2 webView)
+    {
+        try
+        {
+            await webView.EnsureCoreWebView2Async();
+            return !IsDisposed && !Disposing && !webView.IsDisposed;
         }
         catch (Exception ex)
         {
             System.Diagnostics.Trace.TraceWarning($"Failed to initialize in-app preview WebView2: {ex.Message}");
-            _previewWebView?.Dispose();
-            _previewWebView = null;
-            ShowPreviewStatus($"In-app preview is unavailable on this machine: {ex.Message}");
+            if (ReferenceEquals(_previewWebView, webView))
+            {
+                _previewWebView = null;
+                _previewWebViewInitializationTask = null;
+            }
+
+            if (!webView.IsDisposed)
+            {
+                webView.Dispose();
+            }
+
+            if (!IsDisposed && !Disposing)
+            {
+                ShowPreviewStatus($"In-app preview is unavailable on this machine: {ex.Message}");
+            }
+
             return false;
         }
     }
