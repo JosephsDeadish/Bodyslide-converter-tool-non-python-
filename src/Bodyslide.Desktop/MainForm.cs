@@ -205,7 +205,7 @@ public sealed class MainForm : Form
 
     private const int MainSplitPreferredDistance = 560;
     private const int MainSplitPanel1Minimum = 360;
-    private const int MainSplitPanel2Minimum = 460;
+    private const int MainSplitPanel2Minimum = 500;
     private const int MaxLogCharacters = 120000;
     private const int TrimmedLogCharacters = 90000;
     private const int MaxLoggedStepsPerResult = 80;
@@ -398,7 +398,7 @@ public sealed class MainForm : Form
         Width = 1240;
         Height = 920;
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(800, 640);
+        MinimumSize = new Size(800, 680);
 
         _batchRunner = new BatchConversionRunner(StandaloneConversionModules.CreateDefault());
         _inspector = StandaloneConversionModules.CreateInspector();
