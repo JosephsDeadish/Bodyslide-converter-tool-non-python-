@@ -659,21 +659,11 @@ public sealed class ConversionOrchestratorTests
     [InlineData(0)]
     public void NifGeometrySignatureReader_ReportsTextAndBinaryHeaderVersions(byte endian)
     {
-        using var stream = new MemoryStream();
-        using (var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true))
-        {
-            writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
-            WriteUInt32(writer, 0x14020007u, endian);
-            writer.Write(endian);
-            WriteUInt32(writer, 12u, endian);
-            WriteUInt32(writer, 0u, endian);
-            WriteUInt32(writer, 130u, endian);
-        }
-
+        var bytes = CreateNifHeader(0x14020007u, endian, 12u, 0u, 130u);
         var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
         try
         {
-            File.WriteAllBytes(path, stream.ToArray());
+            File.WriteAllBytes(path, bytes);
             var report = NifGeometrySignatureReader.Inspect(path);
 
             Assert.Equal("unsupported", report.Status);
@@ -689,6 +679,67 @@ public sealed class ConversionOrchestratorTests
         {
             File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void NifGeometrySignatureReader_InvalidEndianLeavesNumericHeaderFieldsUnknown()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        try
+        {
+            File.WriteAllBytes(path, CreateNifHeader(0x14020007u, 2, 12u, 0u, 130u));
+            var report = NifGeometrySignatureReader.Inspect(path);
+
+            Assert.Equal("20.2.0.7", report.HeaderVersion);
+            Assert.Equal((byte)2, report.Endian);
+            Assert.Null(report.BinaryVersion);
+            Assert.Null(report.UserVersion);
+            Assert.Null(report.UserVersion2);
+            Assert.Equal("untested", report.ExternalCompatibilityStatus);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void NifGeometrySignatureReader_TruncatedHeaderLeavesNumericFieldsUnknown()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        try
+        {
+            File.WriteAllBytes(path, System.Text.Encoding.ASCII.GetBytes(
+                "Gamebryo File Format, Version 20.2.0.7\n"));
+            var report = NifGeometrySignatureReader.Inspect(path);
+
+            Assert.Equal("20.2.0.7", report.HeaderVersion);
+            Assert.Null(report.BinaryVersion);
+            Assert.Null(report.Endian);
+            Assert.Null(report.UserVersion);
+            Assert.Null(report.UserVersion2);
+            Assert.Equal("untested", report.ExternalCompatibilityStatus);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static byte[] CreateNifHeader(uint version, byte endian, uint userVersion, uint blockCount, uint userVersion2)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true))
+        {
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+            WriteUInt32(writer, version, endian == 0 ? (byte)0 : (byte)1);
+            writer.Write(endian);
+            WriteUInt32(writer, userVersion, endian == 0 ? (byte)0 : (byte)1);
+            WriteUInt32(writer, blockCount, endian == 0 ? (byte)0 : (byte)1);
+            WriteUInt32(writer, userVersion2, endian == 0 ? (byte)0 : (byte)1);
+        }
+
+        return stream.ToArray();
     }
 
     private static void WriteUInt32(BinaryWriter writer, uint value, byte endian)
