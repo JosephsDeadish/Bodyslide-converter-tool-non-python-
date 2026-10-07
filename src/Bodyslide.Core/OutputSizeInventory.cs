@@ -58,7 +58,8 @@ internal static class OutputSizeInventory
         }
         cancellationToken.ThrowIfCancellationRequested();
         if (!string.IsNullOrWhiteSpace(archivePath) &&
-            !Path.GetFullPath(archivePath).StartsWith(Path.GetFullPath(outputDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+            !Path.GetFullPath(archivePath).StartsWith(Path.GetFullPath(outputDirectory)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
                 OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
         {
             try

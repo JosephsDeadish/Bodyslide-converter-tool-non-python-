@@ -55,4 +55,28 @@ public sealed class OutputSizeInventoryTests
         Assert.NotEmpty(report.Warnings);
         Assert.Equal(0, report.TotalBytes);
     }
+
+    [Fact]
+    public void InventoryDoesNotDoubleCountArchiveInsideRootWithAlternateTrailingSeparator()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var archive = Path.Combine(root, "inside.zip");
+            File.WriteAllBytes(archive, new byte[50]);
+
+            var report = OutputSizeInventory.Create(
+                root + Path.AltDirectorySeparatorChar, archive, CancellationToken.None);
+
+            Assert.True(report.Complete);
+            Assert.Equal(1, report.FileCount);
+            Assert.Equal(50, report.TotalBytes);
+            Assert.Equal(50, Assert.Single(report.Categories, category => category.Category == "archives").Bytes);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }
