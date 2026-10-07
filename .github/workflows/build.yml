@@ -241,6 +241,9 @@ jobs:
             throw "Installed Windows bundle desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
           }
 
+      - name: Name standalone desktop download clearly
+        run: Copy-Item artifacts/win-x64/SlideSmith.exe artifacts/SlideSmith-Desktop-Portable.exe
+
       - name: Upload Windows app zip artifact
         uses: actions/upload-artifact@v4
         with:
@@ -259,16 +262,17 @@ jobs:
 
             | File | Description |
             |---|---|
-            | `SlideSmith.exe` | Windows desktop GUI (drag-and-drop armor, no terminal needed) |
+            | `SlideSmith-Desktop-Portable.exe` | Windows desktop GUI for direct standalone launch |
             | `SlideSmith-CLI.exe` | Windows command-line tool |
-            | `slidesmith-win-x64-bundle.zip` | Windows bundle with `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.txt`, and `meta/slidesmith-bundle.json` |
+            | `slidesmith-win-x64-bundle.zip` | Windows bundle with a root-level standalone GUI, the multi-file MO2-ready desktop app, CLI, and setup guide |
             | `slidesmith-linux-x64.zip` | Linux CLI binary |
 
-            **Quick start (desktop):** download `SlideSmith.exe`, double-click it.
+            **Quick start (desktop):** download `SlideSmith-Desktop-Portable.exe`, double-click it.
+            **Quick start (MO2):** install the bundle, then configure the installed `CalienteTools\SlideSmith\SlideSmith.exe` as MO2's executable and run it from MO2.
             **Quick start (CLI):** `.\SlideSmith-CLI.exe --input "path\to\armor.nif" --target CBBE --output "C:\output"`
             Run `.\SlideSmith-CLI.exe --help` for all options.
           files: |
-            artifacts/win-x64/SlideSmith.exe
+            artifacts/SlideSmith-Desktop-Portable.exe
             artifacts/win-x64-cli/SlideSmith-CLI.exe
             artifacts/slidesmith-win-x64-bundle.zip
             artifacts/slidesmith-linux-x64.zip
@@ -370,10 +374,12 @@ jobs:
           New-Item -ItemType Directory -Path $desktopBundle -Force | Out-Null
           New-Item -ItemType Directory -Path $cliBundle -Force | Out-Null
           New-Item -ItemType Directory -Path $metaBundle -Force | Out-Null
+          Copy-Item artifacts/win-x64/SlideSmith.exe $bundleRoot
           Copy-Item artifacts/win-x64-manager/* $desktopBundle -Recurse -Force
           Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
           Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
           $bundleMetadata = [ordered]@{
+            portableDesktop = "SlideSmith.exe"
             desktop = "desktop/SlideSmith.exe"
             cli = "cli/SlideSmith-CLI.exe"
             readme = "README.txt"
