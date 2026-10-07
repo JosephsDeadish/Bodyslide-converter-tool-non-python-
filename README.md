@@ -78,6 +78,59 @@ instructions, not an actual real-user reproduction. This coverage is not an
 safety gates. Unverified custom rigs, topology changes and external game/UI
 checks must not be relabeled automatic merely to improve readiness counts.
 
+### Compatibility boundaries and evidence
+
+The body names below are **built-in conversion profiles**, not a claim that every
+release of each body mod, outfit, skeleton, or physics stack has passed an
+end-to-end test. Automated tests use synthetic/redistributable fixtures and verify
+specific parsers, reports, and safety gates; they do not establish that a package
+works in every Skyrim installation.
+
+| Area | Implemented / automated evidence | Not established by those tests |
+|---|---|---|
+| Inputs | Single NIF, plugin sidecars, folders, and ZIP/7z/TAR-family archives are handled by the import/conversion paths. Folder and ZIP batch flows have end-to-end fixture coverage. | Every archive variant/layout, installed mod, or MO2 virtualized file view. |
+| NIF meshes | Geometry-family readers, topology/partition checks, weight variants, and explicit unsupported-layout diagnostics have synthetic regression coverage. Unknown or unsupported layouts are review cases, not safe conversions. | An exhaustive NIF-version/block-type matrix or every real-world mesh exporter. No Skyrim edition is certified by the synthetic fixtures alone. |
+| Body profiles | Embedded profiles provide aliases, detection/reference tokens, slider names, transformations, skeleton framework labels, physics defaults, and expected support regions. Catalog integrity is checked in tests/readiness. | Exact values for every installed body-mod release, slider range, reference mesh, morph payload, or real outfit fit. Profile presence is not a real-asset compatibility test. |
+| BodySlide | OSP/ShapeData generation, source-project discovery, TRI/BSD parsing/reuse, and report-level output checks have regression coverage. | A successful build by the actual BodySlide/Outfit Studio executable, on a user’s installed project set, or in-game slider/morph behavior. |
+| Plugins and packaging | Synthetic plugin parsing/rewrite, ambiguity gates, Data-relative output, ZIP packaging, and MO2 metadata have regression coverage. | Correctness against every load order, installer choice, plugin combination, or MO2/Vortex installation. |
+| Skeleton and physics | Catalog bone resolution, mapping diagnostics, generated CBPC/SMP configuration, and readiness reports are checked by tests. | That a particular game installation has the required skeleton/runtime, or that the generated weights/chains simulate correctly in live gameplay. |
+| Desktop / MO2 / game | Startup routing and launcher argument behavior have automated tests; external proof harnesses describe Windows/UI/runtime/game checks. | A passing Windows desktop flow through MO2, live-game animation/collision testing, or proof for a specific load order until external evidence is imported. |
+
+The converter accepts armor and clothing as mesh assets; it classifies mesh behavior
+(including cloth, leather, plate, skin-tight, and physics-enabled) and headgear
+subtypes to guide conversion and partition handling. Those classifications do not
+replace inspecting the actual garment coverage, topology, weights, and target-body
+reference. A correct cross-body conversion must use the source body/reference to
+interpret the outfit, transfer shape and skin weights to the target’s body regions
+and skeleton, preserve valid partitions and plugin paths, and check both weight
+endpoints. Merely renaming a body, copying a preset, or exporting a nonempty NIF is
+not evidence of a correct fit.
+
+Body-family distinctions currently recorded in the built-in catalog are useful
+conversion hints, not independently verified mod specifications:
+
+| Catalog profile | Configured distinction |
+|---|---|
+| CBBE | Female baseline profile; no physics is selected by default, although physics bones are listed for an explicit override. |
+| 3BA | Catalog describes it as CBBE-topology with extended physics weighting; SMP+CBPC default and additional physics sliders/bones. |
+| BHUNP | Catalog describes it as UUNP-family with advanced physics; SMP+CBPC default and its own reference/detection tokens and slider list. |
+| HIMBO | Male profile with pec-related physics bones; SMP default. |
+| SOS | Male profile with SOS-named genital physics bones; SMP default. |
+
+These records do not currently store authoritative slider ranges or versioned
+provenance for every reference mesh and morph. When source OSP/TRI/BSD assets are
+available, the converter can use them; inferred/fallback data must remain marked
+as such. For an unfamiliar or changed body release, provide the matching installed
+BodySlide assets and treat detection, build output, skeleton/physics reports, and
+in-game fit as separate checks.
+
+Automated failure fixtures currently include unsupported NIF layouts (including
+NiLines), ambiguous plugin links, and topology-review cases. To move a combination
+from “profile/configured” to “verified,” add a redistributable, anonymized fixture
+and regression for it, then record separate Windows BodySlide-build, MO2 install,
+and live-game evidence. Until that evidence exists, review the generated readiness
+and remaining-gaps reports and do not treat success status as universal support.
+
 Batch conversion pairs `_0`/`_1` meshes only within the same source directory.
 Distinct armor folders sharing a mesh name are converted separately, with
 deterministic, collision-free per-armor output folder names. Unique names retain
@@ -830,13 +883,22 @@ Issue #2 baseline coverage has been expanded substantially (import/dependency sc
 | HIMBO Muscular | HIMBO | muscular | smp |
 | HIMBO Athletic | HIMBO | athletic | smp |
 
-## Supported body types
+## Built-in body profiles
 
-**Female:** CBBE, 3BA, UNP, BHUNP, TBD, UBE  
-**Male:** HIMBO, SAM, SOS, Vanilla  
-**Custom:** any unrecognised body falls back to `CUSTOM` detection
+The current catalog contains these 28 configured profiles:
 
-Use `--list-bodies` to see detection tokens and vertex-count hints for each body type. Use `all`, `any`, or `*` as a target alias to convert to every listed body in one run.
+- CBBE-family: CBBE, 3BA, COCO CBBE
+- UNP-family: UNP, UNPB, UUNP, BHUNP, COCO UUNP, TBD
+- Male: HIMBO, SAM, SAM Light, SOS, TNG
+- Vanilla and creature/custom-framework profiles: Vanilla, Vanilla Beast, Serpentine Humanoid, Goat Humanoid, Hagraven, Spriggan, Equine Humanoid, Avian Humanoid, Feline Humanoid, Canine Humanoid, Draconic Humanoid, Insectoid Humanoid, Aquatic Humanoid
+
+Any unrecognized source body can be classified as `CUSTOM`; that fallback is not
+itself a target-body profile or proof of compatibility. Use `--list-bodies` as the
+runtime source of truth for profile names, aliases, detection tokens, and
+vertex-count hints. `all`, `any`, and `*` request all available targets; they do
+not imply that every requested conversion will pass its readiness/review gates.
+See [Compatibility boundaries and evidence](#compatibility-boundaries-and-evidence)
+for the distinction between catalog presence and tested support.
 
 ## Vanilla armor database
 

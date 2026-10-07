@@ -60,4 +60,53 @@ public sealed class CatalogIntegrityTests
             Assert.All(body.AvailablePhysicsBones, bone => Assert.False(string.IsNullOrWhiteSpace(bone)));
         }
     }
+
+    [Fact]
+    public void BuiltInBodyMetadataCatalog_AllProfilesHaveRequiredConversionMetadata()
+    {
+        var requiredRegions = new[]
+        {
+            "chest", "waist", "pelvis", "legs", "shoulders", "breasts",
+            "butt", "belly", "arms", "thighs", "calves"
+        };
+
+        Assert.Equal(28, BuiltInBodyMetadataCatalog.All.Count);
+        foreach (var body in BuiltInBodyMetadataCatalog.All)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(body.Gender), $"{body.Name} is missing gender metadata.");
+            Assert.Contains(body.DefaultPhysics, new[] { "none", "cbpc", "smp", "smp+cbpc" });
+            Assert.False(string.IsNullOrWhiteSpace(body.SkeletonFoundation), $"{body.Name} is missing its skeleton foundation.");
+            Assert.False(string.IsNullOrWhiteSpace(body.SkeletonFramework), $"{body.Name} is missing its skeleton framework.");
+            Assert.NotEmpty(body.Notes);
+            Assert.NotEmpty(body.ReferenceTokens);
+            Assert.NotEmpty(body.DetectionTokens);
+            Assert.NotEmpty(body.SliderNames);
+            Assert.True(body.VertexCountMin > 0, $"{body.Name} must have a positive minimum vertex-count hint.");
+            Assert.True(body.VertexCountMax >= body.VertexCountMin, $"{body.Name} has an invalid vertex-count range.");
+            Assert.All(requiredRegions, region =>
+                Assert.True(body.TransformationField.TryGetValue(region, out var value) &&
+                            double.IsFinite(value) && value > 0,
+                    $"{body.Name} is missing a valid '{region}' transformation value."));
+        }
+    }
+
+    [Fact]
+    public void BuiltInBodyMetadataCatalog_PreservesKeyFemaleAndMaleFamilyDistinctions()
+    {
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("CBBE", out var cbbe));
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("3BA", out var threeBa));
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("BHUNP", out var bhunp));
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("HIMBO", out var himbo));
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("SOS", out var sos));
+
+        Assert.Equal("none", cbbe.DefaultPhysics);
+        Assert.Equal("smp+cbpc", threeBa.DefaultPhysics);
+        Assert.Equal("smp+cbpc", bhunp.DefaultPhysics);
+        Assert.Contains("CBBE topology", threeBa.Notes, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("UUNP-family topology", bhunp.Notes, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("male", himbo.Gender);
+        Assert.Equal("male", sos.Gender);
+        Assert.Contains(himbo.AvailablePhysicsBones, bone => bone.Contains("Pec", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(sos.AvailablePhysicsBones, bone => bone.StartsWith("SOS ", StringComparison.OrdinalIgnoreCase));
+    }
 }
