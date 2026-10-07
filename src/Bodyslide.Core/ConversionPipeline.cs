@@ -5920,13 +5920,23 @@ internal static class NifGeometrySignatureReader
             return new NifHeaderMetadata(headerVersion, null, null, null, null);
         }
 
-        var version = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(binaryOffset, sizeof(uint)));
         var endian = bytes[binaryOffset + sizeof(uint)];
-        var userVersion = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(binaryOffset + 5, sizeof(uint)));
-        var userVersion2 = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(binaryOffset + 13, sizeof(uint)));
+        if (endian is not (0 or 1))
+        {
+            return new NifHeaderMetadata(headerVersion, null, endian, null, null);
+        }
+
+        var version = ReadUInt32(bytes.AsSpan(binaryOffset, sizeof(uint)), endian);
+        var userVersion = ReadUInt32(bytes.AsSpan(binaryOffset + 5, sizeof(uint)), endian);
+        var userVersion2 = ReadUInt32(bytes.AsSpan(binaryOffset + 13, sizeof(uint)), endian);
         var binaryVersion = $"{version >> 24}.{(version >> 16) & 0xff}.{(version >> 8) & 0xff}.{version & 0xff}";
         return new NifHeaderMetadata(headerVersion, binaryVersion, endian, userVersion, userVersion2);
     }
+
+    private static uint ReadUInt32(ReadOnlySpan<byte> bytes, byte endian) =>
+        endian == 1
+            ? System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes)
+            : System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bytes);
 
     private static IReadOnlyList<string> BuildMetadataMessages(
         IReadOnlyList<string> baseMessages,

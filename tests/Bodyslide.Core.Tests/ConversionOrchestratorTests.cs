@@ -654,18 +654,20 @@ public sealed class ConversionOrchestratorTests
         }
     }
 
-    [Fact]
-    public void NifGeometrySignatureReader_ReportsTextAndBinaryHeaderVersions()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(0)]
+    public void NifGeometrySignatureReader_ReportsTextAndBinaryHeaderVersions(byte endian)
     {
         using var stream = new MemoryStream();
         using (var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true))
         {
             writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
-            writer.Write(0x14020007u);
-            writer.Write((byte)1);
-            writer.Write(12u);
-            writer.Write(0u);
-            writer.Write(130u);
+            WriteUInt32(writer, 0x14020007u, endian);
+            writer.Write(endian);
+            WriteUInt32(writer, 12u, endian);
+            WriteUInt32(writer, 0u, endian);
+            WriteUInt32(writer, 130u, endian);
         }
 
         var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
@@ -677,7 +679,7 @@ public sealed class ConversionOrchestratorTests
             Assert.Equal("unsupported", report.Status);
             Assert.Equal("20.2.0.7", report.HeaderVersion);
             Assert.Equal("20.2.0.7", report.BinaryVersion);
-            Assert.Equal((byte)1, report.Endian);
+            Assert.Equal(endian, report.Endian);
             Assert.Equal((uint)12, report.UserVersion);
             Assert.Equal((uint)130, report.UserVersion2);
             Assert.Equal("automated-file-inspection-only", report.CompatibilityEvidenceScope);
@@ -687,6 +689,21 @@ public sealed class ConversionOrchestratorTests
         {
             File.Delete(path);
         }
+    }
+
+    private static void WriteUInt32(BinaryWriter writer, uint value, byte endian)
+    {
+        var bytes = new byte[sizeof(uint)];
+        if (endian == 1)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
+        }
+        else
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(bytes, value);
+        }
+
+        writer.Write(bytes);
     }
 
     [Fact]
