@@ -170,10 +170,12 @@ jobs:
           New-Item -ItemType Directory -Path $desktopBundle -Force | Out-Null
           New-Item -ItemType Directory -Path $cliBundle -Force | Out-Null
           New-Item -ItemType Directory -Path $metaBundle -Force | Out-Null
+          Copy-Item artifacts/win-x64/SlideSmith.exe $bundleRoot
           Copy-Item artifacts/win-x64-manager/* $desktopBundle -Recurse -Force
           Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
           Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
           $bundleMetadata = [ordered]@{
+            portableDesktop = "SlideSmith.exe"
             desktop = "desktop/SlideSmith.exe"
             cli = "cli/SlideSmith-CLI.exe"
             readme = "README.txt"
@@ -196,6 +198,9 @@ jobs:
             Remove-Item $extractPath -Recurse -Force
           }
           Expand-Archive artifacts/slidesmith-win-x64-bundle.zip -DestinationPath $extractPath
+          if (!(Test-Path (Join-Path $extractPath "SlideSmith.exe"))) {
+            throw "Missing root-level SlideSmith.exe in bundle zip."
+          }
           if (!(Test-Path (Join-Path $extractPath "desktop/SlideSmith.exe"))) {
             throw "Missing desktop/SlideSmith.exe in bundle zip."
           }
@@ -402,6 +407,10 @@ jobs:
           }
           if (!(Test-Path (Join-Path $extractPath "meta/slidesmith-bundle.json"))) {
             throw "Missing meta/slidesmith-bundle.json in bundle zip."
+          }
+          $portableProcess = Start-Process -FilePath (Join-Path $extractPath "SlideSmith.exe") -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($portableProcess.ExitCode -ne 0) {
+            throw "Root-level portable desktop smoke test failed with exit code $($portableProcess.ExitCode)."
           }
           $installPath = Join-Path $extractPath "installed/CalienteTools/SlideSmith"
           New-Item -ItemType Directory -Path $installPath -Force | Out-Null

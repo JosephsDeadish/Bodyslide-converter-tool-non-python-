@@ -80,10 +80,12 @@ jobs:
           New-Item -ItemType Directory -Path $desktopBundle -Force | Out-Null
           New-Item -ItemType Directory -Path $cliBundle -Force | Out-Null
           New-Item -ItemType Directory -Path $metaBundle -Force | Out-Null
+          Copy-Item artifacts/win-x64/SlideSmith.exe $bundleRoot
           Copy-Item artifacts/win-x64-manager/* $desktopBundle -Recurse -Force
           Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
           Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
           $bundleMetadata = [ordered]@{
+            portableDesktop = "SlideSmith.exe"
             desktop = "desktop/SlideSmith.exe"
             cli = "cli/SlideSmith-CLI.exe"
             readme = "README.txt"
@@ -98,6 +100,9 @@ jobs:
       - name: Create Windows bundle zip (desktop + CLI)
         run: Compress-Archive -Path artifacts/win-bundle/* -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
 
+      - name: Name standalone desktop download clearly
+        run: Copy-Item artifacts/win-x64/SlideSmith.exe artifacts/SlideSmith-Desktop-Portable.exe
+
       - name: Verify Windows bundle zip contents
         shell: pwsh
         run: |
@@ -106,6 +111,9 @@ jobs:
             Remove-Item $extractPath -Recurse -Force
           }
           Expand-Archive artifacts/slidesmith-win-x64-bundle.zip -DestinationPath $extractPath
+          if (!(Test-Path (Join-Path $extractPath "SlideSmith.exe"))) {
+            throw "Missing root-level SlideSmith.exe in bundle zip."
+          }
           if (!(Test-Path (Join-Path $extractPath "desktop/SlideSmith.exe"))) {
             throw "Missing desktop/SlideSmith.exe in bundle zip."
           }
@@ -117,6 +125,10 @@ jobs:
           }
           if (!(Test-Path (Join-Path $extractPath "meta/slidesmith-bundle.json"))) {
             throw "Missing meta/slidesmith-bundle.json in bundle zip."
+          }
+          $portableProcess = Start-Process -FilePath (Join-Path $extractPath "SlideSmith.exe") -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($portableProcess.ExitCode -ne 0) {
+            throw "Root-level portable desktop smoke test failed with exit code $($portableProcess.ExitCode)."
           }
           if (!(Test-Path (Join-Path $extractPath "fomod/ModuleConfig.xml"))) {
             throw "Missing fomod/ModuleConfig.xml in bundle zip."
@@ -164,6 +176,6 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/win-x64/SlideSmith.exe
+            artifacts/SlideSmith-Desktop-Portable.exe
             artifacts/win-x64-cli/SlideSmith-CLI.exe
             artifacts/slidesmith-win-x64-bundle.zip

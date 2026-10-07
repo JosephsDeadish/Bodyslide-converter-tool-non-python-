@@ -3,7 +3,14 @@ SlideSmith Windows Bundle
 
 This bundle is intended for SkyrimSE Mod Organizer 2 / Vortex managed installs.
 
+Where is the app?
+- For a quick standalone launch, extract the archive and run SlideSmith.exe at
+  the archive's top level.
+- For MO2/Vortex, install the bundle and configure the multi-file desktop app
+  from the installed mod folder as described below. Keep its adjacent files.
+
 Included:
+- SlideSmith.exe (top-level standalone desktop app)
 - CalienteTools/SlideSmith/SlideSmith.exe (desktop launcher after install)
 - Desktop runtime DLLs alongside CalienteTools/SlideSmith/SlideSmith.exe
 - CalienteTools/SlideSmith/cli/SlideSmith-CLI.exe
@@ -13,19 +20,29 @@ Included:
 
 Quick start:
 1) Install this bundle as a mod/tool package in your mod manager.
-2) In MO2, add an executable that points to:
+2) In MO2, open Configure Executables, add a desktop executable, and browse to:
    - Binary: <MO2 mods folder>\SlideSmith Windows Bundle\CalienteTools\SlideSmith\SlideSmith.exe
    - Start in: <MO2 mods folder>\SlideSmith Windows Bundle\CalienteTools\SlideSmith
-   - Arguments: leave empty for a normal GUI launch; --mo2-launcher is optional context information
-3) Keep the complete desktop folder together. This bundle's desktop is self-contained
-   without single-file extraction; copying only its EXE will not work.
+   - Arguments: leave empty for a normal GUI launch.
+   Then select SlideSmith in MO2's executable dropdown and launch it with MO2's Run
+   button so the active profile's virtual files are available.
+3) Keep the complete desktop folder together. The installed desktop app is
+   self-contained without single-file extraction; copying only its EXE will not work.
+   The top-level standalone EXE is for direct launch and is not the recommended
+   binary to configure in MO2.
    You can directly launch CalienteTools/SlideSmith/SlideSmith.exe (GUI) or CalienteTools/SlideSmith/cli/SlideSmith-CLI.exe (CLI).
-4) Keep this package enabled as a separate managed entry.
+4) Keep this package enabled as a separate managed entry. Do not configure the CLI
+   executable when you want the graphical app.
 
 Startup diagnostics are recorded automatically in
 %LOCALAPPDATA%\SlideSmith\startup-launch-diagnostics.log. The log distinguishes
 process entry, window construction, and window display. If no new entry appears,
 failure occurred before managed startup (or the log directory was unwritable).
+If MO2 still does not show the window, check that the package is enabled, the
+Binary points to the installed desktop\SlideSmith.exe (not the CLI or a copied
+single EXE), and launch it from MO2's executable dropdown. Send the fresh startup
+log together with MO2's log from the same attempt; the app cannot diagnose a
+process that MO2/Windows fails to start before managed startup.
 CLI-to-desktop startup also logs its candidate search and immediate process
 failures automatically. The nested cli/ executable can find the installed
 desktop in its parent folder using the desktop runtime configuration.
