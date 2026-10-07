@@ -11,14 +11,15 @@ public sealed class OutputSizeInventoryTests
         Directory.CreateDirectory(root);
         try
         {
-            foreach (var (file, bytes) in new[] { ("mesh.nif", 10), ("texture.dds", 20),
+            foreach (var (file, bytes) in new[] { ("mesh.nif", 10), ("texture.dds", 20), ("texture.jpeg", 15),
                          ("morph.osd", 30), ("quality.json", 40), ("output-size-inventory.json", 99) })
                 File.WriteAllBytes(Path.Combine(root, file), new byte[bytes]);
             File.WriteAllBytes(root + ".zip", new byte[50]);
             var report = OutputSizeInventory.Create(root, root + ".zip", CancellationToken.None);
             Assert.True(report.Complete);
-            Assert.Equal(5, report.FileCount);
-            Assert.Equal(150, report.TotalBytes);
+            Assert.Equal(6, report.FileCount);
+            Assert.Equal(165, report.TotalBytes);
+            Assert.Equal(35, Assert.Single(report.Categories, category => category.Category == "textures").Bytes);
             Assert.Equal(30, Assert.Single(report.Categories, category => category.Category == "morphs").Bytes);
             Assert.Equal(50, Assert.Single(report.Categories, category => category.Category == "archives").Bytes);
         }

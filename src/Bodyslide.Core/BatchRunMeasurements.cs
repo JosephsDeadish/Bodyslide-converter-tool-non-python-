@@ -111,7 +111,7 @@ internal sealed class BatchRunMeasurements : IDisposable
     private static string Category(string path) => Path.GetExtension(path).ToLowerInvariant() switch
     {
         ".nif" => "meshes",
-        ".dds" or ".png" or ".tga" or ".jpg" => "textures",
+        ".dds" or ".png" or ".tga" or ".jpg" or ".jpeg" => "textures",
         ".tri" or ".bsd" or ".osd" => "morphs",
         ".esp" or ".esm" or ".esl" => "plugins",
         ".zip" or ".7z" or ".rar" => "archives",

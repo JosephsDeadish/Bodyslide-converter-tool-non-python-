@@ -88,7 +88,7 @@ internal static class OutputSizeInventory
             var category = Path.GetExtension(path).ToLowerInvariant() switch
             {
                 ".nif" => "meshes",
-                ".dds" or ".png" or ".tga" or ".bmp" or ".jpg" => "textures",
+                ".dds" or ".png" or ".tga" or ".bmp" or ".jpg" or ".jpeg" => "textures",
                 ".tri" or ".bsd" or ".osd" => "morphs",
                 ".esp" or ".esm" or ".esl" => "plugins",
                 ".zip" or ".7z" or ".rar" or ".bsa" or ".ba2" => "archives",

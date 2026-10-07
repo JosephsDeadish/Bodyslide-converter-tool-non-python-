@@ -101,6 +101,7 @@ public sealed class BatchRunMeasurementsTests
         {
             await File.WriteAllBytesAsync(Path.Combine(child, "mesh.nif"), new byte[10]);
             await File.WriteAllBytesAsync(Path.Combine(child, "texture.dds"), new byte[20]);
+            await File.WriteAllBytesAsync(Path.Combine(child, "texture.jpeg"), new byte[15]);
             await File.WriteAllBytesAsync(Path.Combine(child, "morph.osd"), new byte[30]);
             await File.WriteAllBytesAsync(Path.Combine(child, "plugin.esp"), new byte[40]);
             await File.WriteAllBytesAsync(child + ".zip", new byte[50]);
@@ -111,7 +112,7 @@ public sealed class BatchRunMeasurementsTests
             using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, "batch-performance.json")));
             var bytes = report.RootElement.GetProperty("OutputBytesByCategory");
             Assert.Equal(10, bytes.GetProperty("meshes").GetInt64());
-            Assert.Equal(20, bytes.GetProperty("textures").GetInt64());
+            Assert.Equal(35, bytes.GetProperty("textures").GetInt64());
             Assert.Equal(30, bytes.GetProperty("morphs").GetInt64());
             Assert.Equal(40, bytes.GetProperty("plugins").GetInt64());
             Assert.Equal(110, bytes.GetProperty("archives").GetInt64());
