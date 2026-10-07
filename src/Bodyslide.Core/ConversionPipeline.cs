@@ -256,7 +256,12 @@ public sealed record SourceAssetSupportMetrics(
     bool HasOsdPayloads = false,
     int FallbackInferredFromPathEvidenceCount = 0,
     long DiscoveryMilliseconds = 0,
-    int DiscoveredFileCount = 0);
+    int DiscoveredFileCount = 0)
+{
+    public int SourceObservedSliderCount { get; init; }
+    public string SliderDataProvenance { get; init; } = "unknown";
+    public string SliderDataVerificationStatus { get; init; } = "not-validated";
+}
 public sealed record MorphPayloadReuseSummary(
     int RequestedVariantCount,
     int ReusedVariantCount,

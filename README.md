@@ -113,8 +113,11 @@ claim:
 `custom-profile`, or `unavailable` and separately reports whether it was externally
 verified. A complete or internally consistent profile is still configured data, not
 proof that its reference mesh, slider ranges, skeleton, or physics runtime matches an
-installed mod version. The `direct` metadata-reliability signal describes profile
-completeness; it does not certify a real Skyrim/body combination.
+installed mod version. `SourceAssetSupport` separately reports the count and provenance
+of slider names parsed from discovered OSP/TRI/BSD/OSD data; parsing is not version
+validation, and profile defaults or path-based inference remain labeled separately.
+The `direct` metadata-reliability signal describes profile completeness; it does not
+certify a real Skyrim/body combination.
 
 The converter accepts armor and clothing as mesh assets; it classifies mesh behavior
 (including cloth, leather, plate, skin-tight, and physics-enabled) and headgear

@@ -1832,6 +1832,10 @@ internal static class BodySlideSourceProjectSupport
                 missingAssets.Add("reference-assets");
             }
 
+            var sourceObservedSliderCount = Sliders
+                .Select(static slider => slider.Name)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
             return new SourceAssetSupportMetrics(
                 HasOsp,
                 HasTriPayloads,
@@ -1846,7 +1850,20 @@ internal static class BodySlideSourceProjectSupport
                 HasOsdPayloads,
                 fallbackInference?.InferredFromPathEvidence is true ? 1 : 0,
                 DiscoveryMilliseconds,
-                DiscoveredFileCount);
+                DiscoveredFileCount)
+            {
+                SourceObservedSliderCount = sourceObservedSliderCount,
+                SliderDataProvenance = sourceObservedSliderCount > 0
+                    ? "source-observed-plus-profile-defaults"
+                    : fallbackInference is not null
+                        ? "profile-defaults-plus-inference"
+                        : "profile-defaults-only",
+                SliderDataVerificationStatus = sourceObservedSliderCount > 0
+                    ? "parsed-not-version-validated"
+                    : fallbackInference is not null
+                        ? "inferred-not-externally-verified"
+                        : "not-observed"
+            };
         }
     }
 

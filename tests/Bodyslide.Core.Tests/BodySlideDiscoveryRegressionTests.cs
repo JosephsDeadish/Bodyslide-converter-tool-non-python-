@@ -45,8 +45,23 @@ public sealed class BodySlideDiscoveryRegressionTests : IDisposable
         Assert.Equal(1, result.Sliders.Count(slider => slider == "RegressionSlider"));
         Assert.NotNull(result.SourceAssetSupport);
         Assert.True(result.SourceAssetSupport.HasOsp);
+        Assert.Equal(1, result.SourceAssetSupport.SourceObservedSliderCount);
+        Assert.Equal("source-observed-plus-profile-defaults", result.SourceAssetSupport.SliderDataProvenance);
+        Assert.Equal("parsed-not-version-validated", result.SourceAssetSupport.SliderDataVerificationStatus);
         Assert.Equal(1, result.SourceAssetSupport.DiscoveredFileCount);
         Assert.True(result.SourceAssetSupport.DiscoveryMilliseconds >= 0);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithoutSourceAssets_ReportsProfileDefaultsOnly()
+    {
+        var result = await BodySlideSourceProjectSupport.ResolveAsync(
+            new ImportedArmor(root, [], [], [], []), "CBBE", CancellationToken.None);
+
+        Assert.NotNull(result.SourceAssetSupport);
+        Assert.Equal(0, result.SourceAssetSupport!.SourceObservedSliderCount);
+        Assert.Equal("profile-defaults-only", result.SourceAssetSupport.SliderDataProvenance);
+        Assert.Equal("not-observed", result.SourceAssetSupport.SliderDataVerificationStatus);
     }
 
     [Fact]
