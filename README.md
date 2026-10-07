@@ -890,7 +890,7 @@ The current catalog contains these 28 configured profiles:
 - CBBE-family: CBBE, 3BA, COCO CBBE
 - UNP-family: UNP, UNPB, UUNP, BHUNP, COCO UUNP, TBD
 - Male: HIMBO, SAM, SAM Light, SOS, TNG
-- Vanilla and creature/custom-framework profiles: Vanilla, Vanilla Beast, Serpentine Humanoid, Goat Humanoid, Hagraven, Spriggan, Equine Humanoid, Avian Humanoid, Feline Humanoid, Canine Humanoid, Draconic Humanoid, Insectoid Humanoid, Aquatic Humanoid
+- Other/special-framework profiles: UBE, Vanilla, Vanilla Beast, Serpentine Humanoid, Goat Humanoid, Hagraven, Spriggan, Equine Humanoid, Avian Humanoid, Feline Humanoid, Canine Humanoid, Draconic Humanoid, Insectoid Humanoid, Aquatic Humanoid
 
 Any unrecognized source body can be classified as `CUSTOM`; that fallback is not
 itself a target-body profile or proof of compatibility. Use `--list-bodies` as the
