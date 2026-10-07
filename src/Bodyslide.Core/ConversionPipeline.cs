@@ -646,6 +646,8 @@ public sealed record NifSupportReport(
     public byte? Endian { get; init; }
     public uint? UserVersion { get; init; }
     public uint? UserVersion2 { get; init; }
+    public string CompatibilityEvidenceScope { get; init; } = "automated-file-inspection-only";
+    public string ExternalCompatibilityStatus { get; init; } = "untested";
 }
 
 /// <summary>

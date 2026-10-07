@@ -680,6 +680,8 @@ public sealed class ConversionOrchestratorTests
             Assert.Equal((byte)1, report.Endian);
             Assert.Equal((uint)12, report.UserVersion);
             Assert.Equal((uint)130, report.UserVersion2);
+            Assert.Equal("automated-file-inspection-only", report.CompatibilityEvidenceScope);
+            Assert.Equal("untested", report.ExternalCompatibilityStatus);
         }
         finally
         {
@@ -709,6 +711,8 @@ public sealed class ConversionOrchestratorTests
                 string.Equals(report.ParseMode, "block-graph-float", StringComparison.Ordinal) ||
                 string.Equals(report.ParseMode, "geometry-token-float", StringComparison.Ordinal));
             Assert.Equal(96, report.VertexCount);
+            Assert.Equal("automated-file-inspection-only", report.CompatibilityEvidenceScope);
+            Assert.Equal("untested", report.ExternalCompatibilityStatus);
             Assert.Contains("geometry-family:NiTriShape", report.Messages ?? []);
             Assert.NotNull(NifGeometrySignatureReader.TryRead(inputFile));
         }
