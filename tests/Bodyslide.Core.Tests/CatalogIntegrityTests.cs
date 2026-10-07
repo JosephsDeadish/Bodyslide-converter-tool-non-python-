@@ -83,6 +83,13 @@ public sealed class CatalogIntegrityTests
             Assert.NotEmpty(body.SliderNames);
             Assert.True(body.VertexCountMin > 0, $"{body.Name} must have a positive minimum vertex-count hint.");
             Assert.True(body.VertexCountMax >= body.VertexCountMin, $"{body.Name} has an invalid vertex-count range.");
+            foreach (var bone in body.AvailablePhysicsBones)
+            {
+                Assert.True(
+                    SkeletonMappingCatalog.TryResolveSupportedBone(bone, body.SkeletonFramework, out _),
+                    $"{body.Name} physics bone '{bone}' does not resolve in framework '{body.SkeletonFramework}'.");
+            }
+
             Assert.All(requiredRegions, region =>
                 Assert.True(body.TransformationField.TryGetValue(region, out var value) &&
                             double.IsFinite(value) && value > 0,
