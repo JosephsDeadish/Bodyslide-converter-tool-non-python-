@@ -639,7 +639,14 @@ public sealed record NifSupportReport(
     string? SkinInstanceType = null,
     IReadOnlyList<int>? PartitionSlots = null,
     int? BoneCount = null,
-    HeelAnalysisReport? HeelAnalysis = null);
+    HeelAnalysisReport? HeelAnalysis = null)
+{
+    public string? HeaderVersion { get; init; }
+    public string? BinaryVersion { get; init; }
+    public byte? Endian { get; init; }
+    public uint? UserVersion { get; init; }
+    public uint? UserVersion2 { get; init; }
+}
 
 /// <summary>
 /// Machine-readable quality summary for a single conversion, written to
@@ -5796,6 +5803,7 @@ internal static class NifGeometrySignatureReader
         }
 
         var metadata = ExtractMetadata(bytes);
+        var headerMetadata = ReadNifHeaderMetadata(bytes);
         NifBlockGraph? graph = null;
         NifBlockGraphParser.TryParse(bytes, out graph);
         var geometryFamilyMessages = ExtractUnsupportedGeometryFamilyMessages(bytes, graph);
@@ -5826,7 +5834,14 @@ internal static class NifGeometrySignatureReader
                 metadata.SkinInstanceType,
                 metadata.PartitionSlots,
                 metadata.BoneNames.Count,
-                heelAnalysis);
+                heelAnalysis)
+            {
+                HeaderVersion = headerMetadata.HeaderVersion,
+                BinaryVersion = headerMetadata.BinaryVersion,
+                Endian = headerMetadata.Endian,
+                UserVersion = headerMetadata.UserVersion,
+                UserVersion2 = headerMetadata.UserVersion2
+            };
         }
         var unsupportedMessages = new List<string>();
         if (DirectSseHalfFloatShapeTokens.Any(token => bytes.AsSpan().IndexOf(token) >= 0))
@@ -5861,7 +5876,54 @@ internal static class NifGeometrySignatureReader
             metadata.SkinInstanceType,
             metadata.PartitionSlots,
             metadata.BoneNames.Count,
-            heelAnalysis);
+            heelAnalysis)
+        {
+            HeaderVersion = headerMetadata.HeaderVersion,
+            BinaryVersion = headerMetadata.BinaryVersion,
+            Endian = headerMetadata.Endian,
+            UserVersion = headerMetadata.UserVersion,
+            UserVersion2 = headerMetadata.UserVersion2
+        };
+    }
+
+    private sealed record NifHeaderMetadata(
+        string? HeaderVersion,
+        string? BinaryVersion,
+        byte? Endian,
+        uint? UserVersion,
+        uint? UserVersion2);
+
+    private static NifHeaderMetadata ReadNifHeaderMetadata(byte[] bytes)
+    {
+        var headerOffset = bytes.AsSpan().IndexOf(NifHeaderToken);
+        if (headerOffset < 0)
+        {
+            return new NifHeaderMetadata(null, null, null, null, null);
+        }
+
+        var lineEnd = Array.IndexOf(bytes, (byte)'\n', headerOffset);
+        if (lineEnd < 0)
+        {
+            return new NifHeaderMetadata(null, null, null, null, null);
+        }
+
+        var headerLine = System.Text.Encoding.ASCII.GetString(bytes, headerOffset, lineEnd - headerOffset).TrimEnd('\r');
+        var versionMarker = headerLine.LastIndexOf("Version ", StringComparison.OrdinalIgnoreCase);
+        var headerVersion = versionMarker >= 0
+            ? headerLine[(versionMarker + "Version ".Length)..].Trim()
+            : null;
+        var binaryOffset = lineEnd + 1;
+        if (binaryOffset + 17 > bytes.Length)
+        {
+            return new NifHeaderMetadata(headerVersion, null, null, null, null);
+        }
+
+        var version = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(binaryOffset, sizeof(uint)));
+        var endian = bytes[binaryOffset + sizeof(uint)];
+        var userVersion = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(binaryOffset + 5, sizeof(uint)));
+        var userVersion2 = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(binaryOffset + 13, sizeof(uint)));
+        var binaryVersion = $"{version >> 24}.{(version >> 16) & 0xff}.{(version >> 8) & 0xff}.{version & 0xff}";
+        return new NifHeaderMetadata(headerVersion, binaryVersion, endian, userVersion, userVersion2);
     }
 
     private static IReadOnlyList<string> BuildMetadataMessages(

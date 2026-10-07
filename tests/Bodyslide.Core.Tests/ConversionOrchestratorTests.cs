@@ -655,6 +655,39 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void NifGeometrySignatureReader_ReportsTextAndBinaryHeaderVersions()
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true))
+        {
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+            writer.Write(0x14020007u);
+            writer.Write((byte)1);
+            writer.Write(12u);
+            writer.Write(0u);
+            writer.Write(130u);
+        }
+
+        var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        try
+        {
+            File.WriteAllBytes(path, stream.ToArray());
+            var report = NifGeometrySignatureReader.Inspect(path);
+
+            Assert.Equal("unsupported", report.Status);
+            Assert.Equal("20.2.0.7", report.HeaderVersion);
+            Assert.Equal("20.2.0.7", report.BinaryVersion);
+            Assert.Equal((byte)1, report.Endian);
+            Assert.Equal((uint)12, report.UserVersion);
+            Assert.Equal((uint)130, report.UserVersion2);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task NifGeometrySignatureReader_NiTriShapeTokenGuidedStub_IsRecoveredAsSupported()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
