@@ -87,6 +87,7 @@ jobs:
           $bundleMetadata = [ordered]@{
             portableDesktop = "SlideSmith.exe"
             desktop = "desktop/SlideSmith.exe"
+            installedDesktop = "SlideSmith/SlideSmith.exe"
             cli = "cli/SlideSmith-CLI.exe"
             readme = "README.txt"
             fomodModuleConfig = "fomod/ModuleConfig.xml"
@@ -142,19 +143,19 @@ jobs:
 
           [xml]$moduleConfig = Get-Content (Join-Path $extractPath "fomod/ModuleConfig.xml") -Raw
           $requiredMappings = @(
-            'folder[@source="desktop" and @destination="CalienteTools/SlideSmith"]',
-            'folder[@source="cli" and @destination="CalienteTools/SlideSmith/cli"]',
-            'folder[@source="meta" and @destination="CalienteTools/SlideSmith/meta"]',
-            'file[@source="cli/SlideSmith-CLI.exe" and @destination="CalienteTools/SlideSmith/SlideSmith-CLI.exe"]',
-            'file[@source="README.txt" and @destination="CalienteTools/SlideSmith/README.txt"]',
-            'file[@source="meta.ini" and @destination="CalienteTools/SlideSmith/meta.ini"]'
+            'folder[@source="desktop" and @destination="SlideSmith"]',
+            'folder[@source="cli" and @destination="SlideSmith/cli"]',
+            'folder[@source="meta" and @destination="SlideSmith/meta"]',
+            'file[@source="cli/SlideSmith-CLI.exe" and @destination="SlideSmith/SlideSmith-CLI.exe"]',
+            'file[@source="README.txt" and @destination="SlideSmith/README.txt"]',
+            'file[@source="meta.ini" and @destination="SlideSmith/meta.ini"]'
           )
           foreach ($mapping in $requiredMappings) {
             if (!$moduleConfig.SelectSingleNode("/config/requiredInstallFiles/$mapping")) {
               throw "Bundle FOMOD metadata is missing installer mapping $mapping."
             }
           }
-          $installPath = Join-Path $extractPath "installed/CalienteTools/SlideSmith"
+          $installPath = Join-Path $extractPath "installed/SlideSmith"
           New-Item -ItemType Directory -Path $installPath -Force | Out-Null
           Copy-Item (Join-Path $extractPath "desktop/*") $installPath -Recurse -Force
           foreach ($dependency in @("SlideSmith.dll", "SlideSmith.runtimeconfig.json", "hostfxr.dll", "coreclr.dll")) {

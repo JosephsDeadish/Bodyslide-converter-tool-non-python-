@@ -4,5 +4,5 @@
   <Author>DeadOnTheInside</Author>
   <Version MachineVersion="1.0.1">1.0.1</Version>
   <Website></Website>
-  <Description>Auto-generated SkyrimSE Windows tool bundle for SlideSmith. Installs into CalienteTools/SlideSmith so Mod Organizer 2 detects valid Skyrim game data and can launch SlideSmith as a managed executable.</Description>
+  <Description>Windows tool bundle for SlideSmith. Installs the MO2-ready desktop app into the SlideSmith folder at the mod's Data root for easy executable setup.</Description>
 </fomod>

@@ -11,26 +11,27 @@ Where is the app?
 
 Included:
 - SlideSmith.exe (top-level standalone desktop app)
-- CalienteTools/SlideSmith/SlideSmith.exe (desktop launcher after install)
-- Desktop runtime DLLs alongside CalienteTools/SlideSmith/SlideSmith.exe
-- CalienteTools/SlideSmith/cli/SlideSmith-CLI.exe
-- CalienteTools/SlideSmith/meta/slidesmith-bundle.json
-- CalienteTools/SlideSmith/meta.ini
+- SlideSmith/SlideSmith.exe (MO2-ready desktop app after install)
+- Desktop runtime DLLs alongside SlideSmith/SlideSmith.exe
+- SlideSmith/cli/SlideSmith-CLI.exe
+- SlideSmith/meta/slidesmith-bundle.json
+- SlideSmith/meta.ini
 - fomod/ metadata (installer mapping)
 
 Quick start:
 1) Install this bundle as a mod/tool package in your mod manager.
 2) In MO2, open Configure Executables, add a desktop executable, and browse to:
-   - Binary: <MO2 mods folder>\SlideSmith Windows Bundle\CalienteTools\SlideSmith\SlideSmith.exe
-   - Start in: <MO2 mods folder>\SlideSmith Windows Bundle\CalienteTools\SlideSmith
+   - Binary: <MO2 mods folder>\SlideSmith Windows Bundle\SlideSmith\SlideSmith.exe
+   - Start in: <MO2 mods folder>\SlideSmith Windows Bundle\SlideSmith
    - Arguments: leave empty for a normal GUI launch.
    Then select SlideSmith in MO2's executable dropdown and launch it with MO2's Run
    button so the active profile's virtual files are available.
-3) Keep the complete desktop folder together. The installed desktop app is
+3) The installed app is in the mod's `SlideSmith` folder at the Data root, instead
+   of being nested under `CalienteTools`. Keep the complete desktop folder together. The installed desktop app is
    self-contained without single-file extraction; copying only its EXE will not work.
    The top-level standalone EXE is for direct launch and is not the recommended
    binary to configure in MO2.
-   You can directly launch CalienteTools/SlideSmith/SlideSmith.exe (GUI) or CalienteTools/SlideSmith/cli/SlideSmith-CLI.exe (CLI).
+   You can directly launch SlideSmith/SlideSmith.exe (GUI) or SlideSmith/cli/SlideSmith-CLI.exe (CLI).
 4) Keep this package enabled as a separate managed entry. Do not configure the CLI
    executable when you want the graphical app.
 
