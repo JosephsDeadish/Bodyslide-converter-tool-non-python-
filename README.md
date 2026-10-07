@@ -96,6 +96,26 @@ works in every Skyrim installation.
 | Skeleton and physics | Catalog bone resolution, mapping diagnostics, generated CBPC/SMP configuration, and readiness reports are checked by tests. | That a particular game installation has the required skeleton/runtime, or that the generated weights/chains simulate correctly in live gameplay. |
 | Desktop / MO2 / game | Startup routing and launcher argument behavior have automated tests; external proof harnesses describe Windows/UI/runtime/game checks. | A passing Windows desktop flow through MO2, live-game animation/collision testing, or proof for a specific load order until external evidence is imported. |
 
+The current compatibility matrix has **no externally verified game/body/runtime
+combination**. Build and regression coverage is not an installed-game compatibility
+claim:
+
+| Matrix dimension | Automated scope currently recorded | External verification status |
+|---|---|---|
+| Skyrim edition/runtime | No game executable or runtime version is part of the automated conversion fixtures. | Skyrim SE, AE, and VR edition/version combinations remain unverified. |
+| NIF version/layout | Synthetic reader and failure fixtures cover selected supported structures and explicit unsupported cases such as `NiLines`. | No exhaustive NIF version/block-type/exporter matrix has passed an external tool or game check. |
+| Outfit construction | Fixture coverage exercises selected clothing/armor meshes, partitions, linked plugin references, and `_0`/`_1` pairs. | No garment category, modular set, or real outfit/body pair is generally certified. |
+| Body and skeleton | Built-in profiles and framework catalogs are checked for internal metadata consistency. | Catalog profiles, including CBBE, 3BA, BHUNP, HIMBO, SOS, and special frameworks, are not versioned proofs of installed reference meshes or skeletons. |
+| Physics | Generated CBPC/SMP configuration and declared bone mappings have synthetic checks. | No CBPC/SMP runtime version, target skeleton installation, or live simulation/collision combination is certified. |
+| Inputs and manager | File, folder, selected archive formats, plugin, and BodySlide parsing/export paths have automated coverage. | Real installed mods, MO2 virtual filesystem behavior, load-order conflicts, and actual BodySlide/Outfit Studio builds remain unverified. |
+
+`TargetBodySupport` in conversion reports now labels metadata as `embedded-built-in-catalog`,
+`custom-profile`, or `unavailable` and separately reports whether it was externally
+verified. A complete or internally consistent profile is still configured data, not
+proof that its reference mesh, slider ranges, skeleton, or physics runtime matches an
+installed mod version. The `direct` metadata-reliability signal describes profile
+completeness; it does not certify a real Skyrim/body combination.
+
 The converter accepts armor and clothing as mesh assets; it classifies mesh behavior
 (including cloth, leather, plate, skin-tight, and physics-enabled) and headgear
 subtypes to guide conversion and partition handling. Those classifications do not

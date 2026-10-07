@@ -41,6 +41,9 @@ public sealed class FailingPackReadinessTests
                 await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion-quality.json")));
             Assert.NotNull(report);
             Assert.NotNull(report.ValidationSummary);
+            Assert.Equal("embedded-built-in-catalog", report.TargetBodySupport!.MetadataProvenance);
+            Assert.Equal("configured-not-externally-verified", report.TargetBodySupport.MetadataVerificationStatus);
+            Assert.False(report.TargetBodySupport.IsExternallyVerified);
             reports.Add(report);
         }
 

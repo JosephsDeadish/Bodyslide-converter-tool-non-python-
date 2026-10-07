@@ -2487,7 +2487,12 @@ public sealed record TargetBodySupportReport(
     int PhysicsFamilyCount,
     int PhysicsNodeCount,
     IReadOnlyList<string> MissingFields,
-    IReadOnlyList<string> QualityWarnings);
+    IReadOnlyList<string> QualityWarnings)
+{
+    public string MetadataProvenance { get; init; } = "unavailable";
+    public string MetadataVerificationStatus { get; init; } = "not-verified";
+    public bool IsExternallyVerified { get; init; }
+}
 
 public sealed record PreviewWorkbenchPayload(
     string MeshFile,
@@ -30665,6 +30670,11 @@ internal sealed class LocalExportService(
                 ? builtInMetadata?.DefaultPhysics ?? "none"
                 : customProfile?.PhysicsProfile ?? "none";
 
+        var metadataProvenance = assessment.HasBuiltInCoverage
+            ? "embedded-built-in-catalog"
+            : customProfile is not null
+                ? "custom-profile"
+                : "unavailable";
         return new TargetBodySupportReport(
             targetBody,
             assessment.HasBuiltInCoverage,
@@ -30692,7 +30702,14 @@ internal sealed class LocalExportService(
             hasTechnicalProfile ? technicalProfile!.PhysicsFamilyCount : 0,
             hasTechnicalProfile ? technicalProfile!.PhysicsNodeCount : 0,
             assessment.MissingFields,
-            assessment.QualityWarnings);
+            assessment.QualityWarnings)
+        {
+            MetadataProvenance = metadataProvenance,
+            MetadataVerificationStatus = metadataProvenance == "unavailable"
+                ? "missing"
+                : "configured-not-externally-verified",
+            IsExternallyVerified = false
+        };
     }
 
     private static bool HasExplicitCustomTargetBodySupportMetadata(CustomBodyProfile? profile) =>
