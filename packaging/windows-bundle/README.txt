@@ -27,8 +27,9 @@ Quick start:
    Then select SlideSmith in MO2's executable dropdown and launch it with MO2's Run
    button so the active profile's virtual files are available.
 3) The installed app is in the mod's `SlideSmith` folder at the Data root, instead
-   of being nested under `CalienteTools`. Keep the complete desktop folder together. The installed desktop app is
-   self-contained without single-file extraction; copying only its EXE will not work.
+   of being nested under `CalienteTools`. Keep the complete desktop folder together.
+   The installed desktop app is self-contained without single-file extraction;
+   copying only its EXE will not work.
    The top-level standalone EXE is for direct launch and is not the recommended
    binary to configure in MO2.
    You can directly launch SlideSmith/SlideSmith.exe (GUI) or SlideSmith/cli/SlideSmith-CLI.exe (CLI).
