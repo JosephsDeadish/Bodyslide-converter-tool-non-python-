@@ -59,15 +59,16 @@ internal sealed class BatchPluginExportContext : IDisposable
         pluginTextureSwapEvidence.GetOrAdd(Path.GetFullPath(plugin), _ => new Lazy<bool>(scan)).Value;
 
     internal IReadOnlyList<string> GetImportSupportFiles(
-        string root, IReadOnlyList<string>? excludedDirectories, CancellationToken cancellationToken)
+        string root, IReadOnlyList<string>? excludedDirectories, CancellationToken cancellationToken,
+        Action<int>? scanProgress = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var exclusions = ImportExcludedDirectories ?? excludedDirectories;
         var key = Path.GetFullPath(root) + "\0" + string.Join("\0",
             (exclusions ?? []).Select(Path.GetFullPath).OrderBy(path => path, StringComparer.Ordinal));
         return importSupportSnapshots.GetOrAdd(key, _ => new Lazy<IReadOnlyList<string>>(() =>
-            BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
-                root, exclusions, cancellationToken, maxTraversalDepth: 16, includeBodySlideSupport: true))).Value;
+            BatchConversionRunner.SourceScanEnumerator.EnumerateImportSupportFiles(
+                root, exclusions, cancellationToken, scanProgress))).Value;
     }
 
     internal async Task<T> ExecuteAsync<T>(Func<Task<T>> export, CancellationToken cancellationToken)
@@ -7623,7 +7624,8 @@ public sealed class ConversionOrchestrator(
             ReportStage("Importing input", 1);
             armor = await ProfileStageAsync("import", () => importer is LocalArmorImportService localImporter
                 ? localImporter.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories,
-                    normalized.Request.BatchPluginExportContext)
+                    normalized.Request.BatchPluginExportContext,
+                    filesScanned => ReportStage($"Importing input ({filesScanned:N0} files checked)", 1))
                 : importer.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories));
             if (normalized.Request.BatchPluginExportContext is { } batchPluginContext)
             {
@@ -8827,10 +8829,27 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         List<string> meshFiles;
         using (measurements.Measure("discovery"))
         {
-        meshFiles = SourceScanEnumerator.EnumerateFiles(sourceDirectory, [".nif"], excludedDirectories, cancellationToken)
-            .Where(path => IsConvertibleBatchMesh(path, includeCharacterBodyAssets))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            var isArchiveInput = ArchiveExtractionHelper.IsSupportedArchive(request.InputPath);
+            var scanProgressStage = isArchiveInput ? "Scanning extracted archive" : "Scanning input folder";
+            var scanStageIndex = isArchiveInput ? 2 : 1;
+            var scanStageCount = isArchiveInput ? 3 : 2;
+            var scanLabel = Path.GetFileName(request.InputPath);
+            void ReportScanProgress(int filesScanned) =>
+                progress?.Report(new BatchProgressUpdate(
+                    Completed: 0,
+                    Total: 1,
+                    CurrentFile: scanLabel,
+                    Success: false,
+                    Stage: $"{scanProgressStage} ({filesScanned:N0} files checked)",
+                    StageIndex: scanStageIndex,
+                    StageCount: scanStageCount,
+                    IsItemCompleted: false));
+            ReportScanProgress(0);
+            meshFiles = SourceScanEnumerator.EnumerateFiles(
+                    sourceDirectory, [".nif"], excludedDirectories, cancellationToken, ReportScanProgress)
+                .Where(path => IsConvertibleBatchMesh(path, includeCharacterBodyAssets))
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -9182,6 +9201,12 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
     internal static class SourceScanEnumerator
     {
+        internal static readonly string[] ImportSupportExtensions =
+        [
+            ".bgem", ".bgsm", ".bsd", ".dds", ".esp", ".esm", ".esl", ".hkx",
+            ".json", ".nif", ".osd", ".osp", ".png", ".pex", ".tga", ".tri", ".xml"
+        ];
+
         private static readonly string[] ConverterMarkerFiles =
         [
             "conversion-manifest.json",
@@ -9204,7 +9229,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             string path,
             IReadOnlyCollection<string> extensions,
             IReadOnlyList<string>? excludedDirectories = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            Action<int>? scanProgress = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(path))
@@ -9220,7 +9246,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             }
 
             return EnumerateFileSnapshot(path, excludedDirectories, cancellationToken,
-                    maxTraversalDepth: null, includeBodySlideSupport: false, extensions: extensions)
+                    maxTraversalDepth: null, includeBodySlideSupport: false, extensions: extensions, scanProgress: scanProgress)
                 .Select(file => file.Path).ToArray();
         }
 
@@ -9236,15 +9262,27 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         public static (IReadOnlyList<string> MeshFiles, IReadOnlyList<string> SupportFiles) EnumerateImportFiles(
             string path,
             IReadOnlyList<string>? excludedDirectories,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Action<int>? scanProgress = null)
         {
             var files = EnumerateFileSnapshot(path, excludedDirectories, cancellationToken,
-                maxTraversalDepth: 16, includeBodySlideSupport: true, preserveDeepMeshes: true);
+                maxTraversalDepth: 16, includeBodySlideSupport: true, preserveDeepMeshes: true,
+                extensions: ImportSupportExtensions, scanProgress: scanProgress);
             return (
                 files.Where(file => file.MeshEligible && Path.GetExtension(file.Path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
                     .Select(file => file.Path).ToArray(),
                 files.Where(file => file.Depth <= 16).Select(file => file.Path).ToArray());
         }
+
+        public static IReadOnlyList<string> EnumerateImportSupportFiles(
+            string path,
+            IReadOnlyList<string>? excludedDirectories,
+            CancellationToken cancellationToken,
+            Action<int>? scanProgress = null)
+            => EnumerateFileSnapshot(path, excludedDirectories, cancellationToken,
+                    maxTraversalDepth: 16, includeBodySlideSupport: true, extensions: ImportSupportExtensions,
+                    scanProgress: scanProgress)
+                .Select(file => file.Path).ToArray();
 
         private readonly record struct SourceScanFile(string Path, int Depth, bool MeshEligible);
 
@@ -9255,7 +9293,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             int? maxTraversalDepth,
             bool includeBodySlideSupport,
             bool preserveDeepMeshes = false,
-            IReadOnlyCollection<string>? extensions = null)
+            IReadOnlyCollection<string>? extensions = null,
+            Action<int>? scanProgress = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(path))
@@ -9274,6 +9313,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var files = new List<SourceScanFile>();
             var pending = new Stack<(string Directory, int Depth, bool MeshEligible)>();
             pending.Push((Path.GetFullPath(path), 0, true));
+            var scannedFiles = 0;
 
             while (pending.Count > 0)
             {
@@ -9301,11 +9341,21 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 foreach (var file in Directory.EnumerateFiles(directory))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    scannedFiles++;
+                    if (scannedFiles % 2048 == 0)
+                    {
+                        scanProgress?.Invoke(scannedFiles);
+                    }
                     if (extensionFilter is null || extensionFilter.Contains(Path.GetExtension(file)))
                     {
                         files.Add(new SourceScanFile(Path.GetFullPath(file), depth, meshEligible));
                     }
                 }
+            }
+
+            if (scannedFiles > 0 && scannedFiles % 2048 != 0)
+            {
+                scanProgress?.Invoke(scannedFiles);
             }
 
             return files
@@ -11279,7 +11329,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
     internal Task<ImportedArmor> ImportAsync(
         string inputPath, CancellationToken cancellationToken, IReadOnlyList<string>? excludedDirectories,
-        BatchPluginExportContext? batchContext)
+        BatchPluginExportContext? batchContext, Action<int>? scanProgress = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var fullInputPath = Path.GetFullPath(inputPath);
@@ -11305,17 +11355,20 @@ internal sealed class LocalArmorImportService : IArmorImportService
         IReadOnlyList<string> supportFiles;
         if (Directory.Exists(sourcePath))
         {
+            scanProgress?.Invoke(0);
             var snapshot = BatchConversionRunner.SourceScanEnumerator.EnumerateImportFiles(
-                supportScanRoot, excludedDirectories, cancellationToken);
+                supportScanRoot, excludedDirectories, cancellationToken, scanProgress);
             meshFiles = snapshot.MeshFiles;
             supportFiles = snapshot.SupportFiles;
         }
         else
         {
             meshFiles = EnumerateFiles(sourcePath, [".nif"], excludedDirectories, cancellationToken);
-            supportFiles = batchContext?.GetImportSupportFiles(supportScanRoot, excludedDirectories, cancellationToken)
-                ?? BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
-                    supportScanRoot, excludedDirectories, cancellationToken, maxTraversalDepth: 16, includeBodySlideSupport: true);
+            scanProgress?.Invoke(0);
+            supportFiles = batchContext?.GetImportSupportFiles(
+                    supportScanRoot, excludedDirectories, cancellationToken, scanProgress)
+                ?? BatchConversionRunner.SourceScanEnumerator.EnumerateImportSupportFiles(
+                    supportScanRoot, excludedDirectories, cancellationToken, scanProgress);
         }
         IReadOnlyList<string> SelectSupportFiles(params string[] extensions) =>
             supportFiles

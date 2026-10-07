@@ -24,12 +24,17 @@ public sealed class ImportDiscoverySnapshotTests(ITestOutputHelper output) : IDi
         Write("generated/conversion-manifest.json", "{}");
         Write("generated/ignored.nif", "generated");
         Write("meshes/slidesmith/ignored.nif", "generated");
+        Write("textures/unused.jpg", "unsupported");
+        Write("notes/readme.txt", "unsupported");
         var exclusions = new[] { Path.Combine(root, "excluded") };
 
         var independentTimer = Stopwatch.StartNew();
         var expectedMeshes = BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, [".nif"], exclusions);
         var expectedSupport = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
-            root, exclusions, maxTraversalDepth: 16, includeBodySlideSupport: true);
+                root, exclusions, maxTraversalDepth: 16, includeBodySlideSupport: true)
+            .Where(path => BatchConversionRunner.SourceScanEnumerator.ImportSupportExtensions.Contains(
+                Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+            .ToArray();
         independentTimer.Stop();
 
         var snapshotTimer = Stopwatch.StartNew();
@@ -39,9 +44,12 @@ public sealed class ImportDiscoverySnapshotTests(ITestOutputHelper output) : IDi
         Assert.Equal(expectedSupport, snapshot.SupportFiles);
         Assert.Equal(meshCount, snapshot.MeshFiles.Count);
 
+        var importProgress = new List<int>();
         var importTimer = Stopwatch.StartNew();
-        var armor = await new LocalArmorImportService().ImportAsync(root, CancellationToken.None, exclusions);
+        var armor = await new LocalArmorImportService().ImportAsync(
+            root, CancellationToken.None, exclusions, null, importProgress.Add);
         importTimer.Stop();
+        Assert.Equal(meshCount * 2 + 5, importProgress[^1]);
         Assert.Equal(expectedMeshes, armor.MeshFiles);
         Assert.Equal(meshCount, armor.TextureFiles.Count);
         Assert.Contains(Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "Project", "reference.nif"), armor.BodyReferenceFiles);
@@ -68,16 +76,20 @@ public sealed class ImportDiscoverySnapshotTests(ITestOutputHelper output) : IDi
         Write("meshes/slidesmith/ignored.nif", "generated");
         Write("output/ignored.nif", "generated");
         Write("Converted/ignored.nif", "generated");
+        Write("unrelated/ignored.txt", "unsupported");
         var exclusions = new[] { Path.Combine(root, "excluded") };
         string[] extensions = [".NIF", ".esp", ".bgsm"];
         var expected = BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(root, exclusions)
             .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
             .ToArray();
 
-        var actual = BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, extensions, exclusions);
+        var scanProgress = new List<int>();
+        var actual = BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(
+            root, extensions, exclusions, scanProgress: scanProgress.Add);
 
         Assert.Equal(expected, actual);
         Assert.Equal(5, actual.Count);
+        Assert.Equal(7, Assert.Single(scanProgress));
         Assert.Empty(BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, []));
         var selectedMesh = Path.Combine(root, "meshes", "Z_armor.NIF");
         Assert.Equal(selectedMesh, Assert.Single(
@@ -105,11 +117,16 @@ public sealed class ImportDiscoverySnapshotTests(ITestOutputHelper output) : IDi
             .ToArray();
         fullScanTimer.Stop();
         var filteredTimer = Stopwatch.StartNew();
-        var actual = BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, extensions);
+        var scanProgress = new List<int>();
+        var actual = BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(
+            root, extensions, scanProgress: scanProgress.Add);
         filteredTimer.Stop();
 
         Assert.Equal(expected, actual);
         Assert.Equal(2, actual.Count);
+        Assert.Equal(unrelatedCount + 3, scanProgress[^1]);
+        Assert.Equal(scanProgress.OrderBy(count => count), scanProgress);
+        Assert.All(scanProgress.SkipLast(1), count => Assert.Equal(0, count % 2048));
         output.WriteLine(
             $"Synthetic sparse support scan: {unrelatedCount} unrelated textures; full scan/filter={fullScanTimer.Elapsed.TotalMilliseconds:F2} ms; " +
             $"filtered traversal={filteredTimer.Elapsed.TotalMilliseconds:F2} ms. " +
@@ -123,14 +140,23 @@ public sealed class ImportDiscoverySnapshotTests(ITestOutputHelper output) : IDi
         var deep = string.Join('/', Enumerable.Repeat("level", 17));
         Write($"{deep}/deep_armor.nif", "mesh");
         Write($"{deep}/deep_texture.dds", "texture");
+        Write("unrelated/readme.txt", "unsupported");
         Write($"CalienteTools/BodySlide/{deep}/reference.nif", "reference");
 
-        var snapshot = BatchConversionRunner.SourceScanEnumerator.EnumerateImportFiles(root, null, CancellationToken.None);
+        var scanProgress = new List<int>();
+        var snapshot = BatchConversionRunner.SourceScanEnumerator.EnumerateImportFiles(
+            root, null, CancellationToken.None, scanProgress.Add);
         Assert.Equal(BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, [".nif"]), snapshot.MeshFiles);
-        Assert.Equal(BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
-            root, maxTraversalDepth: 16, includeBodySlideSupport: true), snapshot.SupportFiles);
+        Assert.Equal(4, Assert.Single(scanProgress));
+        Assert.Equal(
+            BatchConversionRunner.SourceScanEnumerator.EnumerateAllFiles(
+                    root, maxTraversalDepth: 16, includeBodySlideSupport: true)
+                .Where(path => BatchConversionRunner.SourceScanEnumerator.ImportSupportExtensions.Contains(
+                    Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)),
+            snapshot.SupportFiles);
         Assert.Contains(Path.Combine(root, deep.Replace('/', Path.DirectorySeparatorChar), "deep_armor.nif"), snapshot.MeshFiles);
         Assert.DoesNotContain(snapshot.SupportFiles, path => Path.GetFileName(path) == "deep_texture.dds");
+        Assert.DoesNotContain(snapshot.SupportFiles, path => Path.GetFileName(path) == "readme.txt");
     }
 
     [Fact]

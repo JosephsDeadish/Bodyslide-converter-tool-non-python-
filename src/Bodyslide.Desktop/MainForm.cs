@@ -509,14 +509,24 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Top,
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 3,
             AutoSize = true,
         };
         quickImportPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         quickImportPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         quickImportPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        quickImportPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         quickImportPanel.Controls.Add(dropPanel, 0, 0);
-        quickImportPanel.Controls.Add(startupHandoffPanel, 0, 1);
+        quickImportPanel.Controls.Add(new Label
+        {
+            Name = "setupScrollHintLabel",
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            MaximumSize = new Size(720, 0),
+            Margin = new Padding(4, 6, 4, 4),
+            Text = "Setup: 1) choose armor input, 2) choose a target body or preset, then scroll down to review settings. Start conversion remains in the lower panel.",
+        }, 0, 1);
+        quickImportPanel.Controls.Add(startupHandoffPanel, 0, 2);
 
         _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Quick import", quickImportPanel), 0, 0);
 
@@ -1126,7 +1136,7 @@ public sealed class MainForm : Form
         }
         _sourceHintsGroupBox = CreateAutoSizeSection("Source body", rightOptions);
         _conversionOptionsPanel.Controls.Add(_sourceHintsGroupBox, 1, 0);
-        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Conversion settings", _conversionOptionsPanel), 0, 3);
+        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("3. Conversion settings", _conversionOptionsPanel), 0, 3);
 
         var outputRow = CreateThreeColumnRow("Output destination (optional)", out _outputTextBox);
         _outputTextBox.Name = "outputPathTextBox";
@@ -1899,6 +1909,11 @@ public sealed class MainForm : Form
             _userAdjustedMainSplit = false;
             _cacheInspectionInitialized = true;
             _showAdvancedOptionsCheckBox.Checked = false;
+            var setupScrollHint = Controls.Find("setupScrollHintLabel", true).OfType<Label>().SingleOrDefault();
+            if (setupScrollHint is null || !setupScrollHint.Text.Contains("scroll down", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("The setup view must explain that more options are available by scrolling.");
+            }
             if (!_sourceComboBox.Visible || _profileComboBox.Visible || _cachePathTextBox.Visible)
             {
                 throw new InvalidOperationException("Basic layout must show the source body and hide advanced settings.");
@@ -1943,6 +1958,14 @@ public sealed class MainForm : Form
                         UpdateResponsiveLayout();
                         UpdateMainSplitLayout();
                         PerformLayout();
+                        _mainSplitContainer.Panel1.AutoScrollPosition = Point.Empty;
+                        _mainSplitContainer.Panel1.PerformLayout();
+                        var hintBounds = _mainSplitContainer.Panel1.RectangleToClient(
+                            setupScrollHint.RectangleToScreen(setupScrollHint.ClientRectangle));
+                        if (!_mainSplitContainer.Panel1.ClientRectangle.Contains(hintBounds))
+                        {
+                            throw new InvalidOperationException("The setup scroll guidance must be visible at the top of the setup panel.");
+                        }
                         var expectedColumns = _conversionOptionsPanel.DisplayRectangle.Width < ScaleLayoutValue(1100) ? 1 : 2;
                         if (_conversionOptionsPanel.ColumnCount != expectedColumns)
                         {
@@ -1962,6 +1985,7 @@ public sealed class MainForm : Form
                                      _worldModeComboBox, _skeletonNifTextBox, _cachePathTextBox,
                                      _customProfilesListView, _loadCustomProfileButton, _saveProfileButton,
                                      _bodySelectionSummaryLabel,
+                                     setupScrollHint,
                                      Controls.Find("creatorSupportButton", true).Single(),
                                  })
                         {
