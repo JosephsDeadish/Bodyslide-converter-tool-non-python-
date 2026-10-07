@@ -58,6 +58,40 @@ public sealed class Issue8RegressionTests
         PluginSourceIdentity.RequireUnambiguous([paths[0], paths[0], Path.Combine(Path.GetTempPath(), "Shared.esm")]);
     }
 
+    [Theory]
+    [InlineData("BHUNP", "BHUNP")]
+    [InlineData("CBBE 3BA", "3BA")]
+    public void DetectedSourceBodySelectsOnlyOneMatchingInstallerPluginVariant(string detectedBody, string expectedVariant)
+    {
+        var paths = new[] { "BHUNP", "3BA", "CBBE", "UNP" }
+            .Select(folder => Path.Combine(Path.GetTempPath(), "options", folder, "BDE_Armor.esp"))
+            .Append(Path.Combine(Path.GetTempPath(), "Shared.esm"));
+
+        var resolution = PluginSourceIdentity.Resolve(paths, detectedBody, confidence: 0.91);
+
+        Assert.Empty(resolution.AmbiguousNames);
+        Assert.Contains(resolution.SafePaths, path =>
+            path.Contains(Path.Combine("options", expectedVariant, "BDE_Armor.esp"), StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(resolution.SafePaths, path => Path.GetFileName(path) == "Shared.esm");
+        Assert.DoesNotContain(resolution.SafePaths, path =>
+            path.EndsWith("BDE_Armor.esp", StringComparison.OrdinalIgnoreCase) &&
+            !path.Contains(Path.Combine("options", expectedVariant, "BDE_Armor.esp"), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("BHUNP", 0.74)]
+    [InlineData("UnknownBody", 0.99)]
+    public void InstallerPluginVariantsRemainAmbiguousWithoutConfidentUniqueBodyMatch(string body, double confidence)
+    {
+        var paths = new[] { "BHUNP", "3BA", "CBBE", "UNP" }
+            .Select(folder => Path.Combine(Path.GetTempPath(), "options", folder, "BDE_Armor.esp"));
+
+        var resolution = PluginSourceIdentity.Resolve(paths, body, confidence);
+
+        Assert.Equal(["BDE_Armor.esp"], resolution.AmbiguousNames);
+        Assert.Contains(body, resolution.Warnings[0]);
+    }
+
     [Fact]
     public void InstallerConflictDetailsAreImmutableSnapshots()
     {

@@ -7631,8 +7631,6 @@ public sealed class ConversionOrchestrator(
             {
                 armor = armor with { BatchPluginFiles = batchPluginContext.PluginFiles, BatchMeshFiles = batchPluginContext.MeshFiles };
             }
-            PluginSourceIdentity.RequireUnambiguous(armor.BatchPluginFiles ?? armor.SourcePluginFiles ?? []);
-
             // Merge any explicitly-provided custom profile paths from the request with the
             // auto-scanned profiles that the importer found inside the input directory.
             armor = CustomBodyProfileSupport.MergeProfiles(armor, normalized.Request.CustomProfilePaths);
@@ -7734,30 +7732,6 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"material-textures:{textureSummary.MaterialTexturePaths.Count}");
             }
 
-            ReportStage("Scanning plugins", 3);
-            var pluginAnalysis = await ProfileStageAsync("plugin-analysis", () => pluginAnalysisService.AnalyzeAsync(armor, normalized.Request.TargetBody, cancellationToken));
-            if (pluginAnalysis.ScannedPlugins.Count > 0)
-            {
-                steps.Add($"plugins:scanned={pluginAnalysis.ScannedPlugins.Count},addons={pluginAnalysis.ArmorAddons.Count}");
-            }
-
-            // Emit a dedicated warning step for every plugin whose type could not be
-            // resolved with certainty (ESL flag set but no FE-range FormID evidence).
-            // The rewrite stage honours this flag and skips ambiguous plugins rather
-            // than making assumptions about whether they behave as ESPFE or plain ESP.
-            if (pluginAnalysis.AmbiguousPlugins is { Count: > 0 })
-            {
-                steps.Add($"plugin-ambiguous-warning:{pluginAnalysis.AmbiguousPlugins.Count}");
-            }
-
-            RaceCompatibilityReport? raceCompatibility = null;
-            if ((pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0) && raceCompatService is not null)
-            {
-                ReportStage("Checking plugin race compatibility", 4);
-                raceCompatibility = await ProfileStageAsync("race-compatibility", () => raceCompatService.CheckAsync(pluginAnalysis, normalized.Request.TargetBody, cancellationToken));
-                steps.Add(LocalExportService.BuildRaceCompatibilityStep(raceCompatibility));
-            }
-
             ReportStage("Detecting source body", 5);
             var detectedBody = await ProfileStageAsync("body-detection", () => bodyDetector.DetectAsync(armor, cancellationToken));
             var evidenceSummary = string.Join(',', detectedBody.Evidence.Take(3));
@@ -7771,6 +7745,44 @@ public sealed class ConversionOrchestrator(
             {
                 detectedBody = new BodyDetectionReport(normalized.Request.SourceBodyOverride, 1.0, ["user-override"]);
                 steps.Add($"source-body-override:{normalized.Request.SourceBodyOverride}");
+            }
+
+            var pluginSourcePaths = armor.BatchPluginFiles ?? armor.SourcePluginFiles ?? [];
+            var pluginResolution = PluginSourceIdentity.Resolve(
+                pluginSourcePaths, detectedBody.Body, detectedBody.Confidence);
+            if (pluginResolution.AmbiguousNames.Count > 0)
+            {
+                throw new InstallerChoicesRequiredException(pluginResolution.AmbiguousNames, pluginResolution.Warnings);
+            }
+
+            if (pluginResolution.SafePaths.Count != pluginSourcePaths.Count)
+            {
+                armor = armor with
+                {
+                    BatchPluginFiles = armor.BatchPluginFiles is null ? null : pluginResolution.SafePaths,
+                    SourcePluginFiles = armor.BatchPluginFiles is null ? pluginResolution.SafePaths : armor.SourcePluginFiles
+                };
+                steps.Add($"installer-variant-auto-selected:{detectedBody.Body}");
+            }
+
+            ReportStage("Scanning plugins", 6);
+            var pluginAnalysis = await ProfileStageAsync("plugin-analysis", () => pluginAnalysisService.AnalyzeAsync(armor, normalized.Request.TargetBody, cancellationToken));
+            if (pluginAnalysis.ScannedPlugins.Count > 0)
+            {
+                steps.Add($"plugins:scanned={pluginAnalysis.ScannedPlugins.Count},addons={pluginAnalysis.ArmorAddons.Count}");
+            }
+
+            if (pluginAnalysis.AmbiguousPlugins is { Count: > 0 })
+            {
+                steps.Add($"plugin-ambiguous-warning:{pluginAnalysis.AmbiguousPlugins.Count}");
+            }
+
+            RaceCompatibilityReport? raceCompatibility = null;
+            if ((pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0) && raceCompatService is not null)
+            {
+                ReportStage("Checking plugin race compatibility", 7);
+                raceCompatibility = await ProfileStageAsync("race-compatibility", () => raceCompatService.CheckAsync(pluginAnalysis, normalized.Request.TargetBody, cancellationToken));
+                steps.Add(LocalExportService.BuildRaceCompatibilityStep(raceCompatibility));
             }
 
             ReportStage("Analyzing mesh", 6);
@@ -9021,7 +9033,6 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         var maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2);
         var batchSupportAssets = LocalExportService.DiscoverSupportAssets(
             sourceDirectory, rootOutput, request.SharedPluginOutputDirectory, cancellationToken);
-        PluginSourceIdentity.RequireUnambiguous(batchSupportAssets.PluginFiles);
         using var batchPluginExportContext = new BatchPluginExportContext
         {
             PluginFiles = batchSupportAssets.PluginFiles,
@@ -19262,6 +19273,9 @@ internal static class PluginSourceIdentity
         IReadOnlyList<string> Warnings);
 
     internal static Resolution Resolve(IEnumerable<string> paths)
+        => Resolve(paths, null, 0);
+
+    internal static Resolution Resolve(IEnumerable<string> paths, string? detectedSourceBody, double confidence)
     {
         var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var groups = paths.Select(Path.GetFullPath).Distinct(pathComparer)
@@ -19278,13 +19292,56 @@ internal static class PluginSourceIdentity
                 continue;
             }
 
+            var matchingVariants = confidence >= 0.75 && !string.IsNullOrWhiteSpace(detectedSourceBody)
+                ? alternatives.Where(path => PathContainsBodyVariant(path, detectedSourceBody)).ToArray()
+                : [];
+            if (matchingVariants.Length == 1)
+            {
+                safePaths.Add(matchingVariants[0]);
+                continue;
+            }
+
             ambiguousNames.Add(group.Key!);
+            var resolutionReason = matchingVariants.Length > 1
+                ? $"More than one path matches detected source body '{detectedSourceBody}'. "
+                : confidence < 0.75
+                    ? $"Source-body detection confidence ({confidence:P0}) is too low to select an installer variant. "
+                    : $"No unique path matches detected source body '{detectedSourceBody}'. ";
             warnings.Add($"Ambiguous plugin identity '{group.Key}': different source paths [{string.Join("; ", alternatives)}]. "
+                + resolutionReason
                 + "Copying and automated rewriting are disabled. Select one compatible plugin variant, remove the alternatives from the input, and review its master chain in xEdit before converting again.");
         }
 
         return new Resolution(safePaths, ambiguousNames, warnings);
     }
+
+    private static bool PathContainsBodyVariant(string path, string detectedSourceBody)
+    {
+        var normalizedBody = NormalizeVariantLabel(
+            BuiltInBodyMetadataCatalog.TryResolveCanonicalName(detectedSourceBody, out var canonical)
+                ? canonical : detectedSourceBody);
+        if (normalizedBody.Length == 0)
+        {
+            return false;
+        }
+
+        var matchingLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { normalizedBody };
+        if (BuiltInBodyMetadataCatalog.TryGet(detectedSourceBody, out var metadata))
+        {
+            foreach (var alias in metadata.Aliases)
+            {
+                matchingLabels.Add(NormalizeVariantLabel(alias));
+            }
+        }
+
+        return path.Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .SkipLast(1)
+            .Any(component => matchingLabels.Contains(NormalizeVariantLabel(component)));
+    }
+
+    private static string NormalizeVariantLabel(string value) =>
+        new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 }
 
 /// <summary>
@@ -22288,7 +22345,8 @@ internal sealed class LocalExportService(
         Directory.CreateDirectory(outputDirectory);
         var supportAssets = request.BatchPluginExportContext?.SupportAssets ?? DiscoverSupportAssets(
             armor.SourcePath, outputDirectory, request.SharedPluginOutputDirectory, cancellationToken);
-        var sourcePluginIdentities = PluginSourceIdentity.Resolve(armor.BatchPluginFiles ?? supportAssets.PluginFiles);
+        var sourcePluginIdentities = PluginSourceIdentity.Resolve(
+            armor.BatchPluginFiles ?? supportAssets.PluginFiles, detectedBody.Body, detectedBody.Confidence);
         supportAssets = supportAssets with { PluginFiles = sourcePluginIdentities.SafePaths };
         if (sourcePluginIdentities.AmbiguousNames.Count > 0)
         {
