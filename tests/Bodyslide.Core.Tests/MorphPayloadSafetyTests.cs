@@ -109,6 +109,26 @@ public sealed class MorphPayloadSafetyTests
         Assert.Equal((65_536, 0.5f, 0f, 0f), Assert.Single(Assert.Single(payload.Morphs).SparseDeltas));
     }
 
+    [Fact]
+    public void OsdWriterRejectsVertexCountsOutsideItsSixteenBitIndexRange()
+    {
+        Assert.True(LocalExportService.IsOsdVertexCountRepresentable(ushort.MaxValue));
+        Assert.False(LocalExportService.IsOsdVertexCountRepresentable((int)ushort.MaxValue + 1));
+        Assert.False(LocalExportService.IsOsdVertexCountRepresentable(0));
+    }
+
+    [Fact]
+    public void OsdWriterRejectsSliderNamesThatCannotFitItsLengthField()
+    {
+        var longName = new string('A', byte.MaxValue + 1);
+
+        Assert.True(LocalExportService.IsOsdSliderNameRepresentable("Waist"));
+        Assert.False(LocalExportService.IsOsdSliderNameRepresentable(longName));
+        Assert.False(LocalExportService.IsOsdSliderNameRepresentable(string.Empty));
+        Assert.True(LocalExportService.IsOsdSparseRecordCountRepresentable(ushort.MaxValue));
+        Assert.False(LocalExportService.IsOsdSparseRecordCountRepresentable((int)ushort.MaxValue + 1));
+    }
+
     [Theory]
     [InlineData("bsd")]
     [InlineData("tri")]

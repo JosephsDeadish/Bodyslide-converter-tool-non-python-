@@ -29150,6 +29150,7 @@ public sealed class OutputCompletenessTests
                 new PluginAnalysisResult([], [], string.Empty));
 
             Assert.Contains(issues, issue => issue.Code.Equals("missing-bodyslide-slider-payload", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(issues, issue => issue.Code.Equals("bodyslide-osd-payload-unavailable", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {

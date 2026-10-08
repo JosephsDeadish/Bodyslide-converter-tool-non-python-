@@ -22695,12 +22695,18 @@ internal sealed class LocalExportService(
             outputFiles.Add(triHighPath);
 
             // Write an OSD payload bundle for tooling that can consume Outfit Studio style sparse morph files.
-            var osdPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.osd");
-            await File.WriteAllBytesAsync(
-                osdPath,
-                BuildOsdBytes(bodySlideProject.Sliders, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext),
-                cancellationToken);
-            outputFiles.Add(osdPath);
+            var osdBytes = BuildOsdBytes(
+                bodySlideProject.Sliders,
+                morphVertexCount,
+                mesh.RegionalMorphing,
+                morphs.ReusableSourceMorphPayloads,
+                morphTransferContext);
+            if (osdBytes is not null)
+            {
+                var osdPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.osd");
+                await File.WriteAllBytesAsync(osdPath, osdBytes, cancellationToken);
+                outputFiles.Add(osdPath);
+            }
         }
 
         // Write plugin patch guidance + rewrite instructions when plugins were found.
@@ -29139,6 +29145,16 @@ internal sealed class LocalExportService(
                     "missing-bodyslide-slider-payload",
                     "medium",
                     $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing TRI/OSD slider payload files, so the generated project cannot rebuild slider morphs correctly."));
+            }
+
+            if (Directory.Exists(shapeDataDirectory) &&
+                bodySlideProject.Sliders.Count > 0 &&
+                !HasAnyFile(shapeDataDirectory, "*.osd"))
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "bodyslide-osd-payload-unavailable",
+                    "high",
+                    $"BodySlide OSD data for '{bodySlideProject.ProjectName}' was withheld because its vertex/index/count or slider-name data exceeds the supported 16-bit record limits."));
             }
 
             var semanticProblems = ValidateBodySlideSemanticConsistency(ospPath, sliderGroupsPath, shapeDataDirectory);
@@ -39883,14 +39899,28 @@ internal sealed class LocalExportService(
     /// Builds an OSD morph payload with one data record per slider.
     /// Uses Outfit Studio header layout (OSD\0 + version + morph count) with ushort indexes for compactness.
     /// </summary>
-    private static byte[] BuildOsdBytes(
+    internal static bool IsOsdVertexCountRepresentable(int vertexCount) =>
+        vertexCount > 0 && vertexCount <= ushort.MaxValue;
+
+    internal static bool IsOsdSparseRecordCountRepresentable(int sparseRecordCount) =>
+        sparseRecordCount >= 0 && sparseRecordCount <= ushort.MaxValue;
+
+    internal static bool IsOsdSliderNameRepresentable(string sliderName) =>
+        !string.IsNullOrWhiteSpace(sliderName) &&
+        System.Text.Encoding.UTF8.GetByteCount(sliderName) <= byte.MaxValue;
+
+    private static byte[]? BuildOsdBytes(
         IReadOnlyList<string> sliders,
         int vertexCount,
         IReadOnlyDictionary<string, double> regionalMorphing,
         IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null,
         MorphTransferContext? morphTransferContext = null)
     {
-        vertexCount = Math.Clamp(vertexCount, 1, 250_000);
+        if (!IsOsdVertexCountRepresentable(vertexCount))
+        {
+            return null;
+        }
+
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
         writer.Write(new byte[] { 0x4f, 0x53, 0x44, 0x00 }); // OSD\0 (Outfit Studio style)
@@ -39906,6 +39936,10 @@ internal sealed class LocalExportService(
                 regionalMorphing,
                 reusableSourceMorphPayloads,
                 morphTransferContext);
+            if (deltas.Count != vertexCount)
+            {
+                return null;
+            }
 
             var sparseDeltas = new List<(int Index, float X, float Y, float Z)>();
             for (var index = 0; index < deltas.Count; index++)
@@ -39920,14 +39954,24 @@ internal sealed class LocalExportService(
             }
 
             var nameBytes = System.Text.Encoding.UTF8.GetBytes(name);
-            var clampedNameLength = Math.Min(byte.MaxValue, nameBytes.Length);
-            writer.Write((byte)clampedNameLength);
-            writer.Write(nameBytes, 0, clampedNameLength);
-            writer.Write((ushort)Math.Min(ushort.MaxValue, sparseDeltas.Count));
-            for (var sparseIndex = 0; sparseIndex < sparseDeltas.Count && sparseIndex < ushort.MaxValue; sparseIndex++)
+            if (!IsOsdSliderNameRepresentable(name) ||
+                !IsOsdSparseRecordCountRepresentable(sparseDeltas.Count))
             {
-                var (index, x, y, z) = sparseDeltas[sparseIndex];
-                writer.Write((ushort)Math.Min(ushort.MaxValue, index));
+                return null;
+            }
+
+            writer.Write((byte)nameBytes.Length);
+            writer.Write(nameBytes);
+            writer.Write((ushort)sparseDeltas.Count);
+            foreach (var (index, x, y, z) in sparseDeltas)
+            {
+                if (index < 0 || index > ushort.MaxValue ||
+                    !float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z))
+                {
+                    return null;
+                }
+
+                writer.Write((ushort)index);
                 writer.Write(x);
                 writer.Write(y);
                 writer.Write(z);
