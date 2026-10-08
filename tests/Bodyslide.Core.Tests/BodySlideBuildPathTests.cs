@@ -131,6 +131,39 @@ public sealed class BodySlideBuildPathTests
     }
 
     [Fact]
+    public void ValidateShapeDataLinks_RejectsMissingOrUnsupportedSourceNif()
+    {
+        const string ospXml = """
+            <SliderSetInfo version="1">
+              <SliderSet name="Demo">
+                <DataFolder>Demo</DataFolder>
+                <SourceFile>mesh.nif</SourceFile>
+                <Shape target="Torso">Torso</Shape>
+                <Slider name="Belly" default="0">
+                  <Data name="morph" target="Torso" local="true">Demo.osd\morph</Data>
+                </Slider>
+              </SliderSet>
+            </SliderSetInfo>
+            """;
+        var shapeDataDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(shapeDataDirectory);
+        try
+        {
+            var document = XDocument.Parse(ospXml);
+            Assert.Contains(LocalExportService.ValidateShapeDataLinks(document, shapeDataDirectory),
+                static problem => problem.Contains("SourceFile is missing, unreadable, or uses an unsupported NIF layout", StringComparison.Ordinal));
+
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "mesh.nif"), "not a NIF"u8.ToArray());
+            Assert.Contains(LocalExportService.ValidateShapeDataLinks(document, shapeDataDirectory),
+                static problem => problem.Contains("SourceFile is missing, unreadable, or uses an unsupported NIF layout", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(shapeDataDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ShapeLinkedOsdExport_ReportsSyntheticFallbackWithoutShapeProvenance()
     {
         const string ospXml = """

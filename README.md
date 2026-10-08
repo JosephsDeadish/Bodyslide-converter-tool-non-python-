@@ -115,10 +115,12 @@ Do not treat generated OSP/ShapeData as build-ready based on the automated tests
 alone. For supported Skyrim SE unskinned `BSTriShape` inputs, generation now
 emits per-shape `<Shape>` mappings and one local OSD `<Data>` link per non-zap
 slider and target. The output preflight verifies the link targets, file paths,
-and record names. Unsupported NIF layouts and OSD ranges that cannot be encoded
-remain unlinked and must be treated as review-required, not guessed or counted
-as a successful build. Synthetic or retargeted OSD morph records are reported
-as fallback data, not recovered source morphs.
+and record names, and now requires the referenced source NIF to exist and use a
+shape-reader layout the tool can verify. Missing, unreadable, or unsupported
+source NIFs and OSD ranges that cannot be encoded must be treated as
+review-required, not guessed or counted as a successful build. Synthetic or
+retargeted OSD morph records are reported as fallback data, not recovered source
+morphs.
 
 On a Windows test host:
 

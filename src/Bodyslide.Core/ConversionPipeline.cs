@@ -40226,21 +40226,36 @@ internal sealed class LocalExportService(
                 continue;
             }
 
+            if (string.IsNullOrWhiteSpace(sourceFile))
+            {
+                problems.Add($"OSP SliderSet '{setName}' has no SourceFile, so its shape targets cannot be verified.");
+                continue;
+            }
+
+            if (!IsSafeBodySlideRelativePath(sourceFile) ||
+                !sourceFile.EndsWith(".nif", StringComparison.OrdinalIgnoreCase))
+            {
+                problems.Add($"OSP SliderSet '{setName}' has an invalid SourceFile path.");
+                continue;
+            }
+
+            var sourceShapeTargets = TryReadSourceShapeTargets(sourceFile);
+            if (sourceShapeTargets is null)
+            {
+                problems.Add($"OSP SliderSet '{setName}' SourceFile is missing, unreadable, or uses an unsupported NIF layout; shape targets cannot be verified.");
+                continue;
+            }
+
             if (shapes.Length == 0)
             {
-                if (regularSliders.Length > 0 &&
-                    !string.IsNullOrWhiteSpace(sourceFile) &&
-                    TryReadSourceShapeTargets(sourceFile) is { Count: > 0 })
+                if (sourceShapeTargets.Count > 0)
                 {
                     problems.Add($"OSP SliderSet '{setName}' has supported source shapes but declares no Shape targets for OSD data.");
                 }
                 continue;
             }
 
-            var sourceShapeTargets = string.IsNullOrWhiteSpace(sourceFile)
-                ? null
-                : TryReadSourceShapeTargets(sourceFile);
-            if (sourceShapeTargets is not null && !targetNames.SetEquals(sourceShapeTargets))
+            if (!targetNames.SetEquals(sourceShapeTargets))
             {
                 problems.Add($"OSP SliderSet '{setName}' Shape targets do not match the names in its SourceFile.");
             }
