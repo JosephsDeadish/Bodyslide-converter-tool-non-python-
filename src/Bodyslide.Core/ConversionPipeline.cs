@@ -22728,8 +22728,7 @@ internal sealed class LocalExportService(
                 bodySlideProject.OspXml,
                 bodySlideProject.ProjectName,
                 shapeDataBySourceFile,
-                mesh.RegionalMorphing,
-                morphs.ReusableSourceMorphPayloads);
+                mesh.RegionalMorphing);
             syntheticBodySlideOsdMorphCount = linkedShapeData.SyntheticMorphRecordCount;
             if (syntheticBodySlideOsdMorphCount > 0)
             {
@@ -40094,8 +40093,7 @@ internal sealed class LocalExportService(
         string ospXml,
         string projectName,
         IReadOnlyDictionary<string, IReadOnlyList<SkyrimSseNifShape>> shapesBySourceFile,
-        IReadOnlyDictionary<string, double> regionalMorphing,
-        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null)
+        IReadOnlyDictionary<string, double> regionalMorphing)
     {
         var document = System.Xml.Linq.XDocument.Parse(ospXml);
         var sliderSets = document.Descendants()
@@ -40145,7 +40143,6 @@ internal sealed class LocalExportService(
                 shapes,
                 sliders!,
                 regionalMorphing,
-                shapes.Count == 1 ? reusableSourceMorphPayloads : null,
                 out var setSyntheticMorphRecordCount);
             syntheticMorphRecordCount += setSyntheticMorphRecordCount;
             if (bytes is null)
@@ -40194,11 +40191,16 @@ internal sealed class LocalExportService(
         var problems = new List<string>();
         var rootDirectory = Path.GetFullPath(shapeDataDirectory);
         var osdRecordsByPath = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var sourceShapeTargetsByPath = new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase);
         foreach (var sliderSet in document.Descendants()
                      .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase)))
         {
             var setName = ((string?)sliderSet.Attribute("name"))?.Trim();
             setName = string.IsNullOrWhiteSpace(setName) ? "<unnamed>" : setName;
+            var sourceFile = sliderSet.Elements()
+                .FirstOrDefault(static element => string.Equals(element.Name.LocalName, "SourceFile", StringComparison.OrdinalIgnoreCase))
+                ?.Value.Trim()
+                .Replace('\\', '/');
             var shapes = sliderSet.Elements()
                 .Where(static element => string.Equals(element.Name.LocalName, "Shape", StringComparison.OrdinalIgnoreCase))
                 .Select(element => new
@@ -40226,7 +40228,21 @@ internal sealed class LocalExportService(
 
             if (shapes.Length == 0)
             {
+                if (regularSliders.Length > 0 &&
+                    !string.IsNullOrWhiteSpace(sourceFile) &&
+                    TryReadSourceShapeTargets(sourceFile) is { Count: > 0 })
+                {
+                    problems.Add($"OSP SliderSet '{setName}' has supported source shapes but declares no Shape targets for OSD data.");
+                }
                 continue;
+            }
+
+            var sourceShapeTargets = string.IsNullOrWhiteSpace(sourceFile)
+                ? null
+                : TryReadSourceShapeTargets(sourceFile);
+            if (sourceShapeTargets is not null && !targetNames.SetEquals(sourceShapeTargets))
+            {
+                problems.Add($"OSP SliderSet '{setName}' Shape targets do not match the names in its SourceFile.");
             }
 
             foreach (var slider in regularSliders)
@@ -40295,6 +40311,53 @@ internal sealed class LocalExportService(
 
         return problems;
 
+        HashSet<string>? TryReadSourceShapeTargets(string relativeSourceFile)
+        {
+            if (!IsSafeBodySlideRelativePath(relativeSourceFile) ||
+                !relativeSourceFile.EndsWith(".nif", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var sourcePath = Path.GetFullPath(Path.Combine(
+                rootDirectory,
+                relativeSourceFile.Replace('/', Path.DirectorySeparatorChar)));
+            if (!sourcePath.StartsWith(rootDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (sourceShapeTargetsByPath.TryGetValue(sourcePath, out var cachedTargets))
+            {
+                return cachedTargets;
+            }
+
+            HashSet<string>? targets = null;
+            try
+            {
+                var fileInfo = new FileInfo(sourcePath);
+                if (fileInfo.Exists && fileInfo.Length <= 512L * 1024 * 1024)
+                {
+                    var readResult = SkyrimSseNifShapeReader.Read(File.ReadAllBytes(sourcePath));
+                    if (readResult.Supported)
+                    {
+                        targets = readResult.Shapes
+                            .Select(static shape => shape.Name)
+                            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    }
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+
+            sourceShapeTargetsByPath[sourcePath] = targets;
+            return targets;
+        }
+
         static bool IsSafeBodySlideRelativePath(string value) =>
             !string.IsNullOrWhiteSpace(value) &&
             !value.StartsWith('/') &&
@@ -40306,7 +40369,6 @@ internal sealed class LocalExportService(
         IReadOnlyList<SkyrimSseNifShape> shapes,
         IReadOnlyList<string> sliders,
         IReadOnlyDictionary<string, double> regionalMorphing,
-        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
         out int syntheticMorphRecordCount)
     {
         syntheticMorphRecordCount = 0;
@@ -40329,22 +40391,14 @@ internal sealed class LocalExportService(
             for (var sliderIndex = 0; sliderIndex < sliders.Count; sliderIndex++)
             {
                 var name = $"s{shapeIndex}_m{sliderIndex}";
-                var hasExactSourcePayload =
-                    reusableSourceMorphPayloads?.TryGetValue(sliders[sliderIndex], out var variants) == true &&
-                    variants.LowWeight is { } lowWeightPayload &&
-                    lowWeightPayload.VertexCount == shape.Vertices.Count &&
-                    lowWeightPayload.Deltas.Count == shape.Vertices.Count;
-                if (!hasExactSourcePayload)
-                {
-                    syntheticMorphRecordCount++;
-                }
+                syntheticMorphRecordCount++;
 
                 var deltas = ResolveMorphDeltas(
                     sliders[sliderIndex],
                     isHighWeight: false,
                     shape.Vertices.Count,
                     regionalMorphing,
-                    reusableSourceMorphPayloads,
+                    reusableSourceMorphPayloads: null,
                     morphTransferContext: null);
                 if (deltas.Count != shape.Vertices.Count)
                 {

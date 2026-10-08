@@ -93,6 +93,9 @@ public sealed class BodySlideBuildPathTests
         Directory.CreateDirectory(shapeDataDirectory);
         try
         {
+            File.WriteAllBytes(
+                Path.Combine(shapeDataDirectory, "mesh.nif"),
+                SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso", "Sleeves"));
             foreach (var (fileName, bytes) in export.OsdFiles)
             {
                 File.WriteAllBytes(Path.Combine(shapeDataDirectory, fileName), bytes);
@@ -100,6 +103,13 @@ public sealed class BodySlideBuildPathTests
 
             var document = XDocument.Parse(export.OspXml);
             Assert.Empty(LocalExportService.ValidateShapeDataLinks(document, shapeDataDirectory));
+
+            var sleevesShape = document.Descendants("Shape")
+                .Single(static shape => (string?)shape.Attribute("target") == "Sleeves");
+            sleevesShape.SetAttributeValue("target", "UnknownShape");
+            Assert.Contains(LocalExportService.ValidateShapeDataLinks(document, shapeDataDirectory),
+                static problem => problem.Contains("Shape targets do not match", StringComparison.Ordinal));
+            sleevesShape.SetAttributeValue("target", "Sleeves");
 
             var slider = Assert.Single(document.Descendants("Slider"));
             slider.Elements("Data").First().Remove();
@@ -118,6 +128,36 @@ public sealed class BodySlideBuildPathTests
         {
             Directory.Delete(shapeDataDirectory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void ShapeLinkedOsdExport_ReportsSyntheticFallbackWithoutShapeProvenance()
+    {
+        const string ospXml = """
+            <SliderSetInfo version="1">
+              <SliderSet name="Demo">
+                <SourceFile>mesh.nif</SourceFile>
+                <Slider name="Belly" default="0" />
+              </SliderSet>
+            </SliderSetInfo>
+            """;
+        var shape = new SkyrimSseNifShape(
+            "Torso",
+            [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            [0, 1, 2],
+            12);
+        var export = LocalExportService.BuildShapeLinkedOsdExport(
+            ospXml,
+            "Demo",
+            new Dictionary<string, IReadOnlyList<SkyrimSseNifShape>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["mesh.nif"] = [shape]
+            },
+            new Dictionary<string, double>());
+
+        Assert.Equal(1, export.SyntheticMorphRecordCount);
+        Assert.True(OsdMorphReader.TryRead(Assert.Single(export.OsdFiles).Bytes, out var payload));
+        Assert.NotEmpty(Assert.Single(payload!.Morphs).SparseDeltas);
     }
 
     [Theory]

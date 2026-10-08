@@ -5,6 +5,11 @@ namespace Bodyslide.Core.Tests;
 
 public sealed class SkyrimSseNifShapeReaderTests
 {
+    internal static byte[] CreateNifForShapeTargets(params string[] shapeNames) =>
+        CreateNif(shapeNames
+            .Select(static name => new TestShape(name, [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)]))
+            .ToArray());
+
     [Fact]
     public void ReadsSeparateShapeNamesVerticesAndTriangleIndexes()
     {
