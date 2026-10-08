@@ -2113,7 +2113,7 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithDefaultModules_WritesNativeOsdMorphPayloadToShapeDataFolder()
+    public async Task ConvertAsync_WithUnreadableNifWithholdsUnmappedOsdPayload()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -2132,30 +2132,10 @@ public sealed class ConversionOrchestratorTests
             Assert.True(Directory.Exists(shapeDataBase), "ShapeData folder should exist under CalienteTools/BodySlide/");
 
             Assert.Empty(Directory.GetFiles(shapeDataBase, "*.bsd", SearchOption.AllDirectories));
-            var osdFiles = Directory.GetFiles(shapeDataBase, "*.osd", SearchOption.AllDirectories);
-            Assert.NotEmpty(osdFiles);
+            Assert.Empty(Directory.GetFiles(shapeDataBase, "*.osd", SearchOption.AllDirectories));
 
-            var ospFile = Assert.Single(Directory.GetFiles(
-                Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets"), "*.osp"));
-            var expectedMorphNames = XDocument.Load(ospFile)
-                .Descendants("Slider")
-                .Where(static slider => !string.Equals(
-                    (string?)slider.Attribute("zap"), "true", StringComparison.OrdinalIgnoreCase))
-                .Select(static slider => (string?)slider.Attribute("name"))
-                .Where(static name => !string.IsNullOrWhiteSpace(name))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(static name => name, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            foreach (var osdFile in osdFiles)
-            {
-                Assert.StartsWith(shapeDataBase, osdFile, StringComparison.OrdinalIgnoreCase);
-                Assert.True(OsdMorphReader.TryRead(osdFile, out var payload) && payload is not null);
-                var actualMorphNames = payload!.Morphs
-                    .Select(static morph => morph.Name)
-                    .OrderBy(static name => name, StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-                Assert.Equal(expectedMorphNames, actualMorphNames);
-            }
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-nif-shape-layout-unsupported\"", qualityJson);
         }
         finally
         {

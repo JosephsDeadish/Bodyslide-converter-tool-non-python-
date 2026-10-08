@@ -5,6 +5,64 @@ namespace Bodyslide.Core.Tests;
 
 public sealed class BodySlideBuildPathTests
 {
+    [Fact]
+    public void ShapeLinkedOsdExport_MapsSliderDataToEachNamedShape()
+    {
+        const string ospXml = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <SliderSetInfo version="1">
+              <SliderSet name="Demo" baseShape="Base Shape">
+                <DataFolder>Demo</DataFolder>
+                <SourceFile>mesh.nif</SourceFile>
+                <OutputPath>meshes\</OutputPath>
+                <OutputFile gender="female" GenWeights="false">mesh</OutputFile>
+                <Slider name="Belly" default="0" zap="false" />
+                <Slider name="HideSleeves" default="0" zap="true" />
+              </SliderSet>
+            </SliderSetInfo>
+            """;
+        var shapes = new SkyrimSseNifShape[]
+        {
+            new("Torso", [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2], 12),
+            new("Sleeves", [new(0, 0, 1), new(1, 0, 1), new(0, 1, 1)], [0, 1, 2], 12)
+        };
+
+        var result = LocalExportService.BuildShapeLinkedOsdExport(
+            ospXml,
+            "Demo",
+            new Dictionary<string, IReadOnlyList<SkyrimSseNifShape>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["mesh.nif"] = shapes
+            },
+            new Dictionary<string, double>());
+        var document = XDocument.Parse(result.OspXml);
+        var sliderSet = Assert.Single(document.Descendants("SliderSet"));
+        var ospShapes = sliderSet.Elements("Shape").ToArray();
+        Assert.Equal(new[] { "Torso", "Sleeves" }, ospShapes.Select(static shape => shape.Value).ToArray());
+        Assert.Equal(new[] { "Torso", "Sleeves" }, ospShapes.Select(static shape => (string?)shape.Attribute("target")).ToArray());
+
+        var bellySlider = sliderSet.Elements("Slider")
+            .Single(static slider => (string?)slider.Attribute("name") == "Belly");
+        var dataLinks = bellySlider.Elements("Data").ToArray();
+        Assert.Equal(2, dataLinks.Length);
+        Assert.Equal(new[] { "Torso", "Sleeves" }, dataLinks.Select(static data => (string?)data.Attribute("target")).ToArray());
+        Assert.All(dataLinks, data =>
+        {
+            Assert.Equal("true", (string?)data.Attribute("local"));
+            Assert.EndsWith(".osd\\" + data.Attribute("name")!.Value, data.Value, StringComparison.Ordinal);
+        });
+
+        var zapSlider = sliderSet.Elements("Slider")
+            .Single(static slider => (string?)slider.Attribute("name") == "HideSleeves");
+        Assert.Empty(zapSlider.Elements("Data"));
+        var osdFile = Assert.Single(result.OsdFiles);
+        Assert.Equal("Demo.osd", osdFile.FileName);
+        Assert.True(OsdMorphReader.TryRead(osdFile.Bytes, out var payload));
+        Assert.Equal(dataLinks.Select(static data => (string)data.Attribute("name")!).OrderBy(static name => name),
+            payload!.Morphs.Select(static morph => morph.Name).OrderBy(static name => name));
+        Assert.All(payload.Morphs, static morph => Assert.NotEmpty(morph.SparseDeltas));
+    }
+
     [Theory]
     [InlineData("GNDgloves.nif", null)]
     [InlineData("GNDgloves.v2.nif", null)]

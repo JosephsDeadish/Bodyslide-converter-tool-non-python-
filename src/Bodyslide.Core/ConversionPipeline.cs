@@ -22662,7 +22662,7 @@ internal sealed class LocalExportService(
                 cancellationToken);
             outputFiles.Add(sliderGroupsPath);
 
-            // BSD slider data, TRI morph files, and the BodySlide source-shape NIF all belong under
+            // OSD slider data, TRI morph files, and BodySlide source-shape NIFs all belong under
             // Data\CalienteTools\BodySlide\ShapeData\<project>\ so BodySlide can locate them when the
             // user opens the slider editor.  The source NIF is a copy of the primary converted mesh and
             // acts as the base reference shape displayed inside BodySlide.
@@ -22694,17 +22694,42 @@ internal sealed class LocalExportService(
             outputFiles.Add(triLowPath);
             outputFiles.Add(triHighPath);
 
-            // Write an OSD payload bundle for tooling that can consume Outfit Studio style sparse morph files.
-            var osdBytes = BuildOsdBytes(
-                bodySlideProject.Sliders,
-                morphVertexCount,
-                mesh.RegionalMorphing,
-                morphs.ReusableSourceMorphPayloads,
-                morphTransferContext);
-            if (osdBytes is not null)
+            var shapeDataBySourceFile = new Dictionary<string, IReadOnlyList<SkyrimSseNifShape>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var sourceFile in Directory.EnumerateFiles(shapeDataDirectory, "*.nif", SearchOption.TopDirectoryOnly))
             {
-                var osdPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.osd");
-                await File.WriteAllBytesAsync(osdPath, osdBytes, cancellationToken);
+                var fileInfo = new FileInfo(sourceFile);
+                if (fileInfo.Length > 512L * 1024 * 1024)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var readResult = SkyrimSseNifShapeReader.Read(await File.ReadAllBytesAsync(sourceFile, cancellationToken));
+                    if (readResult.Supported)
+                    {
+                        shapeDataBySourceFile[Path.GetFileName(sourceFile)] = readResult.Shapes;
+                    }
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+
+            var linkedShapeData = BuildShapeLinkedOsdExport(
+                bodySlideProject.OspXml,
+                bodySlideProject.ProjectName,
+                shapeDataBySourceFile,
+                mesh.RegionalMorphing,
+                morphs.ReusableSourceMorphPayloads);
+            await File.WriteAllTextAsync(ospPath, linkedShapeData.OspXml, cancellationToken);
+            foreach (var (fileName, bytes) in linkedShapeData.OsdFiles)
+            {
+                var osdPath = Path.Combine(shapeDataDirectory, fileName);
+                await File.WriteAllBytesAsync(osdPath, bytes, cancellationToken);
                 outputFiles.Add(osdPath);
             }
         }
@@ -28040,9 +28065,16 @@ internal sealed class LocalExportService(
             Directory.Exists(directoryPath) &&
             Directory.EnumerateFiles(directoryPath, searchPattern).Any(HasNonEmptyFile);
 
-        static IReadOnlyList<string> ValidateBodySlideShapeAndDataLinks(string ospPath)
+        static IReadOnlyList<string> ValidateBodySlideShapeAndDataLinks(string ospPath, string shapeDataDirectory)
         {
             var problems = new List<string>();
+            var osdRecordsByPath = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            static bool IsSafeRelativePath(string value) =>
+                !string.IsNullOrWhiteSpace(value) &&
+                !value.StartsWith('\\') &&
+                !value.Contains(':') &&
+                value.Split('\\').All(segment => segment.Length > 0 && segment is not "." and not "..");
+
             if (!File.Exists(ospPath))
             {
                 return problems;
@@ -28060,8 +28092,15 @@ internal sealed class LocalExportService(
                     setName = string.IsNullOrWhiteSpace(setName) ? "<unnamed>" : setName;
                     var shapes = sliderSet.Elements()
                         .Where(static element => string.Equals(element.Name.LocalName, "Shape", StringComparison.OrdinalIgnoreCase))
-                        .Where(static element => !string.IsNullOrWhiteSpace((string?)element.Attribute("name")))
+                        .Where(static element => !string.IsNullOrWhiteSpace(element.Value) ||
+                                                 !string.IsNullOrWhiteSpace((string?)element.Attribute("name")))
                         .ToArray();
+                    var shapeTargets = shapes
+                        .Select(static shape => ((string?)shape.Attribute("target"))?.Trim() ??
+                                                ((string?)shape.Attribute("name"))?.Trim() ??
+                                                shape.Value.Trim())
+                        .Where(static target => !string.IsNullOrWhiteSpace(target))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
                     if (shapes.Length == 0)
                     {
                         problems.Add($"SliderSet '{setName}' has no named <Shape> mapping.");
@@ -28079,6 +28118,52 @@ internal sealed class LocalExportService(
                         if (!hasDataLink)
                         {
                             problems.Add($"SliderSet '{setName}' slider '{sliderName}' has no non-empty <Data> link.");
+                            continue;
+                        }
+
+                        foreach (var data in slider.Elements()
+                                     .Where(static element => string.Equals(element.Name.LocalName, "Data", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            var dataTarget = ((string?)data.Attribute("target"))?.Trim();
+                            if (string.IsNullOrWhiteSpace(dataTarget) || !shapeTargets.Contains(dataTarget))
+                            {
+                                problems.Add($"SliderSet '{setName}' slider '{sliderName}' has a <Data> target not declared by a <Shape> mapping.");
+                            }
+
+                            var dataName = ((string?)data.Attribute("name"))?.Trim();
+                            var dataFileReference = data.Value.Trim().Replace('/', '\\');
+                            var splitIndex = dataFileReference.LastIndexOf('\\');
+                            if (splitIndex <= 0 || splitIndex == dataFileReference.Length - 1)
+                            {
+                                problems.Add($"SliderSet '{setName}' slider '{sliderName}' has a malformed OSD file/record reference.");
+                                continue;
+                            }
+
+                            var fileName = dataFileReference[..splitIndex];
+                            var recordName = dataFileReference[(splitIndex + 1)..];
+                            if (!string.Equals(dataName, recordName, StringComparison.Ordinal) ||
+                                !IsSafeRelativePath(fileName) ||
+                                !fileName.EndsWith(".osd", StringComparison.OrdinalIgnoreCase))
+                            {
+                                problems.Add($"SliderSet '{setName}' slider '{sliderName}' has an invalid OSD record link.");
+                                continue;
+                            }
+
+                            var payloadPath = Path.Combine(
+                                shapeDataDirectory,
+                                fileName.Replace('\\', Path.DirectorySeparatorChar));
+                            if (!osdRecordsByPath.TryGetValue(payloadPath, out var recordNames))
+                            {
+                                recordNames = OsdMorphReader.TryRead(payloadPath, out var payload) && payload is not null
+                                    ? payload.Morphs.Select(static morph => morph.Name).ToHashSet(StringComparer.Ordinal)
+                                    : [];
+                                osdRecordsByPath[payloadPath] = recordNames;
+                            }
+
+                            if (!recordNames.Contains(recordName))
+                            {
+                                problems.Add($"SliderSet '{setName}' slider '{sliderName}' links to missing OSD record '{recordName}'.");
+                            }
                         }
                     }
                 }
@@ -28500,6 +28585,24 @@ internal sealed class LocalExportService(
                 var lowWeightPayloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var highWeightPayloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var osdPayloadMorphNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var osdDataAliasToSlider = document.Descendants()
+                    .Where(static element => string.Equals(element.Name.LocalName, "Slider", StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(slider =>
+                    {
+                        var sliderName = ((string?)slider.Attribute("name"))?.Trim();
+                        return slider.Elements()
+                            .Where(static element => string.Equals(element.Name.LocalName, "Data", StringComparison.OrdinalIgnoreCase))
+                            .Select(data => new
+                            {
+                                DataName = ((string?)data.Attribute("name"))?.Trim(),
+                                SliderName = sliderName
+                            });
+                    })
+                    .Where(static item => !string.IsNullOrWhiteSpace(item.DataName) &&
+                                          !string.IsNullOrWhiteSpace(item.SliderName))
+                    .GroupBy(static item => item.DataName!, StringComparer.OrdinalIgnoreCase)
+                    .Where(static group => group.Select(item => item.SliderName).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1)
+                    .ToDictionary(static group => group.Key, static group => group.First().SliderName!, StringComparer.OrdinalIgnoreCase);
                 var payloadPaths = Directory.EnumerateFiles(shapeDataDirectory).ToArray();
                 var payloadPathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
                 foreach (var bsdPath in payloadPaths.Where(path => path.EndsWith(".bsd", payloadPathComparison)))
@@ -28534,8 +28637,11 @@ internal sealed class LocalExportService(
                         {
                             if (!string.IsNullOrWhiteSpace(morph.Name))
                             {
-                                payloadSliderTokens.Add(morph.Name);
-                                var normalizedSlider = NormalizeSliderToken(morph.Name);
+                                var linkedSliderName = osdDataAliasToSlider.TryGetValue(morph.Name, out var mappedSliderName)
+                                    ? mappedSliderName
+                                    : morph.Name;
+                                payloadSliderTokens.Add(linkedSliderName);
+                                var normalizedSlider = NormalizeSliderToken(linkedSliderName);
                                 payloadSliderNames.Add(normalizedSlider);
                                 if (isHighWeight)
                                 {
@@ -29213,7 +29319,7 @@ internal sealed class LocalExportService(
                     $"BodySlide project '{bodySlideProject.ProjectName}' has inconsistent OSP/ShapeData content: {string.Join(" | ", semanticProblems.Take(3))}"));
             }
 
-            var linkProblems = ValidateBodySlideShapeAndDataLinks(ospPath);
+            var linkProblems = ValidateBodySlideShapeAndDataLinks(ospPath, shapeDataDirectory);
             if (linkProblems.Count > 0)
             {
                 issues.Add(new ConversionValidationIssue(
@@ -39942,10 +40048,183 @@ internal sealed class LocalExportService(
            _ => string.Empty
         };
 
-    /// <summary>
-    /// Builds an OSD morph payload with one data record per slider.
-    /// Uses Outfit Studio header layout (OSD\0 + version + morph count) with ushort indexes for compactness.
-    /// </summary>
+    internal sealed record BodySlideShapeDataExport(
+        string OspXml,
+        IReadOnlyList<(string FileName, byte[] Bytes)> OsdFiles);
+
+    internal static BodySlideShapeDataExport BuildShapeLinkedOsdExport(
+        string ospXml,
+        string projectName,
+        IReadOnlyDictionary<string, IReadOnlyList<SkyrimSseNifShape>> shapesBySourceFile,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null)
+    {
+        var document = System.Xml.Linq.XDocument.Parse(ospXml);
+        var sliderSets = document.Descendants()
+            .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var osdFiles = new List<(string FileName, byte[] Bytes)>();
+        for (var setIndex = 0; setIndex < sliderSets.Length; setIndex++)
+        {
+            var sliderSet = sliderSets[setIndex];
+            var sourceFile = sliderSet.Elements()
+                .FirstOrDefault(static element => string.Equals(element.Name.LocalName, "SourceFile", StringComparison.OrdinalIgnoreCase))
+                ?.Value.Trim();
+            if (string.IsNullOrWhiteSpace(sourceFile) ||
+                !shapesBySourceFile.TryGetValue(Path.GetFileName(sourceFile.Replace('\\', '/')), out var shapes) ||
+                shapes.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var existingShape in sliderSet.Elements()
+                         .Where(static element => string.Equals(element.Name.LocalName, "Shape", StringComparison.OrdinalIgnoreCase))
+                         .ToArray())
+            {
+                existingShape.Remove();
+            }
+
+            foreach (var shape in shapes)
+            {
+                sliderSet.Add(new System.Xml.Linq.XElement(
+                    "Shape",
+                    new System.Xml.Linq.XAttribute("target", shape.Name),
+                    shape.Name));
+            }
+
+            var sliders = sliderSet.Elements()
+                .Where(static element => string.Equals(element.Name.LocalName, "Slider", StringComparison.OrdinalIgnoreCase))
+                .Where(static element => !string.Equals((string?)element.Attribute("zap"), "true", StringComparison.OrdinalIgnoreCase))
+                .Select(static element => ((string?)element.Attribute("name"))?.Trim())
+                .Where(static name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var fileName = sliderSets.Length == 1
+                ? $"{projectName}.osd"
+                : $"{projectName}_{setIndex}.osd";
+            var bytes = BuildShapeOsdBytes(
+                shapes,
+                sliders!,
+                regionalMorphing,
+                shapes.Count == 1 ? reusableSourceMorphPayloads : null);
+            if (bytes is null)
+            {
+                continue;
+            }
+
+            var sliderIndexByName = sliders
+                .Select((name, index) => (name: name!, index))
+                .ToDictionary(static item => item.name, static item => item.index, StringComparer.OrdinalIgnoreCase);
+            foreach (var slider in sliderSet.Elements()
+                         .Where(static element => string.Equals(element.Name.LocalName, "Slider", StringComparison.OrdinalIgnoreCase))
+                         .Where(static element => !string.Equals((string?)element.Attribute("zap"), "true", StringComparison.OrdinalIgnoreCase)))
+            {
+                var sliderName = ((string?)slider.Attribute("name"))?.Trim();
+                if (string.IsNullOrWhiteSpace(sliderName) ||
+                    !sliderIndexByName.TryGetValue(sliderName, out var sliderIndex))
+                {
+                    continue;
+                }
+
+                for (var shapeIndex = 0; shapeIndex < shapes.Count; shapeIndex++)
+                {
+                    var dataName = $"s{shapeIndex}_m{sliderIndex}";
+                    slider.Add(new System.Xml.Linq.XElement(
+                        "Data",
+                        new System.Xml.Linq.XAttribute("name", dataName),
+                        new System.Xml.Linq.XAttribute("target", shapes[shapeIndex].Name),
+                        new System.Xml.Linq.XAttribute("local", "true"),
+                        $"{fileName}\\{dataName}"));
+                }
+            }
+
+            osdFiles.Add((fileName, bytes));
+        }
+
+        var xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" + Environment.NewLine
+            + document.ToString(System.Xml.Linq.SaveOptions.None);
+        return new BodySlideShapeDataExport(xml, osdFiles);
+    }
+
+    private static byte[]? BuildShapeOsdBytes(
+        IReadOnlyList<SkyrimSseNifShape> shapes,
+        IReadOnlyList<string> sliders,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads)
+    {
+        if (shapes.Count == 0 || sliders.Count == 0 ||
+            (long)shapes.Count * sliders.Count > ushort.MaxValue ||
+            shapes.Any(static shape => !IsOsdVertexCountRepresentable(shape.Vertices.Count)))
+        {
+            return null;
+        }
+
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(new byte[] { 0x4f, 0x53, 0x44, 0x00 });
+        writer.Write(3);
+        writer.Write(shapes.Count * sliders.Count);
+
+        for (var shapeIndex = 0; shapeIndex < shapes.Count; shapeIndex++)
+        {
+            var shape = shapes[shapeIndex];
+            for (var sliderIndex = 0; sliderIndex < sliders.Count; sliderIndex++)
+            {
+                var name = $"s{shapeIndex}_m{sliderIndex}";
+                var deltas = ResolveMorphDeltas(
+                    sliders[sliderIndex],
+                    isHighWeight: false,
+                    shape.Vertices.Count,
+                    regionalMorphing,
+                    reusableSourceMorphPayloads,
+                    morphTransferContext: null);
+                if (deltas.Count != shape.Vertices.Count)
+                {
+                    return null;
+                }
+
+                var sparseDeltas = new List<(int Index, float X, float Y, float Z)>();
+                for (var index = 0; index < deltas.Count; index++)
+                {
+                    var (x, y, z) = deltas[index];
+                    if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z))
+                    {
+                        return null;
+                    }
+
+                    if (MathF.Abs(x) > 0.0001f || MathF.Abs(y) > 0.0001f || MathF.Abs(z) > 0.0001f)
+                    {
+                        sparseDeltas.Add((index, x, y, z));
+                    }
+                }
+
+                if (!IsOsdSliderNameRepresentable(name) ||
+                    !IsOsdSparseRecordCountRepresentable(sparseDeltas.Count))
+                {
+                    return null;
+                }
+
+                writer.Write((byte)System.Text.Encoding.UTF8.GetByteCount(name));
+                writer.Write(System.Text.Encoding.UTF8.GetBytes(name));
+                writer.Write((ushort)sparseDeltas.Count);
+                foreach (var (index, x, y, z) in sparseDeltas)
+                {
+                    writer.Write((ushort)index);
+                    writer.Write(x);
+                    writer.Write(y);
+                    writer.Write(z);
+                }
+
+                if (ms.Length > MorphPayloadLimits.MaximumFileBytes)
+                {
+                    return null;
+                }
+            }
+        }
+
+        return ms.ToArray();
+    }
+
     internal static bool IsOsdVertexCountRepresentable(int vertexCount) =>
         vertexCount > 0 && vertexCount <= ushort.MaxValue;
 
@@ -39955,78 +40234,6 @@ internal sealed class LocalExportService(
     internal static bool IsOsdSliderNameRepresentable(string sliderName) =>
         !string.IsNullOrWhiteSpace(sliderName) &&
         System.Text.Encoding.UTF8.GetByteCount(sliderName) <= byte.MaxValue;
-
-    private static byte[]? BuildOsdBytes(
-        IReadOnlyList<string> sliders,
-        int vertexCount,
-        IReadOnlyDictionary<string, double> regionalMorphing,
-        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null,
-        MorphTransferContext? morphTransferContext = null)
-    {
-        if (!IsOsdVertexCountRepresentable(vertexCount))
-        {
-            return null;
-        }
-
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
-        writer.Write(new byte[] { 0x4f, 0x53, 0x44, 0x00 }); // OSD\0 (Outfit Studio style)
-        writer.Write(3); // payload version
-        writer.Write(sliders.Count);
-
-        foreach (var name in sliders)
-        {
-            var deltas = ResolveMorphDeltas(
-                name,
-                isHighWeight: false,
-                vertexCount,
-                regionalMorphing,
-                reusableSourceMorphPayloads,
-                morphTransferContext);
-            if (deltas.Count != vertexCount)
-            {
-                return null;
-            }
-
-            var sparseDeltas = new List<(int Index, float X, float Y, float Z)>();
-            for (var index = 0; index < deltas.Count; index++)
-            {
-                var (x, y, z) = deltas[index];
-                if (MathF.Abs(x) <= 0.0001f && MathF.Abs(y) <= 0.0001f && MathF.Abs(z) <= 0.0001f)
-                {
-                    continue;
-                }
-
-                sparseDeltas.Add((index, x, y, z));
-            }
-
-            var nameBytes = System.Text.Encoding.UTF8.GetBytes(name);
-            if (!IsOsdSliderNameRepresentable(name) ||
-                !IsOsdSparseRecordCountRepresentable(sparseDeltas.Count))
-            {
-                return null;
-            }
-
-            writer.Write((byte)nameBytes.Length);
-            writer.Write(nameBytes);
-            writer.Write((ushort)sparseDeltas.Count);
-            foreach (var (index, x, y, z) in sparseDeltas)
-            {
-                if (index < 0 || index > ushort.MaxValue ||
-                    !float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z))
-                {
-                    return null;
-                }
-
-                writer.Write((ushort)index);
-                writer.Write(x);
-                writer.Write(y);
-                writer.Write(z);
-            }
-        }
-
-        return ms.ToArray();
-    }
 
     /// <summary>
     /// Builds a TRI morph binary payload for all sliders of one weight variant.
