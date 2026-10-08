@@ -19,7 +19,7 @@ public sealed class PackageArtifactRegressionTests
             "packaging", "windows-bundle", "fomod", "ModuleConfig.xml"));
         var desktopFolder = Assert.Single(config.Descendants("folder"), element =>
             string.Equals(element.Attribute("source")?.Value, "desktop", StringComparison.Ordinal));
-        Assert.Equal("CalienteTools/SlideSmith", desktopFolder.Attribute("destination")?.Value);
+        Assert.Equal("SlideSmith", desktopFolder.Attribute("destination")?.Value);
         Assert.DoesNotContain(config.Descendants("file"), element =>
             string.Equals(element.Attribute("source")?.Value, "desktop/SlideSmith.exe", StringComparison.Ordinal));
     }

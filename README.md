@@ -616,13 +616,13 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 |---|---|---|
 | `SlideSmith.exe` | Windows | Desktop GUI — double-click to open, drag-and-drop armor |
 | `SlideSmith-CLI.exe` | Windows | Command-line tool — run from a terminal with `--help` |
-| `slidesmith-win-x64-bundle.zip` | Windows | MO2/Vortex-installable SkyrimSE bundle; installs the desktop EXE and runtime files under `CalienteTools/SlideSmith`, with `cli/SlideSmith-CLI.exe`, `README.txt`, `meta/slidesmith-bundle.json` and `meta.ini`; archive also contains FOMOD metadata |
+| `slidesmith-win-x64-bundle.zip` | Windows | MO2/Vortex-installable SkyrimSE bundle; installs the desktop EXE and runtime files under `SlideSmith`, with `cli/SlideSmith-CLI.exe`, `README.txt`, `meta/slidesmith-bundle.json` and `meta.ini`; archive also contains FOMOD metadata |
 | `slidesmith-linux-x64.zip` | Linux | Single CLI binary |
 
 Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.
 
 For Mod Organizer 2, set Binary to the installed physical path
-`<mod>\CalienteTools\SlideSmith\SlideSmith.exe` and Start in to its containing
+`<mod>\SlideSmith\SlideSmith.exe` and Start in to its containing
 folder. Leave Arguments empty for a normal GUI launch; `--mo2-launcher` only adds
 context information and does not enable or repair MO2's VFS/USVFS hook.
 Keep every desktop runtime file alongside the EXE, and launch from MO2 when
@@ -647,7 +647,7 @@ What it does:
 Standalone executable downloads remain self-contained single files. The Windows
 mod-manager bundle uses a self-contained folder-based desktop build without native
 self-extraction; its installer puts the EXE and all runtime DLLs together in
-`CalienteTools/SlideSmith`. Do not copy only the bundle's desktop EXE. Windows CI
+`SlideSmith` at the Skyrim Data root. Do not copy only the bundle's desktop EXE. Windows CI
 checks dependencies and smoke-tests the extracted, installed desktop layout.
 
 If the app seems to "do nothing", run it from a terminal with `--help` first. The CLI expects arguments (`--input`, `--target`/`--preset`, optional `--output`) and prints usage when required arguments are missing.
