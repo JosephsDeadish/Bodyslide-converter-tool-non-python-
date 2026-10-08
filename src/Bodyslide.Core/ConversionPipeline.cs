@@ -28097,6 +28097,7 @@ internal sealed class LocalExportService(
             try
             {
                 var document = System.Xml.Linq.XDocument.Load(ospPath);
+                problems.AddRange(ValidateShapeDataLinks(document, shapeDataDirectory));
                 var sliderSets = document.Descendants()
                     .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase))
                     .ToArray();
@@ -28261,7 +28262,6 @@ internal sealed class LocalExportService(
             try
             {
                 var document = System.Xml.Linq.XDocument.Load(ospPath);
-                problems.AddRange(ValidateShapeDataLinks(document, shapeDataDirectory));
                 static bool IsTrueLike(string? value) =>
                     string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
