@@ -28091,6 +28091,44 @@ internal sealed class LocalExportService(
             return problems;
         }
 
+        static IReadOnlyList<string> FindUnsupportedBodySlideNifLayouts(string shapeDataDirectory)
+        {
+            const long maximumNifBytes = 512L * 1024 * 1024;
+            var diagnostics = new List<string>();
+            if (!Directory.Exists(shapeDataDirectory))
+            {
+                return diagnostics;
+            }
+
+            foreach (var nifPath in Directory.EnumerateFiles(shapeDataDirectory, "*.nif", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    if (new FileInfo(nifPath).Length > maximumNifBytes)
+                    {
+                        diagnostics.Add($"{Path.GetFileName(nifPath)}:nif-file-size-out-of-range");
+                        continue;
+                    }
+
+                    var readResult = SkyrimSseNifShapeReader.Read(File.ReadAllBytes(nifPath));
+                    if (!readResult.Supported)
+                    {
+                        diagnostics.Add($"{Path.GetFileName(nifPath)}:{readResult.Diagnostic}");
+                    }
+                }
+                catch (IOException)
+                {
+                    diagnostics.Add($"{Path.GetFileName(nifPath)}:nif-read-failed");
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    diagnostics.Add($"{Path.GetFileName(nifPath)}:nif-access-denied");
+                }
+            }
+
+            return diagnostics;
+        }
+
         bool ContainsXmlAttributeValue(System.Xml.Linq.XDocument document, string attributeName, string value) =>
             document.Descendants()
                 .Where(element => element.Name.LocalName.Equals("folder", StringComparison.OrdinalIgnoreCase) ||
@@ -29135,6 +29173,15 @@ internal sealed class LocalExportService(
                     "missing-bodyslide-reference-nif",
                     "medium",
                     $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing a reference NIF, so Outfit Studio cannot load the generated project correctly."));
+            }
+
+            var unsupportedNifLayouts = FindUnsupportedBodySlideNifLayouts(shapeDataDirectory);
+            if (unsupportedNifLayouts.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "bodyslide-nif-shape-layout-unsupported",
+                    "high",
+                    $"BodySlide project '{bodySlideProject.ProjectName}' cannot be marked build-ready because its NIF shape geometry is unsupported: {string.Join(", ", unsupportedNifLayouts.Take(4))}"));
             }
 
             if (Directory.Exists(shapeDataDirectory) &&

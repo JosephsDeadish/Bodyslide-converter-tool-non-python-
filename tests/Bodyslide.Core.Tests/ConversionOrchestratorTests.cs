@@ -29151,6 +29151,7 @@ public sealed class OutputCompletenessTests
 
             Assert.Contains(issues, issue => issue.Code.Equals("missing-bodyslide-slider-payload", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(issues, issue => issue.Code.Equals("bodyslide-osd-payload-unavailable", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(issues, issue => issue.Code.Equals("bodyslide-nif-shape-layout-unsupported", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
