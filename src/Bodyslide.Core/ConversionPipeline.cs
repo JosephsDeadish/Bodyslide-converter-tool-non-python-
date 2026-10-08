@@ -1346,8 +1346,6 @@ internal static class ConversionValidationGuidance
                 "Inspect CalienteTools/BodySlide/ShapeData for the expected TRI/OSD slider payloads, then rebuild the output before release so BodySlide users do not receive a partial morph package.",
             "bodyslide-multishape-morph-fallback" =>
                 "Review each generated shape's OSD morphs in Outfit Studio and replace synthetic fallback deltas with shape-matched source morphs before treating the multi-shape project as production-ready.",
-            "bodyslide-synthetic-morph-fallback" =>
-                "Review OSD records reported as synthetic or retargeted in Outfit Studio; prefer exact-count source morph payloads and do not treat fallback deformations as authored morph transfer.",
             "bodyslide-shape-data-links-missing" =>
                 "Open the generated OSP and verify every supported Shape/Slider/Data reference resolves to its OSD record; unsupported NIF layouts and zap semantics require manual review.",
             "bodyslide-semantic-mismatch" =>
@@ -22735,7 +22733,11 @@ internal sealed class LocalExportService(
             syntheticBodySlideOsdMorphCount = linkedShapeData.SyntheticMorphRecordCount;
             if (syntheticBodySlideOsdMorphCount > 0)
             {
-                qualityWarnings.Add($"BodySlide OSD morph fallback records={syntheticBodySlideOsdMorphCount} (synthetic or retargeted rather than exact-count source data)");
+                qualityWarnings =
+                [
+                    .. qualityWarnings,
+                    $"BodySlide OSD morph fallback records={syntheticBodySlideOsdMorphCount} (synthetic or retargeted rather than exact-count source data)"
+                ];
             }
 
             await File.WriteAllTextAsync(ospPath, linkedShapeData.OspXml, cancellationToken);
@@ -29338,14 +29340,6 @@ internal sealed class LocalExportService(
                             "medium",
                             $"BodySlide project '{bodySlideProject.ProjectName}' has per-shape links, but multi-shape OSD deltas use synthetic fallback until shape-matched source morphs are available."));
                     }
-                }
-
-                if (syntheticBodySlideOsdMorphCount > 0)
-                {
-                    issues.Add(new ConversionValidationIssue(
-                        "bodyslide-synthetic-morph-fallback",
-                        "medium",
-                        $"BodySlide project '{bodySlideProject.ProjectName}' contains {syntheticBodySlideOsdMorphCount} OSD morph records without an exact-count source payload; review their deformations in Outfit Studio."));
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
                 {
