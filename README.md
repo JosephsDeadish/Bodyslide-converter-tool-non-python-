@@ -109,6 +109,58 @@ claim:
 | Physics | Generated CBPC/SMP configuration and declared bone mappings have synthetic checks. | No CBPC/SMP runtime version, target skeleton installation, or live simulation/collision combination is certified. |
 | Inputs and manager | File, folder, selected archive formats, plugin, and BodySlide parsing/export paths have automated coverage. | Real installed mods, MO2 virtual filesystem behavior, load-order conflicts, and actual BodySlide/Outfit Studio builds remain unverified. |
 
+### External BodySlide and Skyrim build gate
+
+Do not treat generated OSP/ShapeData as build-ready based on the automated tests
+alone. In particular, every non-zap slider needs a `<Data>` link whose `target`
+maps to a real source-NIF shape and whose OSD record uses the matching data name.
+The current generated OSP does not yet provide these per-shape links, so stop at
+the preflight below rather than counting an unchanged-mesh build as a pass.
+
+On a Windows test host:
+
+1. Use a disposable MO2 profile and a version-matched Skyrim, BodySlide, Outfit
+   Studio, body, skeleton, and armor stack. Install the converter output as its
+   own enabled test mod. Keep the profile's saves and Overwrite isolated from
+   the normal profile.
+2. Before building, inspect each generated OSP: every non-zap `<Slider>` must
+   contain one or more `<Data>` entries; each entry's `target` must match a
+   declared `<Shape target="...">`; and the final component of its text path
+   must equal its `name` and identify a record in the referenced OSD. Confirm
+   all referenced ShapeData files resolve from the installed test mod through
+   MO2. A missing link, unknown shape, missing record, or unresolved path is a
+   failed preflight, not a reason to guess a target.
+3. Record the BodySlide version and game-data configuration. From MO2, launch
+   the installed `BodySlide.exe` with the generated outfit name, a known
+   compatible preset, an empty temporary target directory, and TRI generation
+   enabled. Current upstream builds expose `--build`, `--preset`, `--targetdir`,
+   and `--trimorphs`; verify the syntax supported by the installed version
+   before running. For example:
+
+   ```text
+   BodySlide.exe --build "<generated outfit name>" --preset "<test preset>" --targetdir "<empty temp output>" --trimorphs
+   ```
+
+   Save the exact arguments, process exit code, BodySlide log, MO2 `usvfs` /
+   `mo_interface` logs, and a file listing of the output directory. Confirm
+   both expected weight meshes are produced, the TRI output is present when
+   requested, and the build does not silently copy an unchanged source mesh.
+4. In Outfit Studio, open the generated project and verify the expected shape
+   names and every slider. Move representative sliders to both endpoints and
+   confirm the intended shape deforms; exercise each zap on and off, check
+   weight variants, then save and reopen the project to test persistence.
+5. Install the built meshes as a separate test mod in that disposable MO2
+   profile. In a disposable game session/save, test low and high body weights,
+   the corresponding in-game morph sliders, and zapped shapes. Check for
+   missing shapes, bad topology, clipping, and crashes. Do not save over a
+   normal playthrough. Retain the Skyrim edition/runtime, enabled-mod list,
+   BodySlide/Outfit Studio versions, screenshots, output mesh hashes, and logs
+   with the review evidence.
+
+This procedure describes the required external evidence; it is not evidence
+that the current generated projects pass. No BodySlide, MO2, or Skyrim runtime
+is available in this Linux validation environment.
+
 `TargetBodySupport` in conversion reports now labels metadata as `embedded-built-in-catalog`,
 `custom-profile`, or `unavailable` and separately reports whether it was externally
 verified. A complete or internally consistent profile is still configured data, not
