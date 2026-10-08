@@ -28262,6 +28262,7 @@ internal sealed class LocalExportService(
             try
             {
                 var document = System.Xml.Linq.XDocument.Load(ospPath);
+                problems.AddRange(ValidateShapeDataLinks(document, shapeDataDirectory));
                 static bool IsTrueLike(string? value) =>
                     string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
@@ -40184,6 +40185,122 @@ internal sealed class LocalExportService(
         var xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" + Environment.NewLine
             + document.ToString(System.Xml.Linq.SaveOptions.None);
         return new BodySlideShapeDataExport(xml, osdFiles, syntheticMorphRecordCount);
+    }
+
+    internal static IReadOnlyList<string> ValidateShapeDataLinks(
+        System.Xml.Linq.XDocument document,
+        string shapeDataDirectory)
+    {
+        var problems = new List<string>();
+        var rootDirectory = Path.GetFullPath(shapeDataDirectory);
+        var osdRecordsByPath = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var sliderSet in document.Descendants()
+                     .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase)))
+        {
+            var setName = ((string?)sliderSet.Attribute("name"))?.Trim();
+            setName = string.IsNullOrWhiteSpace(setName) ? "<unnamed>" : setName;
+            var shapes = sliderSet.Elements()
+                .Where(static element => string.Equals(element.Name.LocalName, "Shape", StringComparison.OrdinalIgnoreCase))
+                .Select(element => new
+                {
+                    Name = (element.Value ?? string.Empty).Trim(),
+                    Target = ((string?)element.Attribute("target"))?.Trim()
+                })
+                .Select(static shape => new
+                {
+                    shape.Name,
+                    Target = string.IsNullOrWhiteSpace(shape.Target) ? shape.Name : shape.Target
+                })
+                .Where(static shape => !string.IsNullOrWhiteSpace(shape.Target))
+                .ToArray();
+            var targetNames = shapes.Select(static shape => shape.Target)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var regularSliders = sliderSet.Elements()
+                .Where(static element => string.Equals(element.Name.LocalName, "Slider", StringComparison.OrdinalIgnoreCase))
+                .Where(static element => !string.Equals((string?)element.Attribute("zap"), "true", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (regularSliders.Length == 0)
+            {
+                continue;
+            }
+
+            if (shapes.Length == 0)
+            {
+                problems.Add($"OSP SliderSet '{setName}' has sliders but no readable Shape targets for OSD data.");
+                continue;
+            }
+
+            foreach (var slider in regularSliders)
+            {
+                var sliderName = ((string?)slider.Attribute("name"))?.Trim();
+                sliderName = string.IsNullOrWhiteSpace(sliderName) ? "<unnamed>" : sliderName;
+                var linksByTarget = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var data in slider.Elements()
+                             .Where(static element => string.Equals(element.Name.LocalName, "Data", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var target = ((string?)data.Attribute("target"))?.Trim();
+                    var dataName = ((string?)data.Attribute("name"))?.Trim();
+                    var reference = data.Value.Trim().Replace('\\', '/');
+                    var separator = reference.LastIndexOf('/');
+                    var relativeFile = separator > 0 ? reference[..separator] : string.Empty;
+                    var recordName = separator >= 0 ? reference[(separator + 1)..] : string.Empty;
+                    if (string.IsNullOrWhiteSpace(target) || !targetNames.Contains(target))
+                    {
+                        problems.Add($"OSP slider '{sliderName}' in '{setName}' links OSD data to an undeclared shape target.");
+                        continue;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(dataName) ||
+                        !string.Equals(dataName, recordName, StringComparison.Ordinal) ||
+                        !string.Equals((string?)data.Attribute("local"), "true", StringComparison.OrdinalIgnoreCase) ||
+                        !relativeFile.EndsWith(".osd", StringComparison.OrdinalIgnoreCase) ||
+                        !IsSafeBodySlideRelativePath(relativeFile))
+                    {
+                        problems.Add($"OSP slider '{sliderName}' in '{setName}' has an invalid local OSD data reference.");
+                        continue;
+                    }
+
+                    linksByTarget[target] = linksByTarget.GetValueOrDefault(target) + 1;
+                    var osdPath = Path.GetFullPath(Path.Combine(
+                        rootDirectory,
+                        relativeFile.Replace('/', Path.DirectorySeparatorChar)));
+                    if (!osdPath.StartsWith(rootDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    {
+                        problems.Add($"OSP slider '{sliderName}' in '{setName}' references OSD data outside its ShapeData folder.");
+                        continue;
+                    }
+
+                    if (!osdRecordsByPath.TryGetValue(osdPath, out var records))
+                    {
+                        records = OsdMorphReader.TryRead(osdPath, out var payload) && payload is not null
+                            ? payload.Morphs.Select(static morph => morph.Name).ToHashSet(StringComparer.Ordinal)
+                            : new HashSet<string>(StringComparer.Ordinal);
+                        osdRecordsByPath[osdPath] = records;
+                    }
+
+                    if (!records.Contains(dataName))
+                    {
+                        problems.Add($"OSP slider '{sliderName}' in '{setName}' references a missing OSD record '{dataName}'.");
+                    }
+                }
+
+                foreach (var target in targetNames)
+                {
+                    if (!linksByTarget.TryGetValue(target, out var linkCount) || linkCount != 1)
+                    {
+                        problems.Add($"OSP slider '{sliderName}' in '{setName}' must have exactly one OSD data link for shape '{target}'.");
+                    }
+                }
+            }
+        }
+
+        return problems;
+
+        static bool IsSafeBodySlideRelativePath(string value) =>
+            !string.IsNullOrWhiteSpace(value) &&
+            !value.StartsWith('/') &&
+            !value.Contains(':') &&
+            value.Split('/').All(static segment => segment.Length > 0 && segment is not "." and not "..");
     }
 
     private static byte[]? BuildShapeOsdBytes(

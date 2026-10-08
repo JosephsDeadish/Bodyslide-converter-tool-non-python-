@@ -64,6 +64,62 @@ public sealed class BodySlideBuildPathTests
         Assert.All(payload.Morphs, static morph => Assert.NotEmpty(morph.SparseDeltas));
     }
 
+    [Fact]
+    public void ValidateShapeDataLinks_RejectsMissingShapeLinkAndOsdRecord()
+    {
+        const string ospXml = """
+            <SliderSetInfo version="1">
+              <SliderSet name="Demo">
+                <DataFolder>Demo</DataFolder>
+                <SourceFile>mesh.nif</SourceFile>
+                <Slider name="Belly" default="0" />
+              </SliderSet>
+            </SliderSetInfo>
+            """;
+        var shapes = new SkyrimSseNifShape[]
+        {
+            new("Torso", [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2], 12),
+            new("Sleeves", [new(0, 0, 1), new(1, 0, 1), new(0, 1, 1)], [0, 1, 2], 12)
+        };
+        var export = LocalExportService.BuildShapeLinkedOsdExport(
+            ospXml,
+            "Demo",
+            new Dictionary<string, IReadOnlyList<SkyrimSseNifShape>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["mesh.nif"] = shapes
+            },
+            new Dictionary<string, double>());
+        var shapeDataDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(shapeDataDirectory);
+        try
+        {
+            foreach (var (fileName, bytes) in export.OsdFiles)
+            {
+                File.WriteAllBytes(Path.Combine(shapeDataDirectory, fileName), bytes);
+            }
+
+            var document = XDocument.Parse(export.OspXml);
+            Assert.Empty(LocalExportService.ValidateShapeDataLinks(document, shapeDataDirectory));
+
+            var slider = Assert.Single(document.Descendants("Slider"));
+            slider.Elements("Data").First().Remove();
+            Assert.Contains(LocalExportService.ValidateShapeDataLinks(document, shapeDataDirectory),
+                static problem => problem.Contains("exactly one OSD data link", StringComparison.Ordinal));
+
+            slider.Add(new XElement("Data",
+                new XAttribute("name", "missing-record"),
+                new XAttribute("target", "Torso"),
+                new XAttribute("local", "true"),
+                "Demo.osd\\missing-record"));
+            Assert.Contains(LocalExportService.ValidateShapeDataLinks(document, shapeDataDirectory),
+                static problem => problem.Contains("missing OSD record 'missing-record'", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(shapeDataDirectory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("GNDgloves.nif", null)]
     [InlineData("GNDgloves.v2.nif", null)]
