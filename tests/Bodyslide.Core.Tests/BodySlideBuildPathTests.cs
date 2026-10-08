@@ -42,6 +42,13 @@ public sealed class BodySlideBuildPathTests
             var output = Assert.Single(set.Elements("OutputFile"));
             Assert.Equal(paired ? "true" : "false", output.Attribute("GenWeights")!.Value);
             Assert.Equal(paired ? "BDE_Gloves" : Path.GetFileNameWithoutExtension(inputName), output.Value);
+            foreach (var slider in set.Elements("Slider"))
+            {
+                Assert.Equal("0", slider.Attribute(paired ? "small" : "default")?.Value);
+                Assert.Equal(paired ? "0" : null, slider.Attribute(paired ? "big" : "small")?.Value);
+                Assert.Null(slider.Element("Low"));
+                Assert.Null(slider.Element("High"));
+            }
             var builtFileNames = paired
                 ? new[] { output.Value + "_0.nif", output.Value + "_1.nif" }
                 : new[] { output.Value + ".nif" };

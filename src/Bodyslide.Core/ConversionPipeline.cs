@@ -1343,9 +1343,9 @@ internal static class ConversionValidationGuidance
             "missing-bodyslide-reference-nif" =>
                 "Open CalienteTools/BodySlide/ShapeData and confirm the generated reference NIF is present and opens in Outfit Studio, then re-run before release so BodySlide users can preview the outfit correctly.",
             "missing-bodyslide-slider-payload" =>
-                "Inspect CalienteTools/BodySlide/ShapeData for the expected BSD/TRI/OSD slider payloads, then rebuild the output before release so BodySlide users do not receive a partial morph package.",
+                "Inspect CalienteTools/BodySlide/ShapeData for the expected TRI/OSD slider payloads, then rebuild the output before release so BodySlide users do not receive a partial morph package.",
             "bodyslide-semantic-mismatch" =>
-                "Open the generated BodySlide OSP and ShapeData, then verify the OSP slider list, referenced source NIFs, and BSD/TRI/OSD payload slider coverage all agree before shipping the project to BodySlide or Outfit Studio users.",
+                "Open the generated BodySlide OSP and ShapeData, then verify the OSP slider list, referenced source NIFs, and TRI/OSD payload slider coverage all agree before shipping the project to BodySlide or Outfit Studio users.",
             "missing-xedit-script" =>
                 "Re-run the conversion and confirm patch-armor.pas is packaged beside plugin-patches.json before release so manual xEdit patch follow-up remains available outside the app.",
             "missing-plugin-patch-report" =>
@@ -8045,7 +8045,7 @@ public sealed class ConversionOrchestrator(
 
             // Apply auto-correction feedback: if the correction produced updated regional
             // morphing values (i.e. clipping regions were inflated), rebuild the converted
-            // mesh so that all subsequent steps (BSD/TRI export, voxel pass, BodySlide project)
+            // mesh so that all subsequent steps (TRI/OSD export, voxel pass, BodySlide project)
             // use the corrected morphing data rather than the pre-correction values.
             if (correction.Applied && correction.CorrectedMorphing is { Count: > 0 } correctedMorphing)
             {
@@ -8072,7 +8072,7 @@ public sealed class ConversionOrchestrator(
 
             // Apply voxel push-out feedback: for every region where the voxel grid detected
             // armor/body penetration, add the normalised push-out magnitude to the regional
-            // morphing factor so the BSD/TRI vertex deltas push the armor further out.
+            // morphing factor so the TRI/OSD vertex deltas push the armor further out.
             // The grid-resolution divisor converts voxel-cell units back to a [0,1] range.
             if (voxelResult.HasPenetrations && voxelResult.PushOutMagnitudes.Count > 0)
             {
@@ -18739,18 +18739,14 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
 
             foreach (var slider in sliders)
             {
-                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" invert=\"false\" zap=\"false\" uv=\"false\">");
-                sb.AppendLine("            <Low value=\"0\" />");
-                sb.AppendLine("            <High value=\"100\" />");
-                sb.AppendLine("        </Slider>");
+                var weightDefaults = generateWeights ? "small=\"0\" big=\"0\"" : "default=\"0\"";
+                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" {weightDefaults} invert=\"false\" zap=\"false\" uv=\"false\" />");
             }
 
             foreach (var slider in zapSliders)
             {
-                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" invert=\"false\" zap=\"true\" uv=\"false\">");
-                sb.AppendLine("            <Low value=\"0\" />");
-                sb.AppendLine("            <High value=\"100\" />");
-                sb.AppendLine("        </Slider>");
+                var weightDefaults = generateWeights ? "small=\"0\" big=\"0\"" : "default=\"0\"";
+                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" {weightDefaults} invert=\"false\" zap=\"true\" uv=\"false\" />");
             }
 
             sb.AppendLine("    </SliderSet>");
@@ -22690,20 +22686,7 @@ internal sealed class LocalExportService(
                 outputFiles.Add(shapeDataNifPath);
             }
 
-            // Write BSD slider data files (.bsd) — one per slider for low-weight and high-weight morphs.
-            // The BSD binary format encodes per-slider vertex displacement deltas used by BodySlide.
-            foreach (var slider in bodySlideProject.Sliders)
-            {
-                var lowBsdPath  = Path.Combine(shapeDataDirectory, $"{slider}.bsd");
-                var highBsdPath = Path.Combine(shapeDataDirectory, $"{slider}_1.bsd");
-                await File.WriteAllBytesAsync(lowBsdPath,  BuildBsdBytes(slider, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext), cancellationToken);
-                await File.WriteAllBytesAsync(highBsdPath, BuildBsdBytes(slider, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext),  cancellationToken);
-                outputFiles.Add(lowBsdPath);
-                outputFiles.Add(highBsdPath);
-            }
-
-            // Write TRI morph files (.tri) alongside the BSD files in ShapeData.
-            // The TRI format stores per-morph vertex displacement arrays for in-game slider interpolation.
+            // Write TRI morph files (.tri) in ShapeData for in-game slider interpolation.
             var triLowPath  = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.tri");
             var triHighPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}_1.tri");
             await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext), cancellationToken);
@@ -28058,7 +28041,7 @@ internal sealed class LocalExportService(
                 .Any(element => string.Equals((string?)element.Attribute(attributeName), value, StringComparison.OrdinalIgnoreCase));
 
         bool HasBodySlidePayloadFiles(string directoryPath) =>
-            HasAnyFile(directoryPath, "*.bsd") || HasAnyFile(directoryPath, "*.tri") || HasAnyFile(directoryPath, "*.osd");
+            HasAnyFile(directoryPath, "*.tri") || HasAnyFile(directoryPath, "*.osd");
 
         static string NormalizeSliderToken(string value)
         {
@@ -28548,7 +28531,7 @@ internal sealed class LocalExportService(
                             .ToArray();
                         if (missingOsdCoverage.Length > 0)
                         {
-                            problems.Add($"OSD payloads are missing slider coverage present in BSD/TRI payloads: {string.Join(", ", missingOsdCoverage)}");
+                            problems.Add($"OSD payloads are missing slider coverage present in TRI payloads: {string.Join(", ", missingOsdCoverage)}");
                         }
                     }
                 }
@@ -29104,7 +29087,7 @@ internal sealed class LocalExportService(
                 issues.Add(new ConversionValidationIssue(
                     "missing-bodyslide-slider-payload",
                     "medium",
-                    $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing BSD/TRI/OSD slider payload files, so the generated project cannot rebuild slider morphs correctly."));
+                    $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing TRI/OSD slider payload files, so the generated project cannot rebuild slider morphs correctly."));
             }
 
             var semanticProblems = ValidateBodySlideSemanticConsistency(ospPath, sliderGroupsPath, shapeDataDirectory);
@@ -29374,14 +29357,13 @@ internal sealed class LocalExportService(
                             if (bodySlideProject.Sliders.Count > 0 &&
                                 !zipEntries.Any(entry =>
                                     entry.StartsWith($"{zipShapeDataPrefix}/", StringComparison.OrdinalIgnoreCase) &&
-                                    (entry.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase) ||
-                                     entry.EndsWith(".tri", StringComparison.OrdinalIgnoreCase) ||
+                                    (entry.EndsWith(".tri", StringComparison.OrdinalIgnoreCase) ||
                                      entry.EndsWith(".osd", StringComparison.OrdinalIgnoreCase))))
                             {
                                 issues.Add(new ConversionValidationIssue(
                                     "zip-missing-bodyslide-slider-payload",
                                     "medium",
-                                    $"The distributable ZIP is missing BSD/TRI/OSD slider payload files for '{bodySlideProject.ProjectName}'."));
+                                    $"The distributable ZIP is missing TRI/OSD slider payload files for '{bodySlideProject.ProjectName}'."));
                             }
                         }
                     }
@@ -39838,56 +39820,7 @@ internal sealed class LocalExportService(
         };
 
     /// <summary>
-    /// Builds a BSD (BodySlide Data) binary payload for a single slider.
-    /// <para>
-    /// BSD file layout (little-endian):
-    /// <list type="bullet">
-    ///   <item>4 bytes — magic "BSD\0" (0x42 0x53 0x44 0x00)</item>
-    ///   <item>2 bytes — version (0x01 0x00)</item>
-    ///   <item>1 byte  — weight flag (0x00 = low / _0, 0x01 = high / _1)</item>
-    ///   <item>2 bytes — slider name length (UTF-8)</item>
-    ///   <item>N bytes — slider name (UTF-8)</item>
-    ///   <item>4 bytes — vertex count</item>
-    ///   <item>12 × vertex count bytes — per-vertex XYZ deltas (float32 triplets)</item>
-    /// </list>
-    /// </para>
-    /// </summary>
-    private static byte[] BuildBsdBytes(
-        string sliderName,
-        bool isHighWeight,
-        int vertexCount,
-        IReadOnlyDictionary<string, double> regionalMorphing,
-        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null,
-        MorphTransferContext? morphTransferContext = null)
-    {
-        vertexCount = Math.Clamp(vertexCount, 1, 250_000);
-        var nameBytes = System.Text.Encoding.UTF8.GetBytes(sliderName);
-        var deltas = ResolveMorphDeltas(sliderName, isHighWeight, vertexCount, regionalMorphing, reusableSourceMorphPayloads, morphTransferContext);
-        using var ms = new System.IO.MemoryStream();
-        using var w  = new System.IO.BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
-
-        w.Write((byte)0x42); // 'B'
-        w.Write((byte)0x53); // 'S'
-        w.Write((byte)0x44); // 'D'
-        w.Write((byte)0x00); // null terminator
-        w.Write((ushort)1);               // version 1
-        w.Write(isHighWeight ? (byte)1 : (byte)0); // weight flag
-        w.Write((ushort)nameBytes.Length);
-        w.Write(nameBytes);
-        w.Write((uint)vertexCount);
-
-        foreach (var (x, y, z) in deltas)
-        {
-            w.Write(x);
-            w.Write(y);
-            w.Write(z);
-        }
-
-        return ms.ToArray();
-    }
-
-    /// <summary>
-    /// Builds an OSD morph payload containing both low and high-weight slider deltas.
+    /// Builds an OSD morph payload with one data record per slider.
     /// Uses Outfit Studio header layout (OSD\0 + version + morph count) with ushort indexes for compactness.
     /// </summary>
     private static byte[] BuildOsdBytes(
@@ -39898,27 +39831,17 @@ internal sealed class LocalExportService(
         MorphTransferContext? morphTransferContext = null)
     {
         vertexCount = Math.Clamp(vertexCount, 1, 250_000);
-        var morphNames = new List<(string Name, bool IsHighWeight)>(sliders.Count * 2);
-        foreach (var slider in sliders)
-        {
-            morphNames.Add((slider, IsHighWeight: false));
-            morphNames.Add(($"{slider}_1", IsHighWeight: true));
-        }
-
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
         writer.Write(new byte[] { 0x4f, 0x53, 0x44, 0x00 }); // OSD\0 (Outfit Studio style)
         writer.Write(3); // payload version
-        writer.Write(morphNames.Count);
+        writer.Write(sliders.Count);
 
-        foreach (var (name, isHighWeight) in morphNames)
+        foreach (var name in sliders)
         {
-            var baseSliderName = isHighWeight && name.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
-                ? name[..^2]
-                : name;
             var deltas = ResolveMorphDeltas(
-                baseSliderName,
-                isHighWeight,
+                name,
+                isHighWeight: false,
                 vertexCount,
                 regionalMorphing,
                 reusableSourceMorphPayloads,

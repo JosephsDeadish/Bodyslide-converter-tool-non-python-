@@ -9544,7 +9544,7 @@ public sealed class MainForm : Form
             "bodyslide-slider-groups" => "the generated BodySlide SliderGroups XML",
             "bodyslide-shape-data" => "the generated BodySlide ShapeData payloads",
             "bodyslide-reference-nif" => "the BodySlide reference NIF",
-            "bodyslide-slider-payload" => "the generated BSD/TRI slider payloads",
+            "bodyslide-slider-payload" => "the generated TRI/OSD slider payloads",
             "root-plugin" => "the copied/generated plugin file at the package root",
             "root-plugin-entry" => "the plugin root-file FOMOD entry",
             "staged-cbpc-config" => "the staged CBPC config",

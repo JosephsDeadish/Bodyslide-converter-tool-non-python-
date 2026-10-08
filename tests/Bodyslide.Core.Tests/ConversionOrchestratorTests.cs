@@ -2113,10 +2113,8 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithDefaultModules_WritesBsdFilesToShapeDataFolder()
+    public async Task ConvertAsync_WithDefaultModules_WritesNativeOsdMorphPayloadToShapeDataFolder()
     {
-        // BSD files must live at CalienteTools\BodySlide\ShapeData\<project>\ so BodySlide
-        // can locate the slider data when the user opens the slider editor.
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
         Directory.CreateDirectory(workingDirectory);
@@ -2133,20 +2131,30 @@ public sealed class ConversionOrchestratorTests
             var shapeDataBase = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
             Assert.True(Directory.Exists(shapeDataBase), "ShapeData folder should exist under CalienteTools/BodySlide/");
 
-            var bsdFiles = Directory.GetFiles(shapeDataBase, "*.bsd", SearchOption.AllDirectories);
-            Assert.NotEmpty(bsdFiles);
+            Assert.Empty(Directory.GetFiles(shapeDataBase, "*.bsd", SearchOption.AllDirectories));
             var osdFiles = Directory.GetFiles(shapeDataBase, "*.osd", SearchOption.AllDirectories);
             Assert.NotEmpty(osdFiles);
 
-            // All BSD files must be inside the ShapeData tree.
-            foreach (var bsdFile in bsdFiles)
-                Assert.StartsWith(shapeDataBase, bsdFile, StringComparison.OrdinalIgnoreCase);
+            var ospFile = Assert.Single(Directory.GetFiles(
+                Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets"), "*.osp"));
+            var expectedMorphNames = XDocument.Load(ospFile)
+                .Descendants("Slider")
+                .Where(static slider => !string.Equals(
+                    (string?)slider.Attribute("zap"), "true", StringComparison.OrdinalIgnoreCase))
+                .Select(static slider => (string?)slider.Attribute("name"))
+                .Where(static name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             foreach (var osdFile in osdFiles)
             {
                 Assert.StartsWith(shapeDataBase, osdFile, StringComparison.OrdinalIgnoreCase);
                 Assert.True(OsdMorphReader.TryRead(osdFile, out var payload) && payload is not null);
-                Assert.True(payload!.Morphs.Count > 0, "Expected generated OSD payload morph entries.");
-                Assert.Contains(payload.Morphs.Select(static morph => morph.Name), static name => name.EndsWith("_1", StringComparison.OrdinalIgnoreCase));
+                var actualMorphNames = payload!.Morphs
+                    .Select(static morph => morph.Name)
+                    .OrderBy(static name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                Assert.Equal(expectedMorphNames, actualMorphNames);
             }
         }
         finally
@@ -12389,7 +12397,7 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithDefaultModules_WritesBsdSliderFiles()
+    public async Task ConvertAsync_WithDefaultModules_DoesNotWriteCustomBsdSliderFiles()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -12404,24 +12412,12 @@ public sealed class BsdSliderDataTests
 
             Assert.True(result.Success);
 
-            // BSD files land in CalienteTools/BodySlide/ShapeData/<ProjectName>/
             var shapeDataDir = Directory.GetDirectories(outputDirectory, "*", SearchOption.AllDirectories)
                 .FirstOrDefault(d => d.Contains("ShapeData", StringComparison.OrdinalIgnoreCase));
             Assert.NotNull(shapeDataDir);
 
             var bsdFiles = Directory.GetFiles(shapeDataDir!, "*.bsd", SearchOption.AllDirectories);
-            Assert.NotEmpty(bsdFiles);
-
-            // Verify BSD magic header in each file.
-            foreach (var bsdFile in bsdFiles)
-            {
-                var header = await File.ReadAllBytesAsync(bsdFile);
-                Assert.True(header.Length >= 4);
-                Assert.Equal(0x42, header[0]); // 'B'
-                Assert.Equal(0x53, header[1]); // 'S'
-                Assert.Equal(0x44, header[2]); // 'D'
-                Assert.Equal(0x00, header[3]); // null
-            }
+            Assert.Empty(bsdFiles);
         }
         finally
         {
@@ -12430,7 +12426,7 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithDefaultModules_WritesBsdForLowAndHighWeight()
+    public async Task ConvertAsync_WithDefaultModules_DoesNotWriteBsdWeightVariants()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -12449,10 +12445,7 @@ public sealed class BsdSliderDataTests
             Assert.NotNull(shapeDataDir);
 
             var bsdFiles = Directory.GetFiles(shapeDataDir!, "*.bsd", SearchOption.AllDirectories).Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            // Expect both low-weight (e.g. "Belly.bsd") and high-weight (e.g. "Belly_1.bsd") files.
-            Assert.True(bsdFiles.Any(f => !f!.EndsWith("_1.bsd", StringComparison.OrdinalIgnoreCase)), "Expected low-weight .bsd files.");
-            Assert.True(bsdFiles.Any(f => f!.EndsWith("_1.bsd", StringComparison.OrdinalIgnoreCase)), "Expected high-weight _1.bsd files.");
+            Assert.Empty(bsdFiles);
         }
         finally
         {
@@ -12461,7 +12454,7 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithDefaultModules_BsdFilesContainVertexDeltaPayload()
+    public async Task ConvertAsync_WithDefaultModules_OsdFileContainsSliderDeltaPayload()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -12475,19 +12468,10 @@ public sealed class BsdSliderDataTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
-            var bsdFile = Directory.GetFiles(outputDirectory, "*.bsd", SearchOption.AllDirectories).First();
-            var bytes = await File.ReadAllBytesAsync(bsdFile);
-
-            var nameLengthOffset = 7;
-            var sliderNameLength = BitConverter.ToUInt16(bytes, nameLengthOffset);
-            var vertexCountOffset = nameLengthOffset + sizeof(ushort) + sliderNameLength;
-            var vertexCount = BitConverter.ToUInt32(bytes, vertexCountOffset);
-            var deltaOffset = vertexCountOffset + sizeof(uint);
-            var expectedDeltaBytes = checked((int)vertexCount * 12);
-
-            Assert.True(vertexCount > 0, "BSD vertex count should be populated.");
-            Assert.Equal(deltaOffset + expectedDeltaBytes, bytes.Length);
-            Assert.Contains(bytes.AsSpan(deltaOffset, expectedDeltaBytes).ToArray(), b => b != 0);
+            var osdFile = Directory.GetFiles(outputDirectory, "*.osd", SearchOption.AllDirectories).First();
+            Assert.True(OsdMorphReader.TryRead(osdFile, out var payload) && payload is not null);
+            Assert.NotEmpty(payload!.Morphs);
+            Assert.Contains(payload.Morphs, static morph => morph.SparseDeltas.Count > 0);
         }
         finally
         {

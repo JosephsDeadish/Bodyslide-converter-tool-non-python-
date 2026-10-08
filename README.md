@@ -318,7 +318,7 @@ Issue #8 reporting/performance corrections:
   checked on this path, including cached lookups.
 - Root reports remain the authoritative diagnostics; exports no longer copy them
   into a sibling `.reports` folder. Existing folders from older runs are not removed.
-  Required OSP/OSD/BSD/TRI/ShapeData files are unaffected.
+  Required OSP/OSD/TRI/ShapeData files are unaffected.
 - ZIPs retain required diagnostic/install JSON, including dependency, quality,
   skeleton, physics and plugin evidence. Completed-after-packaging timing and
   inventory JSON, learning-cache state and legacy `.reports` copies stay outside
@@ -716,7 +716,7 @@ output/
 | `CalienteTools/BodySlide/SliderSets/<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) — written only when slider export is enabled |
 | `CalienteTools/BodySlide/SliderGroups/<ArmorName>.xml` | BodySlide group definitions so converted single-piece and batch outputs show up under predictable SlideSmith/body filters for search and Batch Build |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.nif` | BodySlide source-shape reference mesh; required for the slider editor to display the base mesh — written only when slider export is enabled |
-| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<Slider>.bsd` + `<Slider>_1.bsd` | Per-slider vertex-displacement morphs for BodySlide (low + high weight) — written only when slider export is enabled |
+| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.osd` | Sparse Outfit Studio morph payload for tooling that consumes native OSD records — written only when slider export is enabled |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.tri` + `<ArmorName>_1.tri` | TRI morph files for in-game RaceMenu morph interpolation — written only when slider export is enabled |
 | `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/`, `CalienteTools/`, and `SKSE/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
 | `fomod/info.xml` | FOMOD package metadata (name, version, author) |
@@ -773,7 +773,7 @@ Implemented from issue scope:
 - body detection reference comparison now scores body-reference asset names (`*.tri`, `*.osp`, reference mesh names) against known body templates as additional evidence
 - body detection UV-signature evidence now samples mesh UV coverage/aspect ranges from readable NIF geometry and factors it into confidence scoring (`uv:u=... ,v=...`)
 - mesh analysis, cage/strategy stages, weight transfer, morph generation, partition rebuild, clipping detect/correct, physics configs
-- plugin scan, texture summary (6 DDS categories), vanilla armor lookup (105+ entries across base game + Dawnguard/Dragonborn DLC), voxel collision pass, BodySlide OSP output, BSD/TRI slider data, learning cache reuse
+- plugin scan, texture summary (6 DDS categories), vanilla armor lookup (105+ entries across base game + Dawnguard/Dragonborn DLC), voxel collision pass, BodySlide OSP output, OSD/TRI slider data, learning cache reuse
 - automatic CI builds with Linux/Windows executable zip artifacts uploaded in Actions for PR and merge testing (no release publishing)
 - FOMOD metadata output (`fomod/ModuleConfig.xml`, `fomod/info.xml`)
 - **output `.nif` file(s)** written to the output directory; `_0`/`_1` weight variant pairs detected and written as matched pairs
@@ -821,7 +821,7 @@ Implemented from issue scope:
 
 - **skeleton NIF parsing** — `BasicSkeletonMappingService` now reads any `skeleton*.nif` files from the armor's body reference list and parses their string table to extract actual bone names; the source skeleton label (`xpmsse-vanilla`, `xpmsse-physics`, or `fo4-biped`) is inferred from physics-marker bones (`NPC *Breast*`, `*Butt*`, `*Belly*`, `*Pec*`, `*Lat*`) and Bip01 prefixes, giving accurate bone-mapping reports in `skeleton-compatibility.json` without relying solely on hardcoded lists
 
-- **non-stub BodySlide morph payloads** — generated `.bsd` and `.tri` files now include populated vertex counts and deterministic per-vertex delta payloads for each slider/weight variant instead of header-only stub files, so exports are immediately consumable by BodySlide tooling
+- **BodySlide morph payloads** — generated `.tri` files contain low/high-weight morph payloads, while the generated `.osd` stores one native sparse record per slider. OSP data links and per-shape OSD deltas are not yet verified in BodySlide/Outfit Studio, so these files alone do not establish that a generated project can build.
 
 - **ARMO ground-model synthesis** — when an ARMO record has rewritten `MOD2`/`MOD3` world model paths but no `MODL` ground mesh subrecord, plugin rewrite now auto-appends `MODL` using the rewritten world model path so dropped-item world meshes stay aligned with converted armor outputs
 
