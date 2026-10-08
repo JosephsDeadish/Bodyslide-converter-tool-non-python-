@@ -29158,6 +29158,56 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void BuildPackageArtifactIssues_BlocksBodySlideProjectsWithoutShapeMappingsAndSliderDataLinks()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(
+                Path.Combine(sliderSetDirectory, "UnlinkedProject.osp"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <SliderSetInfo version="1">
+                  <SliderSet name="UnlinkedProject">
+                    <Slider name="Waist" zap="false" />
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "UnlinkedProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("UnlinkedProject", "CBBE", ["Waist"], "<SliderSetInfo/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            var issue = Assert.Single(issues, item => item.Code == "bodyslide-shape-data-links-missing");
+            Assert.Equal("high", issue.Severity);
+            Assert.Contains("no named <Shape> mapping", issue.Message, StringComparison.Ordinal);
+            Assert.Contains("slider 'Waist' has no non-empty <Data> link", issue.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void BuildPackageArtifactIssues_FlagsBodySlideSemanticMismatch()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

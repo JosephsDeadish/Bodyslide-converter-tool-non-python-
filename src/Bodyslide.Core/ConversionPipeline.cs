@@ -28034,6 +28034,57 @@ internal sealed class LocalExportService(
             Directory.Exists(directoryPath) &&
             Directory.EnumerateFiles(directoryPath, searchPattern).Any(HasNonEmptyFile);
 
+        static IReadOnlyList<string> ValidateBodySlideShapeAndDataLinks(string ospPath)
+        {
+            var problems = new List<string>();
+            if (!File.Exists(ospPath))
+            {
+                return problems;
+            }
+
+            try
+            {
+                var document = System.Xml.Linq.XDocument.Load(ospPath);
+                var sliderSets = document.Descendants()
+                    .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                foreach (var sliderSet in sliderSets)
+                {
+                    var setName = ((string?)sliderSet.Attribute("name"))?.Trim();
+                    setName = string.IsNullOrWhiteSpace(setName) ? "<unnamed>" : setName;
+                    var shapes = sliderSet.Elements()
+                        .Where(static element => string.Equals(element.Name.LocalName, "Shape", StringComparison.OrdinalIgnoreCase))
+                        .Where(static element => !string.IsNullOrWhiteSpace((string?)element.Attribute("name")))
+                        .ToArray();
+                    if (shapes.Length == 0)
+                    {
+                        problems.Add($"SliderSet '{setName}' has no named <Shape> mapping.");
+                    }
+
+                    foreach (var slider in sliderSet.Elements()
+                                 .Where(static element => string.Equals(element.Name.LocalName, "Slider", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var sliderName = ((string?)slider.Attribute("name"))?.Trim();
+                        sliderName = string.IsNullOrWhiteSpace(sliderName) ? "<unnamed>" : sliderName;
+                        var hasDataLink = slider.Elements()
+                            .Any(static element =>
+                                string.Equals(element.Name.LocalName, "Data", StringComparison.OrdinalIgnoreCase) &&
+                                !string.IsNullOrWhiteSpace(element.Value));
+                        if (!hasDataLink)
+                        {
+                            problems.Add($"SliderSet '{setName}' slider '{sliderName}' has no non-empty <Data> link.");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+            {
+                problems.Add($"OSP shape/data-link preflight could not parse the project: {ex.Message}");
+            }
+
+            return problems;
+        }
+
         bool ContainsXmlAttributeValue(System.Xml.Linq.XDocument document, string attributeName, string value) =>
             document.Descendants()
                 .Where(element => element.Name.LocalName.Equals("folder", StringComparison.OrdinalIgnoreCase) ||
@@ -29097,6 +29148,15 @@ internal sealed class LocalExportService(
                     "bodyslide-semantic-mismatch",
                     "medium",
                     $"BodySlide project '{bodySlideProject.ProjectName}' has inconsistent OSP/ShapeData content: {string.Join(" | ", semanticProblems.Take(3))}"));
+            }
+
+            var linkProblems = ValidateBodySlideShapeAndDataLinks(ospPath);
+            if (linkProblems.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "bodyslide-shape-data-links-missing",
+                    "high",
+                    $"BodySlide project '{bodySlideProject.ProjectName}' is not build-ready: {string.Join(" | ", linkProblems.Take(4))}"));
             }
         }
 
