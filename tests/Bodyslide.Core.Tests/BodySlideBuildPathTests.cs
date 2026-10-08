@@ -35,6 +35,7 @@ public sealed class BodySlideBuildPathTests
                 ["mesh.nif"] = shapes
             },
             new Dictionary<string, double>());
+        Assert.Equal(2, result.SyntheticMorphRecordCount);
         var document = XDocument.Parse(result.OspXml);
         var sliderSet = Assert.Single(document.Descendants("SliderSet"));
         var ospShapes = sliderSet.Elements("Shape").ToArray();

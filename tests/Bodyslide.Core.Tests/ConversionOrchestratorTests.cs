@@ -12424,7 +12424,7 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithDefaultModules_OsdFileContainsSliderDeltaPayload()
+    public async Task ConvertAsync_WithUnreadableNifDoesNotEmitUnmappedOsdDeltas()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -12438,10 +12438,7 @@ public sealed class BsdSliderDataTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
-            var osdFile = Directory.GetFiles(outputDirectory, "*.osd", SearchOption.AllDirectories).First();
-            Assert.True(OsdMorphReader.TryRead(osdFile, out var payload) && payload is not null);
-            Assert.NotEmpty(payload!.Morphs);
-            Assert.Contains(payload.Morphs, static morph => morph.SparseDeltas.Count > 0);
+            Assert.Empty(Directory.GetFiles(outputDirectory, "*.osd", SearchOption.AllDirectories));
         }
         finally
         {
@@ -17066,9 +17063,10 @@ public sealed class RealisticModPackFixtureTests
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
             Assert.True(Directory.Exists(shapeDataDirectory));
             Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
-            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.osd", SearchOption.AllDirectories));
+            Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.osd", SearchOption.AllDirectories));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-nif-shape-layout-unsupported\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("target-body-template.slidesmith-body.json", qualityJson, StringComparison.OrdinalIgnoreCase);
@@ -17110,8 +17108,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(Directory.Exists(shapeDataDirectory));
             Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
             Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.osd", SearchOption.AllDirectories));
-
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-osd-payload-unavailable\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
         }
@@ -18445,8 +18443,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(Directory.Exists(shapeDataDirectory));
             Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
             Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.osd", SearchOption.AllDirectories));
-
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-osd-payload-unavailable\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("target-body-template.slidesmith-body.json", qualityJson, StringComparison.OrdinalIgnoreCase);
@@ -18814,16 +18812,9 @@ public sealed class RealisticModPackFixtureTests
             var osdPaths = Directory.GetFiles(shapeDataProjectDirectory, "*.osd", SearchOption.TopDirectoryOnly);
             var triPaths = Directory.GetFiles(shapeDataProjectDirectory, "*.tri", SearchOption.TopDirectoryOnly);
             var nifPaths = Directory.GetFiles(shapeDataProjectDirectory, "*.nif", SearchOption.TopDirectoryOnly);
-            Assert.NotEmpty(osdPaths);
+            Assert.Empty(osdPaths);
             Assert.NotEmpty(triPaths);
             Assert.NotEmpty(nifPaths);
-
-            foreach (var osdPath in osdPaths)
-            {
-                Assert.True(OsdMorphReader.TryRead(osdPath, out var osdPayload));
-                Assert.NotNull(osdPayload);
-                Assert.NotEmpty(osdPayload!.Morphs);
-            }
 
             var triPayloads = triPaths
                 .Select(path =>
@@ -18837,7 +18828,7 @@ public sealed class RealisticModPackFixtureTests
                 sliderNames.Contains(sliderName, StringComparer.OrdinalIgnoreCase));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
-            Assert.DoesNotContain("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"Code\": \"bodyslide-nif-shape-layout-unsupported\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -30241,16 +30232,7 @@ public sealed class OutputCompletenessTests
             var lowTriPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}TestProject.tri", StringComparison.OrdinalIgnoreCase));
             var highTriPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}TestProject_1.tri", StringComparison.OrdinalIgnoreCase));
 
-            var osdPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}TestProject.osd", StringComparison.OrdinalIgnoreCase));
-            Assert.True(OsdMorphReader.TryRead(await File.ReadAllBytesAsync(osdPath), out var osdPayload));
-            var osdMorph = Assert.Single(osdPayload!.Morphs);
-            Assert.Equal("Belly", osdMorph.Name);
-            var osdDeltas = new (float X, float Y, float Z)[lowDeltas.Length];
-            foreach (var (index, x, y, z) in osdMorph.SparseDeltas)
-            {
-                osdDeltas[index] = (x, y, z);
-            }
-            AssertDeltasEqual(lowDeltas, osdDeltas);
+            Assert.DoesNotContain(files, path => path.EndsWith(".osd", StringComparison.OrdinalIgnoreCase));
 
             Assert.True(TriMorphReader.TryRead(await File.ReadAllBytesAsync(lowTriPath), out var lowTriPayload));
             Assert.NotNull(lowTriPayload);
@@ -30881,12 +30863,7 @@ public sealed class OutputCompletenessTests
                 detected, skel, null, voxel,
                 CancellationToken.None);
 
-            var osdPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}TestProject.osd", StringComparison.OrdinalIgnoreCase));
-            Assert.True(OsdMorphReader.TryRead(await File.ReadAllBytesAsync(osdPath), out var osdPayload));
-            var osdDeltas = Assert.Single(osdPayload!.Morphs).SparseDeltas;
-            Assert.Equal(2, osdDeltas.Count);
-            Assert.Equal(0.125f, osdDeltas[0].X, 3);
-            Assert.Equal(0.125f, osdDeltas[1].X, 3);
+            Assert.DoesNotContain(files, path => path.EndsWith(".osd", StringComparison.OrdinalIgnoreCase));
 
             var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
             Assert.Contains("\"Code\": \"synthetic-morph-fallback\"", qualityJson);

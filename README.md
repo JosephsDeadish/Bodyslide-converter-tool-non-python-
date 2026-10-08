@@ -734,9 +734,8 @@ output/
       SliderGroups/
         <ArmorName>.xml          ← BodySlide batch-build/search groups (when slider export is enabled)
       ShapeData/<ArmorName>/
-        <ArmorName>.nif          ← BodySlide source-shape reference mesh (when enabled)
-        <Slider>.bsd             ← low-weight slider morph (one per slider, when enabled)
-        <Slider>_1.bsd           ← high-weight slider morph (one per slider, when enabled)
+        <ArmorName>.nif          ← BodySlide source-shape mesh (when enabled)
+        <ArmorName>.osd          ← per-shape sparse slider payload, only for supported NIFs
         <ArmorName>.tri          ← low-weight TRI morph for RaceMenu (when enabled)
         <ArmorName>_1.tri        ← high-weight TRI morph (when enabled)
   textures/...                   ← source textures (preserved relative paths)
@@ -768,7 +767,7 @@ output/
 | `CalienteTools/BodySlide/SliderSets/<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) — written only when slider export is enabled |
 | `CalienteTools/BodySlide/SliderGroups/<ArmorName>.xml` | BodySlide group definitions so converted single-piece and batch outputs show up under predictable SlideSmith/body filters for search and Batch Build |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.nif` | BodySlide source-shape reference mesh; required for the slider editor to display the base mesh — written only when slider export is enabled |
-| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.osd` | Sparse Outfit Studio morph payload for tooling that consumes native OSD records — written only when slider export is enabled |
+| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>[_setN].osd` | Native sparse Outfit Studio records linked per shape/slider from the OSP — emitted only when named shapes can be read and fit OSD's 16-bit limits |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.tri` + `<ArmorName>_1.tri` | TRI morph files for in-game RaceMenu morph interpolation — written only when slider export is enabled |
 | `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/`, `CalienteTools/`, and `SKSE/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
 | `fomod/info.xml` | FOMOD package metadata (name, version, author) |
@@ -873,7 +872,7 @@ Implemented from issue scope:
 
 - **skeleton NIF parsing** — `BasicSkeletonMappingService` now reads any `skeleton*.nif` files from the armor's body reference list and parses their string table to extract actual bone names; the source skeleton label (`xpmsse-vanilla`, `xpmsse-physics`, or `fo4-biped`) is inferred from physics-marker bones (`NPC *Breast*`, `*Butt*`, `*Belly*`, `*Pec*`, `*Lat*`) and Bip01 prefixes, giving accurate bone-mapping reports in `skeleton-compatibility.json` without relying solely on hardcoded lists
 
-- **BodySlide morph payloads** — generated `.tri` files contain low/high-weight morph payloads, while the generated `.osd` stores one sparse record per slider. The OSD writer now withholds payloads that exceed its supported 16-bit vertex/index/count or name-length limits rather than clamping values; validation marks a missing OSD payload high-risk. Package validation also marks projects high-risk when an OSP lacks named `<Shape>` mappings, a non-empty per-slider `<Data>` link, or a supported NIF shape layout. This structural check does not yet resolve OSD record names/paths or prove vertex indices target the mapped NIF shape; generated projects remain unverified until shape-aware export and a real BodySlide/Outfit Studio build check succeed.
+- **BodySlide morph payloads** — generated `.tri` files contain low/high-weight RaceMenu payloads. For supported unskinned Skyrim SSE `BSTriShape` NIFs, each OSP maps named shapes to one OSD record per regular slider and the validator resolves the OSD file, record name, and target. Exact-count source deltas are reused only for single-shape meshes; other OSD records use synthetic/retargeted fallback and are flagged for review. Multi-shape source morph transfer, zap target semantics, and other NIF layouts remain unsupported or unverified. A real BodySlide/Outfit Studio build check is still required before generated projects can be treated as verified.
 
 - **ARMO ground-model synthesis** — when an ARMO record has rewritten `MOD2`/`MOD3` world model paths but no `MODL` ground mesh subrecord, plugin rewrite now auto-appends `MODL` using the rewritten world model path so dropped-item world meshes stay aligned with converted armor outputs
 

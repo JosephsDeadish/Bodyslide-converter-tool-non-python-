@@ -1344,6 +1344,12 @@ internal static class ConversionValidationGuidance
                 "Open CalienteTools/BodySlide/ShapeData and confirm the generated reference NIF is present and opens in Outfit Studio, then re-run before release so BodySlide users can preview the outfit correctly.",
             "missing-bodyslide-slider-payload" =>
                 "Inspect CalienteTools/BodySlide/ShapeData for the expected TRI/OSD slider payloads, then rebuild the output before release so BodySlide users do not receive a partial morph package.",
+            "bodyslide-multishape-morph-fallback" =>
+                "Review each generated shape's OSD morphs in Outfit Studio and replace synthetic fallback deltas with shape-matched source morphs before treating the multi-shape project as production-ready.",
+            "bodyslide-synthetic-morph-fallback" =>
+                "Review OSD records reported as synthetic or retargeted in Outfit Studio; prefer exact-count source morph payloads and do not treat fallback deformations as authored morph transfer.",
+            "bodyslide-shape-data-links-missing" =>
+                "Open the generated OSP and verify every supported Shape/Slider/Data reference resolves to its OSD record; unsupported NIF layouts and zap semantics require manual review.",
             "bodyslide-semantic-mismatch" =>
                 "Open the generated BodySlide OSP and ShapeData, then verify the OSP slider list, referenced source NIFs, and TRI/OSD payload slider coverage all agree before shipping the project to BodySlide or Outfit Studio users.",
             "missing-xedit-script" =>
@@ -22362,6 +22368,7 @@ internal sealed class LocalExportService(
 
         var outputFiles = new List<string>();
         MorphTransferContext? morphTransferContext = null;
+        var syntheticBodySlideOsdMorphCount = 0;
 
         var manifest = new
         {
@@ -22725,6 +22732,12 @@ internal sealed class LocalExportService(
                 shapeDataBySourceFile,
                 mesh.RegionalMorphing,
                 morphs.ReusableSourceMorphPayloads);
+            syntheticBodySlideOsdMorphCount = linkedShapeData.SyntheticMorphRecordCount;
+            if (syntheticBodySlideOsdMorphCount > 0)
+            {
+                qualityWarnings.Add($"BodySlide OSD morph fallback records={syntheticBodySlideOsdMorphCount} (synthetic or retargeted rather than exact-count source data)");
+            }
+
             await File.WriteAllTextAsync(ospPath, linkedShapeData.OspXml, cancellationToken);
             foreach (var (fileName, bytes) in linkedShapeData.OsdFiles)
             {
@@ -29307,7 +29320,36 @@ internal sealed class LocalExportService(
                 issues.Add(new ConversionValidationIssue(
                     "bodyslide-osd-payload-unavailable",
                     "high",
-                    $"BodySlide OSD data for '{bodySlideProject.ProjectName}' was withheld because its vertex/index/count or slider-name data exceeds the supported 16-bit record limits."));
+                    $"BodySlide OSD data for '{bodySlideProject.ProjectName}' was withheld because no supported shape-linked payload could be built within NIF and OSD limits."));
+            }
+
+            if (HasAnyFile(shapeDataDirectory, "*.osd") && File.Exists(ospPath))
+            {
+                try
+                {
+                    var hasMultiShapeSets = System.Xml.Linq.XDocument.Load(ospPath).Descendants()
+                        .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase))
+                        .Any(static sliderSet => sliderSet.Elements()
+                            .Count(static element => string.Equals(element.Name.LocalName, "Shape", StringComparison.OrdinalIgnoreCase)) > 1);
+                    if (hasMultiShapeSets)
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "bodyslide-multishape-morph-fallback",
+                            "medium",
+                            $"BodySlide project '{bodySlideProject.ProjectName}' has per-shape links, but multi-shape OSD deltas use synthetic fallback until shape-matched source morphs are available."));
+                    }
+                }
+
+                if (syntheticBodySlideOsdMorphCount > 0)
+                {
+                    issues.Add(new ConversionValidationIssue(
+                        "bodyslide-synthetic-morph-fallback",
+                        "medium",
+                        $"BodySlide project '{bodySlideProject.ProjectName}' contains {syntheticBodySlideOsdMorphCount} OSD morph records without an exact-count source payload; review their deformations in Outfit Studio."));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+                {
+                }
             }
 
             var semanticProblems = ValidateBodySlideSemanticConsistency(ospPath, sliderGroupsPath, shapeDataDirectory);
@@ -40050,7 +40092,8 @@ internal sealed class LocalExportService(
 
     internal sealed record BodySlideShapeDataExport(
         string OspXml,
-        IReadOnlyList<(string FileName, byte[] Bytes)> OsdFiles);
+        IReadOnlyList<(string FileName, byte[] Bytes)> OsdFiles,
+        int SyntheticMorphRecordCount);
 
     internal static BodySlideShapeDataExport BuildShapeLinkedOsdExport(
         string ospXml,
@@ -40064,6 +40107,7 @@ internal sealed class LocalExportService(
             .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase))
             .ToArray();
         var osdFiles = new List<(string FileName, byte[] Bytes)>();
+        var syntheticMorphRecordCount = 0;
         for (var setIndex = 0; setIndex < sliderSets.Length; setIndex++)
         {
             var sliderSet = sliderSets[setIndex];
@@ -40106,7 +40150,9 @@ internal sealed class LocalExportService(
                 shapes,
                 sliders!,
                 regionalMorphing,
-                shapes.Count == 1 ? reusableSourceMorphPayloads : null);
+                shapes.Count == 1 ? reusableSourceMorphPayloads : null,
+                out var setSyntheticMorphRecordCount);
+            syntheticMorphRecordCount += setSyntheticMorphRecordCount;
             if (bytes is null)
             {
                 continue;
@@ -40143,15 +40189,17 @@ internal sealed class LocalExportService(
 
         var xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" + Environment.NewLine
             + document.ToString(System.Xml.Linq.SaveOptions.None);
-        return new BodySlideShapeDataExport(xml, osdFiles);
+        return new BodySlideShapeDataExport(xml, osdFiles, syntheticMorphRecordCount);
     }
 
     private static byte[]? BuildShapeOsdBytes(
         IReadOnlyList<SkyrimSseNifShape> shapes,
         IReadOnlyList<string> sliders,
         IReadOnlyDictionary<string, double> regionalMorphing,
-        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads)
+        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
+        out int syntheticMorphRecordCount)
     {
+        syntheticMorphRecordCount = 0;
         if (shapes.Count == 0 || sliders.Count == 0 ||
             (long)shapes.Count * sliders.Count > ushort.MaxValue ||
             shapes.Any(static shape => !IsOsdVertexCountRepresentable(shape.Vertices.Count)))
@@ -40171,6 +40219,16 @@ internal sealed class LocalExportService(
             for (var sliderIndex = 0; sliderIndex < sliders.Count; sliderIndex++)
             {
                 var name = $"s{shapeIndex}_m{sliderIndex}";
+                var hasExactSourcePayload =
+                    reusableSourceMorphPayloads?.TryGetValue(sliders[sliderIndex], out var variants) == true &&
+                    variants.LowWeight is { } lowWeightPayload &&
+                    lowWeightPayload.VertexCount == shape.Vertices.Count &&
+                    lowWeightPayload.Deltas.Count == shape.Vertices.Count;
+                if (!hasExactSourcePayload)
+                {
+                    syntheticMorphRecordCount++;
+                }
+
                 var deltas = ResolveMorphDeltas(
                     sliders[sliderIndex],
                     isHighWeight: false,
