@@ -40226,7 +40226,6 @@ internal sealed class LocalExportService(
 
             if (shapes.Length == 0)
             {
-                problems.Add($"OSP SliderSet '{setName}' has sliders but no readable Shape targets for OSD data.");
                 continue;
             }
 
@@ -44554,7 +44553,10 @@ internal sealed class LocalExportService(
         }
 
         var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 8);
-        var followUpActions = ConversionValidationGuidance.BuildFollowUpActions(validationSummary, targetBody);
+        var followUpActions = ConversionValidationGuidance.BuildFollowUpActions(
+            validationSummary,
+            targetBody,
+            maxActions: 8);
         var gateLabel = ConversionValidationPresentation.GetGateLabel(validationSummary.Status);
         var dispositionMessage = ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status);
         var statusColor = validationSummary.Status switch

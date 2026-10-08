@@ -112,10 +112,13 @@ claim:
 ### External BodySlide and Skyrim build gate
 
 Do not treat generated OSP/ShapeData as build-ready based on the automated tests
-alone. In particular, every non-zap slider needs a `<Data>` link whose `target`
-maps to a real source-NIF shape and whose OSD record uses the matching data name.
-The current generated OSP does not yet provide these per-shape links, so stop at
-the preflight below rather than counting an unchanged-mesh build as a pass.
+alone. For supported Skyrim SE unskinned `BSTriShape` inputs, generation now
+emits per-shape `<Shape>` mappings and one local OSD `<Data>` link per non-zap
+slider and target. The output preflight verifies the link targets, file paths,
+and record names. Unsupported NIF layouts and OSD ranges that cannot be encoded
+remain unlinked and must be treated as review-required, not guessed or counted
+as a successful build. Synthetic or retargeted OSD morph records are reported
+as fallback data, not recovered source morphs.
 
 On a Windows test host:
 
@@ -124,7 +127,7 @@ On a Windows test host:
    own enabled test mod. Keep the profile's saves and Overwrite isolated from
    the normal profile.
 2. Before building, inspect each generated OSP: every non-zap `<Slider>` must
-   contain one or more `<Data>` entries; each entry's `target` must match a
+   contain one `<Data>` entry per declared target shape; each entry's `target` must match a
    declared `<Shape target="...">`; and the final component of its text path
    must equal its `name` and identify a record in the referenced OSD. Confirm
    all referenced ShapeData files resolve from the installed test mod through
