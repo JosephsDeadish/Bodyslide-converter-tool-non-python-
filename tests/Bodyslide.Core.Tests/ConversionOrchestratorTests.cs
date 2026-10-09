@@ -5712,14 +5712,7 @@ public sealed class ConversionOrchestratorTests
             var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
             var analysis = new MeshAnalysis("cloth", false, 1);
             var mesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
-            var morphs = new MorphSet(
-                "low",
-                "high",
-                true,
-                SourceAssetSupport: new SourceAssetSupportMetrics(false, false, false, false, false)
-                {
-                    UnsupportedOspSemantics = ["inverted-sliders"]
-                });
+            var morphs = new MorphSet("low", "high", true);
             var physics = new PhysicsConfig("smp+cbpc");
             var clipping = new ClippingReport(false, [], []);
             var correction = new CorrectionResult(false, "not-required");
@@ -6013,7 +6006,14 @@ public sealed class ConversionOrchestratorTests
         var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
         var analysis = new MeshAnalysis("cloth", false, 1);
         var mesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
-        var morphs = new MorphSet("low", "high", true);
+        var morphs = new MorphSet(
+            "low",
+            "high",
+            true,
+            SourceAssetSupport: new SourceAssetSupportMetrics(false, false, false, false, false)
+            {
+                UnsupportedOspSemantics = ["inverted-sliders"]
+            });
         var payloadReuse = new MorphPayloadReuseSummary(0, 0, 0);
         var physics = new PhysicsConfig("none", SmpConfigXml: string.Empty);
         var clipping = new ClippingReport(false, [], []);

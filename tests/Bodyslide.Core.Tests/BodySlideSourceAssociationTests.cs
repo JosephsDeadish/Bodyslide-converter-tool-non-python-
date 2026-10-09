@@ -139,6 +139,7 @@ public sealed class BodySlideSourceAssociationTests
                     "source-slider-data-links",
                     "unknown-slider-set-elements",
                     "uv-slider-data",
+                    "weight-variant-output-mode-rebuilt",
                     "zap-target-semantics"
                 },
                 result.SourceAssetSupport!.UnsupportedOspSemantics);
@@ -147,7 +148,7 @@ public sealed class BodySlideSourceAssociationTests
     }
 
     [Fact]
-    public async Task MatchedOspDoesNotReportDefaultSettingsAsUnsupported()
+    public async Task MatchedOspReportsWeightVariantModeAsRebuilt()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -171,7 +172,9 @@ public sealed class BodySlideSourceAssociationTests
             var result = await BodySlideSourceProjectSupport.ResolveAsync(
                 new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
 
-            Assert.Empty(result.SourceAssetSupport!.UnsupportedOspSemantics);
+            Assert.Equal(
+                ["weight-variant-output-mode-rebuilt"],
+                result.SourceAssetSupport!.UnsupportedOspSemantics);
         }
         finally { Directory.Delete(root, true); }
     }
