@@ -17147,7 +17147,7 @@ public sealed class RealisticModPackFixtureTests
 
             using var qualityJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json")));
             Assert.Contains(
-                qualityJson.RootElement.GetProperty("Validation").GetProperty("Issues").EnumerateArray(),
+                qualityJson.RootElement.GetProperty("ValidationSummary").GetProperty("Issues").EnumerateArray(),
                 issue => issue.GetProperty("Code").GetString() == "bodyslide-tri-payload-withheld");
             Assert.True(qualityJson.RootElement.GetProperty("SkeletonRemapCertainty").GetProperty("Confidence").GetDouble() > 0d);
             Assert.Contains(
@@ -18415,9 +18415,10 @@ public sealed class RealisticModPackFixtureTests
 
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
             Assert.True(Directory.Exists(shapeDataDirectory));
-            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
+            Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
             Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.osd", SearchOption.AllDirectories));
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
             Assert.Contains("\"Code\": \"bodyslide-osd-payload-unavailable\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
@@ -30119,7 +30120,7 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
-    public async Task ExportAsync_ReusesSourceMorphPayloads_WhenVertexCountsMatch()
+    public async Task ExportAsync_WithholdsSourceMorphPayloads_WhenShapeOrderIsUnverified()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmpDir);
@@ -30176,24 +30177,13 @@ public sealed class OutputCompletenessTests
                 detected, skel, null, voxel,
                 CancellationToken.None);
 
-            var lowTriPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}TestProject.tri", StringComparison.OrdinalIgnoreCase));
-            var highTriPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}TestProject_1.tri", StringComparison.OrdinalIgnoreCase));
-
+            Assert.DoesNotContain(files, path => path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(files, path => path.EndsWith(".osd", StringComparison.OrdinalIgnoreCase));
 
-            Assert.True(TriMorphReader.TryRead(await File.ReadAllBytesAsync(lowTriPath), out var lowTriPayload));
-            Assert.NotNull(lowTriPayload);
-            Assert.Equal("Belly", lowTriPayload!.Morphs.Single().Name);
-            AssertDeltasEqual(lowDeltas, lowTriPayload.Morphs.Single().Deltas);
-
-            Assert.True(TriMorphReader.TryRead(await File.ReadAllBytesAsync(highTriPath), out var highTriPayload));
-            Assert.NotNull(highTriPayload);
-            Assert.Equal("Belly_1", highTriPayload!.Morphs.Single().Name);
-            AssertDeltasEqual(highDeltas, highTriPayload.Morphs.Single().Deltas);
-
             var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
-            Assert.Contains("\"ReusedVariantCount\": 2", qualityJson);
+            Assert.Contains("\"ReusedVariantCount\": 0", qualityJson);
             Assert.Contains("\"FallbackVariantCount\": 0", qualityJson);
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson);
         }
         finally
         {
@@ -30764,7 +30754,7 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
-    public async Task ExportAsync_SourcePayloadVertexMismatch_SurfacesSyntheticFallback()
+    public async Task ExportAsync_SourcePayloadVertexMismatch_DoesNotEmitSyntheticTriFallback()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmpDir);
@@ -30813,14 +30803,10 @@ public sealed class OutputCompletenessTests
             Assert.DoesNotContain(files, path => path.EndsWith(".osd", StringComparison.OrdinalIgnoreCase));
 
             var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
-            Assert.Contains("\"Code\": \"synthetic-morph-fallback\"", qualityJson);
-            Assert.Contains("\"RequestedVariantCount\": 2", qualityJson);
+            Assert.DoesNotContain(files, path => path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase));
             Assert.Contains("\"ReusedVariantCount\": 0", qualityJson);
-            Assert.Contains("\"FallbackVariantCount\": 1", qualityJson);
-            Assert.Contains("\"RetargetedVariantCount\": 1", qualityJson);
-            Assert.Contains("\"ExtremelyAdaptedVariantCount\": 1", qualityJson);
-            Assert.Contains("\"Code\": \"retargeted-morph-reuse\"", qualityJson);
-            Assert.Contains("\"Code\": \"extreme-topology-adaptation\"", qualityJson);
+            Assert.Contains("\"FallbackVariantCount\": 0", qualityJson);
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson);
         }
         finally
         {

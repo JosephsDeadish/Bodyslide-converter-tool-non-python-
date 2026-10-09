@@ -99,8 +99,10 @@ public sealed class CompactDiagnosticsTests
             var fullIssues = LocalExportService.BuildPackageArtifactIssues(full.Request, armor,
                 full.Request.OutputDirectory!, full.Files, project, plugins);
             Assert.Equal(fullIssues.Select(issue => issue.Code).Order(), compactIssues.Select(issue => issue.Code).Order());
+            Assert.Contains(compactIssues, issue => issue.Code == "missing-bodyslide-slider-payload");
             Assert.DoesNotContain(compactIssues, issue =>
-                issue.Code.StartsWith("missing-", StringComparison.Ordinal) ||
+                (issue.Code.StartsWith("missing-", StringComparison.Ordinal) &&
+                 issue.Code != "missing-bodyslide-slider-payload") ||
                 issue.Code.StartsWith("zip-missing-", StringComparison.Ordinal) ||
                 issue.Code == "invalid-package-artifact");
 
