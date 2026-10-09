@@ -44666,9 +44666,14 @@ internal sealed class LocalExportService(
 
     private static string BuildValidationPreviewPanelHtml(
         ConversionValidationSummary? validationSummary,
+        string targetBody) =>
+        BuildValidationPreviewPanelHtmlCore(validationSummary, targetBody, maxIssues: 8, maxActions: 8);
+
+    private static string BuildValidationPreviewPanelHtmlCore(
+        ConversionValidationSummary? validationSummary,
         string targetBody,
-        int maxIssues = 8,
-        int maxActions = 8)
+        int maxIssues,
+        int maxActions)
     {
         if (validationSummary is null)
         {
@@ -45506,7 +45511,7 @@ internal sealed class LocalExportService(
             <p>Compact diagnostics: interactive mesh payloads and duplicated report tables are omitted.
             This static regional preview is not geometry or runtime proof. Inspect the exported meshes in Outfit Studio or NifSkope and validate in-game before release.</p>
             <img src="preview.svg" alt="Static regional conversion preview">
-            {{BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody, maxIssues: 4, maxActions: 4)}}
+            {{BuildValidationPreviewPanelHtmlCore(validationSummary, request.TargetBody, maxIssues: 4, maxActions: 4)}}
             <h2>Review and install</h2>
             <ul>
             <li><a href="conversion-quality.json">Full quality gate, issues and readiness</a></li>
