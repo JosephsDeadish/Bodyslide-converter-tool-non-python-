@@ -60,6 +60,37 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void WriterTransformsEveryParsedShapeWithoutChangingShapeTopology()
+    {
+        var source = CreateNif(
+        [
+            new TestShape("Body", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)]),
+            new TestShape("BodyDetail", [(0f, 2f, 1f), (24f, 2f, 9f), (0f, 18f, 18f)])
+        ]);
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        var sourceShapes = SkyrimSseNifShapeReader.Read(source).Shapes;
+        var transformedShapes = SkyrimSseNifShapeReader.Read(transformed).Shapes;
+        Assert.Equal(sourceShapes.Select(static shape => shape.Name), transformedShapes.Select(static shape => shape.Name));
+        Assert.Equal(sourceShapes.Select(static shape => shape.TriangleIndices), transformedShapes.Select(static shape => shape.TriangleIndices));
+        for (var shapeIndex = 0; shapeIndex < sourceShapes.Count; shapeIndex++)
+        {
+            Assert.NotEqual(sourceShapes[shapeIndex].Vertices, transformedShapes[shapeIndex].Vertices);
+        }
+    }
+
+    [Fact]
     public void RejectsNonSseStreamProfile()
     {
         var result = SkyrimSseNifShapeReader.Read(CreateNif([new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])], streamVersion: 83));

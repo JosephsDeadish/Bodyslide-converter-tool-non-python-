@@ -25551,17 +25551,19 @@ internal sealed class LocalExportService(
         DeformationCage? deformationCage)
     {
         var parsedGeometry = SkyrimSseNifShapeReader.Read(sourceBytes);
-        if (parsedGeometry.Supported && parsedGeometry.Shapes.Count == 1)
+        if (parsedGeometry.Supported && parsedGeometry.Shapes.Count > 0)
         {
-            var shape = parsedGeometry.Shapes[0];
-            if (shape.VertexDataOffset >= 0 && shape.VertexStride >= 3 * sizeof(float))
+            var parsedVertexStreams = parsedGeometry.Shapes
+                .Select(static shape => (Offset: shape.VertexDataOffset, Count: shape.Vertices.Count, Stride: shape.VertexStride))
+                .ToArray();
+            if (parsedVertexStreams.All(static stream => stream.Offset >= 0 && stream.Count > 0 && stream.Stride >= 3 * sizeof(float)))
             {
                 return TryApplyNifInterleavedFloatVertexTransform(
                     sourceBytes,
                     sourcePath,
                     regionalMorphing,
                     deformationCage,
-                    (shape.VertexDataOffset, shape.Vertices.Count, shape.VertexStride));
+                    parsedVertexStreams);
             }
         }
 
@@ -25745,37 +25747,48 @@ internal sealed class LocalExportService(
         string? sourcePath,
         IReadOnlyDictionary<string, double> regionalMorphing,
         DeformationCage? deformationCage,
-        (int Offset, int Count, int Stride)? parsedVertexStream = null)
+        IReadOnlyList<(int Offset, int Count, int Stride)>? parsedVertexStreams = null)
     {
-        int vertexDataOffset;
-        int vertexCount;
-        int vertexStride;
-        if (parsedVertexStream is { } parsedStream)
+        IReadOnlyList<(int Offset, int Count, int Stride)> vertexStreams;
+        if (parsedVertexStreams is not null)
         {
-            vertexDataOffset = parsedStream.Offset;
-            vertexCount = parsedStream.Count;
-            vertexStride = parsedStream.Stride;
+            vertexStreams = parsedVertexStreams;
         }
-        else if (!NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(
-                     sourceBytes,
-                     out vertexDataOffset,
-                     out vertexCount,
-                     out vertexStride))
+        else
         {
-            return sourceBytes;
+            if (!NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(
+                    sourceBytes,
+                    out var vertexDataOffset,
+                    out var vertexCount,
+                    out var vertexStride))
+            {
+                return sourceBytes;
+            }
+
+            vertexStreams = [(vertexDataOffset, vertexCount, vertexStride)];
         }
 
-        if (vertexCount <= 0 || vertexStride < 12)
+        if (vertexStreams.Count == 0 || vertexStreams.Any(static stream => stream.Count <= 0 || stream.Stride < 12))
         {
             return sourceBytes;
         }
 
         var transformed = sourceBytes.ToArray();
-        var requiredBytes = (long)vertexCount * vertexStride;
-        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > transformed.Length)
+        var vertexOffsets = new List<int>();
+        foreach (var stream in vertexStreams)
         {
-            return sourceBytes;
+            var requiredBytes = (long)stream.Count * stream.Stride;
+            if (stream.Offset < 0 || stream.Offset + requiredBytes > transformed.Length)
+            {
+                return sourceBytes;
+            }
+
+            for (var index = 0; index < stream.Count; index++)
+            {
+                vertexOffsets.Add(checked(stream.Offset + (index * stream.Stride)));
+            }
         }
+        var vertexCount = vertexOffsets.Count;
 
         var minX = float.MaxValue;
         var maxX = float.MinValue;
@@ -25787,7 +25800,7 @@ internal sealed class LocalExportService(
         var rawVertices = new (float X, float Y, float Z)[vertexCount];
         for (var index = 0; index < vertexCount; index++)
         {
-            var offset = vertexDataOffset + (index * vertexStride);
+            var offset = vertexOffsets[index];
             var x = BitConverter.ToSingle(transformed, offset);
             var y = BitConverter.ToSingle(transformed, offset + 4);
             var z = BitConverter.ToSingle(transformed, offset + 8);
@@ -25813,7 +25826,7 @@ internal sealed class LocalExportService(
 
         for (var index = 0; index < vertexCount; index++)
         {
-            var offset = vertexDataOffset + (index * vertexStride);
+            var offset = vertexOffsets[index];
             var x = BitConverter.ToSingle(transformed, offset);
             var y = BitConverter.ToSingle(transformed, offset + 4);
             var z = BitConverter.ToSingle(transformed, offset + 8);
