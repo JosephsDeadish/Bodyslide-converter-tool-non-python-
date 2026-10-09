@@ -262,6 +262,7 @@ public sealed record SourceAssetSupportMetrics(
     public int SourceObservedSliderCount { get; init; }
     public string SliderDataProvenance { get; init; } = "unknown";
     public string SliderDataVerificationStatus { get; init; } = "not-validated";
+    public IReadOnlyList<string> UnsupportedOspSemantics { get; init; } = [];
 }
 public sealed record MorphPayloadReuseSummary(
     int RequestedVariantCount,
@@ -27589,6 +27590,15 @@ internal sealed class LocalExportService(
                 "bodyslide-osd-synthetic-morphs",
                 "medium",
                 $"Generated {syntheticBodySlideOsdMorphCount} synthetic BodySlide OSD morph record(s); these are not recovered or authored source morphs and have not been verified to produce the intended deformation."));
+        }
+
+        var unsupportedOspSemantics = morphs.SourceAssetSupport?.UnsupportedOspSemantics ?? [];
+        if (unsupportedOspSemantics.Count > 0)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "source-osp-semantics-not-preserved",
+                "medium",
+                $"Matched source OSP contains settings not reconstructed in the generated project: {string.Join(", ", unsupportedOspSemantics)}."));
         }
 
         if (TryBuildTargetBodySupportIssue(armor, request.TargetBody, physicsCompatibility.RequestedProfile, out var targetBodySupportIssue))

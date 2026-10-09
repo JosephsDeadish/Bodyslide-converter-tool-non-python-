@@ -81,6 +81,127 @@ internal static class BodySlideSourceProjectSupport
         {
             return resolution.Value.Value.WaitAsync(cancellationToken);
         }
+
+        private static IReadOnlyList<string> CollectUnsupportedOspSemantics(XElement sliderSet)
+        {
+            var semantics = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var slider in sliderSet.Descendants().Where(static element =>
+                         element.Name.LocalName.Equals("Slider", StringComparison.OrdinalIgnoreCase)))
+            {
+                var knownSliderAttributes = new HashSet<string>(
+                    ["name", "default", "small", "big", "invert", "zap", "uv"],
+                    StringComparer.OrdinalIgnoreCase);
+                if (slider.Attributes().Any(attribute => !knownSliderAttributes.Contains(attribute.Name.LocalName)))
+                {
+                    semantics.Add("slider-unknown-attributes");
+                }
+
+                if (slider.Elements().Any(static element =>
+                        element.Name.LocalName.Equals("Data", StringComparison.OrdinalIgnoreCase)))
+                {
+                    semantics.Add("source-slider-data-links");
+                }
+
+                if (new[] { "default", "small", "big" }.Any(attributeName =>
+                        double.TryParse(
+                            slider.Attribute(attributeName)?.Value,
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var value) && Math.Abs(value) > 0.000001d))
+                {
+                    semantics.Add("nonzero-slider-defaults");
+                }
+
+                if (IsTruthy(slider.Attribute("invert")?.Value))
+                {
+                    semantics.Add("inverted-sliders");
+                }
+
+                if (IsTruthy(slider.Attribute("uv")?.Value))
+                {
+                    semantics.Add("uv-slider-data");
+                }
+            }
+
+            if (sliderSet.Descendants().Any(static element =>
+                    element.Name.LocalName.Contains("Reference", StringComparison.OrdinalIgnoreCase)))
+            {
+                semantics.Add("source-reference-links");
+            }
+
+            if (sliderSet.Elements().Any(static element =>
+                    element.Name.LocalName.Equals("Shape", StringComparison.OrdinalIgnoreCase)))
+            {
+                semantics.Add("source-shape-mappings");
+            }
+
+            if (sliderSet.Descendants().Any(static element =>
+                    element.Name.LocalName.Contains("Zap", StringComparison.OrdinalIgnoreCase) &&
+                    !element.Name.LocalName.Equals("Slider", StringComparison.OrdinalIgnoreCase)))
+            {
+                semantics.Add("zap-target-semantics");
+            }
+
+            var dataFolders = sliderSet.Elements().Where(static element =>
+                element.Name.LocalName.Equals("DataFolder", StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (dataFolders.Length > 1 || dataFolders.Any(static element =>
+                    IsExternalDataFolder(element.Value)))
+            {
+                semantics.Add("external-data-folder");
+            }
+
+            var baseShape = sliderSet.Attribute("baseShape")?.Value;
+            if (!string.IsNullOrWhiteSpace(baseShape) &&
+                !baseShape.Equals("Base Shape", StringComparison.OrdinalIgnoreCase))
+            {
+                semantics.Add("custom-base-shape");
+            }
+
+            var bodySlideVersion = sliderSet.Attribute("bsversion")?.Value;
+            if (!string.IsNullOrWhiteSpace(bodySlideVersion) && !bodySlideVersion.Equals("20", StringComparison.Ordinal))
+            {
+                semantics.Add("source-osp-version");
+            }
+
+            if (sliderSet.DescendantsAndSelf().Any(static element =>
+                    element.Name.LocalName.Contains("Seam", StringComparison.OrdinalIgnoreCase) ||
+                    element.Name.LocalName.Contains("LockNormal", StringComparison.OrdinalIgnoreCase) ||
+                    element.Attributes().Any(attribute =>
+                        attribute.Name.LocalName.Contains("Seam", StringComparison.OrdinalIgnoreCase) ||
+                        attribute.Name.LocalName.Contains("LockNormal", StringComparison.OrdinalIgnoreCase))))
+            {
+                semantics.Add("seam-or-lock-normal-settings");
+            }
+
+            var supportedChildren = new HashSet<string>(
+                ["Slider", "OutputFile", "OutputPath", "DataFolder", "SourceFile", "Shape"],
+                StringComparer.OrdinalIgnoreCase);
+            if (sliderSet.Elements().Any(element => !supportedChildren.Contains(element.Name.LocalName)))
+            {
+                semantics.Add("unknown-slider-set-elements");
+            }
+
+            var outputFile = sliderSet.Elements().FirstOrDefault(static element =>
+                element.Name.LocalName.Equals("OutputFile", StringComparison.OrdinalIgnoreCase));
+            if (outputFile is not null &&
+                outputFile.Attributes().Any(static attribute =>
+                    !attribute.Name.LocalName.Equals("gender", StringComparison.OrdinalIgnoreCase) &&
+                    !attribute.Name.LocalName.Equals("GenWeights", StringComparison.OrdinalIgnoreCase)))
+            {
+                semantics.Add("output-options");
+            }
+
+            return semantics.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+
+        private static bool IsExternalDataFolder(string value)
+        {
+            var normalized = value.Trim().Replace('\\', '/');
+            return normalized.Length == 0 ||
+                   normalized.StartsWith('/', StringComparison.Ordinal) ||
+                   normalized.Contains(':') ||
+                   normalized.Split('/').Any(static segment => segment is "." or "..");
+        }
         return ResolveUncachedAsync(armor, targetBody, cancellationToken);
     }
 
@@ -1196,6 +1317,11 @@ internal static class BodySlideSourceProjectSupport
             var zapSliders = new List<SourceSliderCandidate>();
 
             var sets = document.Descendants("SliderSet").Where(set => MatchesOutput(set, meshFiles)).ToArray();
+            var unsupportedSemantics = sets
+                .SelectMany(CollectUnsupportedOspSemantics)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             var sliderElements = document.Descendants("SliderSet").Any()
                 ? sets.SelectMany(static set => set.Descendants("Slider"))
                 : document.Descendants("Slider");
@@ -1224,7 +1350,8 @@ internal static class BodySlideSourceProjectSupport
                 HasOsp: !document.Descendants("SliderSet").Any() || sets.Length > 0,
                 HasTriPayloads: false,
                 HasBsdPayloads: false,
-                HasOsdPayloads: false);
+                HasOsdPayloads: false,
+                UnsupportedOspSemantics: unsupportedSemantics);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
@@ -1804,7 +1931,8 @@ internal static class BodySlideSourceProjectSupport
         bool HasOsdPayloads,
         bool HasReferenceAssets = false,
         long DiscoveryMilliseconds = 0,
-        int DiscoveredFileCount = 0)
+        int DiscoveredFileCount = 0,
+        IReadOnlyList<string>? UnsupportedOspSemantics = null)
     {
         public SourceMorphQualityMetrics? SourceMorphQuality => BuildSourceMorphQuality(Sliders, ZapSliders);
 
@@ -1862,7 +1990,8 @@ internal static class BodySlideSourceProjectSupport
                     ? "parsed-not-version-validated"
                     : fallbackInference is not null
                         ? "inferred-not-externally-verified"
-                        : "not-observed"
+                        : "not-observed",
+                UnsupportedOspSemantics = UnsupportedOspSemantics ?? []
             };
         }
     }

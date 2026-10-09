@@ -5712,7 +5712,14 @@ public sealed class ConversionOrchestratorTests
             var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
             var analysis = new MeshAnalysis("cloth", false, 1);
             var mesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
-            var morphs = new MorphSet("low", "high", true);
+            var morphs = new MorphSet(
+                "low",
+                "high",
+                true,
+                SourceAssetSupport: new SourceAssetSupportMetrics(false, false, false, false, false)
+                {
+                    UnsupportedOspSemantics = ["inverted-sliders"]
+                });
             var physics = new PhysicsConfig("smp+cbpc");
             var clipping = new ClippingReport(false, [], []);
             var correction = new CorrectionResult(false, "not-required");
@@ -6074,6 +6081,9 @@ public sealed class ConversionOrchestratorTests
         var syntheticOsdIssue = Assert.Single(summary.Issues, issue => issue.Code == "bodyslide-osd-synthetic-morphs");
         Assert.Equal("medium", syntheticOsdIssue.Severity);
         Assert.Contains("not recovered or authored source morphs", syntheticOsdIssue.Message, StringComparison.Ordinal);
+        var unsupportedOspIssue = Assert.Single(summary.Issues, issue => issue.Code == "source-osp-semantics-not-preserved");
+        Assert.Equal("medium", unsupportedOspIssue.Severity);
+        Assert.Contains("inverted-sliders", unsupportedOspIssue.Message, StringComparison.Ordinal);
     }
 
     [Theory]

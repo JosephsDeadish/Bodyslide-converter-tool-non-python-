@@ -94,4 +94,85 @@ public sealed class BodySlideSourceAssociationTests
         }
         finally { Directory.Delete(root, true); }
     }
+
+    [Fact]
+    public async Task MatchedOspReportsSettingsThatAreNotPreserved()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var mesh = Path.Combine(root, "jacket_0.nif");
+            var project = Path.Combine(root, "source.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <SliderSet name="Jacket" baseShape="Custom Base" bsversion="19" seamNormals="true">
+                    <DataFolder>../shared-data</DataFolder>
+                    <OutputFile gender="female" GenWeights="true" options="custom">jacket</OutputFile>
+                    <Slider name="Fit" default="0.25" small="0.1" big="0.8" invert="true" uv="true">
+                      <Data target="Torso">shared.osd#Fit</Data>
+                    </Slider>
+                    <Reference>reference.nif</Reference>
+                    <Zap target="Sleeves" />
+                    <Shape target="Torso">jacket.nif</Shape>
+                    <CustomOption enabled="true" />
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            Assert.Equal(
+                new[]
+                {
+                    "custom-base-shape",
+                    "external-data-folder",
+                    "inverted-sliders",
+                    "nonzero-slider-defaults",
+                    "output-options",
+                    "seam-or-lock-normal-settings",
+                    "source-osp-version",
+                    "source-reference-links",
+                    "source-shape-mappings",
+                    "source-slider-data-links",
+                    "unknown-slider-set-elements",
+                    "uv-slider-data",
+                    "zap-target-semantics"
+                },
+                result.SourceAssetSupport!.UnsupportedOspSemantics);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task MatchedOspDoesNotReportDefaultSettingsAsUnsupported()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var mesh = Path.Combine(root, "jacket_0.nif");
+            var project = Path.Combine(root, "source.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <SliderSet name="Jacket" baseShape="Base Shape" bsversion="20">
+                    <DataFolder>Jacket</DataFolder>
+                    <SourceFile>jacket.nif</SourceFile>
+                    <OutputPath>meshes\armor\</OutputPath>
+                    <OutputFile gender="female" GenWeights="true">jacket</OutputFile>
+                    <Slider name="Fit" small="0" big="0" invert="false" zap="false" uv="false" />
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            Assert.Empty(result.SourceAssetSupport!.UnsupportedOspSemantics);
+        }
+        finally { Directory.Delete(root, true); }
+    }
 }

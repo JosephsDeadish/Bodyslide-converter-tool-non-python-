@@ -418,6 +418,14 @@ Linked OSP discovery now selects matching output projects before resolving their
 DataFolders and morph payloads, with project-scoped cache keys. This prevents
 cross-project payload reuse but does not establish per-shape ownership within a
 selected project. Original multi-project support assets remain preserved.
+Matched source OSPs are audited for nonzero slider defaults, inversion/UV flags,
+source slider-data links, shape/reference and zap mappings, custom base shapes,
+non-current OSP versions, external DataFolders, seam/lock-normal settings,
+output options, and unrecognized set/slider fields. These settings are not silently
+copied: `SourceAssetSupport.UnsupportedOspSemantics` records the detected categories,
+and `conversion-quality.json` adds `source-osp-semantics-not-preserved` for review.
+Detection is evidence that a setting was present, not proof the generated project
+preserves its behavior; absence of a category is not a general OSP compatibility claim.
 
 Remaining issue #8 acceptance work: structural NIF support does not prove all UV/skin/partition/material
 relationships, runtime physics linkage/conflicts, or shape-specific source morph
