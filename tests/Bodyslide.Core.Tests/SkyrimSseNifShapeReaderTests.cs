@@ -38,11 +38,18 @@ public sealed class SkyrimSseNifShapeReaderTests
     public void WriterUsesParsedVertexStreamForSupportedSingleShapeNif()
     {
         var source = CreateNif(
-            [new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])]);
+            [new TestShape("Body", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)])]);
         var transformed = LocalExportService.TryApplyNifVertexTransform(
             source,
             null,
-            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.4d },
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
             BasicCageGenerationService.CreatePresetCage("mixed"));
 
         var sourceShape = Assert.Single(SkyrimSseNifShapeReader.Read(source).Shapes);
