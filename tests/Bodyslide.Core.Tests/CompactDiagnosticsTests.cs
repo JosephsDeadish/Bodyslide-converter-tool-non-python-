@@ -103,11 +103,13 @@ public sealed class CompactDiagnosticsTests
             Assert.DoesNotContain(compactIssues, issue =>
                 (issue.Code.StartsWith("missing-", StringComparison.Ordinal) &&
                  issue.Code != "missing-bodyslide-slider-payload") ||
-                issue.Code.StartsWith("zip-missing-", StringComparison.Ordinal) ||
+                (issue.Code.StartsWith("zip-missing-", StringComparison.Ordinal) &&
+                 issue.Code != "zip-missing-bodyslide-slider-payload") ||
                 issue.Code == "invalid-package-artifact");
 
             if (zip)
             {
+                Assert.Contains(compactIssues, issue => issue.Code == "zip-missing-bodyslide-slider-payload");
                 var archivePath = Assert.Single(compact.Files, path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
                 using var archive = ZipFile.OpenRead(archivePath);
                 using var fullArchive = ZipFile.OpenRead(Assert.Single(full.Files,
