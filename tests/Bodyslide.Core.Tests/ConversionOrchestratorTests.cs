@@ -6046,6 +6046,7 @@ public sealed class ConversionOrchestratorTests
                 detectedBody,
                 morphs,
                 payloadReuse,
+                1,
                 clipping,
                 correction,
                 voxelResult,
@@ -6070,6 +6071,9 @@ public sealed class ConversionOrchestratorTests
 
         var missingNormalsIssue = Assert.Single(summary.Issues, issue => issue.Code == "missing-normal-maps");
         Assert.Equal("low", missingNormalsIssue.Severity);
+        var syntheticOsdIssue = Assert.Single(summary.Issues, issue => issue.Code == "bodyslide-osd-synthetic-morphs");
+        Assert.Equal("medium", syntheticOsdIssue.Severity);
+        Assert.Contains("not recovered or authored source morphs", syntheticOsdIssue.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -10045,7 +10049,6 @@ public sealed class NifOutputAndSourceOverrideTests
             Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.TopDirectoryOnly));
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
-            Assert.Contains("\"Code\": \"bodyslide-osd-synthetic-morphs\"", qualityJson, StringComparison.Ordinal);
             Assert.Contains("\"SyntheticBodySlideOsdMorphCount\":", qualityJson, StringComparison.Ordinal);
         }
         finally
