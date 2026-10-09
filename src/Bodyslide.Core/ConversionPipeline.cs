@@ -25544,12 +25544,27 @@ internal sealed class LocalExportService(
         return controls;
     }
 
-    private static byte[] TryApplyNifVertexTransform(
+    internal static byte[] TryApplyNifVertexTransform(
         byte[] sourceBytes,
         string? sourcePath,
         IReadOnlyDictionary<string, double> regionalMorphing,
         DeformationCage? deformationCage)
     {
+        var parsedGeometry = SkyrimSseNifShapeReader.Read(sourceBytes);
+        if (parsedGeometry.Supported && parsedGeometry.Shapes.Count == 1)
+        {
+            var shape = parsedGeometry.Shapes[0];
+            if (shape.VertexDataOffset >= 0 && shape.VertexStride >= 3 * sizeof(float))
+            {
+                return TryApplyNifInterleavedFloatVertexTransform(
+                    sourceBytes,
+                    sourcePath,
+                    regionalMorphing,
+                    deformationCage,
+                    (shape.VertexDataOffset, shape.Vertices.Count, shape.VertexStride));
+            }
+        }
+
         if (!NifGeometrySignatureReader.TryLocateVertexBlock(sourceBytes, out var vertexDataOffset, out var vertexCount))
         {
             var floatStrideTransformed = TryApplyNifInterleavedFloatVertexTransform(sourceBytes, sourcePath, regionalMorphing, deformationCage);
@@ -25729,13 +25744,23 @@ internal sealed class LocalExportService(
         byte[] sourceBytes,
         string? sourcePath,
         IReadOnlyDictionary<string, double> regionalMorphing,
-        DeformationCage? deformationCage)
+        DeformationCage? deformationCage,
+        (int Offset, int Count, int Stride)? parsedVertexStream = null)
     {
-        if (!NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(
-                sourceBytes,
-                out var vertexDataOffset,
-                out var vertexCount,
-                out var vertexStride))
+        int vertexDataOffset;
+        int vertexCount;
+        int vertexStride;
+        if (parsedVertexStream is { } parsedStream)
+        {
+            vertexDataOffset = parsedStream.Offset;
+            vertexCount = parsedStream.Count;
+            vertexStride = parsedStream.Stride;
+        }
+        else if (!NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(
+                     sourceBytes,
+                     out vertexDataOffset,
+                     out vertexCount,
+                     out vertexStride))
         {
             return sourceBytes;
         }

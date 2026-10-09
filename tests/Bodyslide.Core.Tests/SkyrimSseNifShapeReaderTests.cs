@@ -28,9 +28,28 @@ public sealed class SkyrimSseNifShapeReaderTests
         Assert.Equal(new MeshVertex(1f, 2f, 3f), result.Shapes[0].Vertices[0]);
         Assert.Equal(new MeshVertex(7f, 8f, 9f), result.Shapes[0].Vertices[2]);
         Assert.Equal(new ushort[] { 0, 1, 2 }, result.Shapes[0].TriangleIndices);
+        Assert.True(result.Shapes[0].VertexDataOffset > 0);
         Assert.Equal("BodyPartB", result.Shapes[1].Name);
         Assert.Equal(new MeshVertex(-1f, -2f, -3f), result.Shapes[1].Vertices[0]);
         Assert.Equal(16, result.Shapes[1].VertexStride);
+    }
+
+    [Fact]
+    public void WriterUsesParsedVertexStreamForSupportedSingleShapeNif()
+    {
+        var source = CreateNif(
+            [new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])]);
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.4d },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        var sourceShape = Assert.Single(SkyrimSseNifShapeReader.Read(source).Shapes);
+        var transformedShape = Assert.Single(SkyrimSseNifShapeReader.Read(transformed).Shapes);
+        Assert.NotEqual(sourceShape.Vertices, transformedShape.Vertices);
+        Assert.Equal(sourceShape.TriangleIndices, transformedShape.TriangleIndices);
+        Assert.Equal(sourceShape.Name, transformedShape.Name);
     }
 
     [Fact]

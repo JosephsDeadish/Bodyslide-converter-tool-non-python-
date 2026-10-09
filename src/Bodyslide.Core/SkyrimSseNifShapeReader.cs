@@ -7,7 +7,8 @@ internal sealed record SkyrimSseNifShape(
     string Name,
     IReadOnlyList<MeshVertex> Vertices,
     IReadOnlyList<ushort> TriangleIndices,
-    int VertexStride);
+    int VertexStride,
+    int VertexDataOffset = -1);
 
 internal sealed record SkyrimSseNifShapeReadResult(
     bool Supported,
@@ -215,6 +216,7 @@ internal static class SkyrimSseNifShapeReader
             throw new InvalidDataException($"bstrishape-data-size-mismatch:{strings[(int)nameIndex]}");
         }
 
+        var vertexDataOffset = offset;
         var vertices = new MeshVertex[vertexCount];
         for (var i = 0; i < vertices.Length; i++)
         {
@@ -243,7 +245,7 @@ internal static class SkyrimSseNifShapeReader
             triangleIndexes[i] = index;
         }
 
-        return new SkyrimSseNifShape(strings[(int)nameIndex], vertices, triangleIndexes, vertexStride);
+        return new SkyrimSseNifShape(strings[(int)nameIndex], vertices, triangleIndexes, vertexStride, vertexDataOffset);
     }
 
     private static bool IsUnsupportedGeometryType(string typeName) =>
