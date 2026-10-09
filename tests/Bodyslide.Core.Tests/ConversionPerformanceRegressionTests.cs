@@ -385,8 +385,8 @@ public sealed class ConversionPerformanceRegressionTests
                 Assert.Equal("TestSlider.bsd", low.GetProperty("SourceAssetName").GetString());
                 Assert.Equal("unresolved", low.GetProperty("ShapeIdentityStatus").GetString());
                 Assert.Equal("unverified", low.GetProperty("VertexOrderStatus").GetString());
-                Assert.Equal("blocked-shape-or-order-unverified", low.GetProperty("ReuseEligibility").GetString());
-                Assert.Contains("requires verified shape identity and vertex order", summary.GetProperty("SourceMorphReusePolicy").GetString());
+                Assert.Equal("blocked-correspondence-evidence", low.GetProperty("ReuseEligibility").GetString());
+                Assert.Contains("requires verified shape correspondence and matching shape/order fingerprints", summary.GetProperty("SourceMorphReusePolicy").GetString());
             }
 
             Assert.Same(deltas, payload.Deltas);
