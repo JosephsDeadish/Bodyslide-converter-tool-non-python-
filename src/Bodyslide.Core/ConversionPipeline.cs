@@ -25821,7 +25821,7 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var topologyContext = ResolveSharedTopologyTransformContext(sourceBytes, sourcePath, rawVertices, parsedTopology);
+        var topologyContext = ResolveTopologyTransformContext(sourceBytes, sourcePath, rawVertices, parsedTopology);
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
@@ -25986,8 +25986,14 @@ internal sealed class LocalExportService(
     private static TopologyTransformContext? ResolveSharedTopologyTransformContext(
         byte[] sourceBytes,
         string? sourcePath,
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices) =>
+        ResolveTopologyTransformContext(sourceBytes, sourcePath, rawVertices, null);
+
+    private static TopologyTransformContext? ResolveTopologyTransformContext(
+        byte[] sourceBytes,
+        string? sourcePath,
         IReadOnlyList<(float X, float Y, float Z)> rawVertices,
-        NifGeometrySignatureReader.MeshTopologySummary? parsedTopology = null)
+        NifGeometrySignatureReader.MeshTopologySummary? parsedTopology)
     {
         if (parsedTopology is not null &&
             parsedTopology.VertexCount == rawVertices.Count &&
