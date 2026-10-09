@@ -137,11 +137,12 @@ high-severity `bodyslide-tri-payload-withheld` issue, so this output is not
 reported as ready. BodySlide may generate TRI files during its own validated
 build; inspect and test those files independently before packaging.
 Source TRI/BSD/OSD parsing records candidate payloads, but does not establish
-which NIF shape or vertex order they belong to. Exact reuse requires both
-`ShapeIdentityStatus` and `VertexOrderStatus` to be `verified`; topology retarget
+which NIF shape or vertex order they belong to. Exact reuse requires verified statuses, matching named shapes, non-empty shape
+correspondence evidence, and matching vertex-order fingerprints. Topology retarget
 additionally requires an explicit verified map method, at least 0.95 confidence,
-and non-empty evidence. `PayloadReuse.RetargetEvidence` records the method,
-confidence, and evidence used for any accepted retarget. The current source
+and non-empty map/correspondence evidence. `PayloadReuse.RetargetEvidence` records
+the source/target shape names, method, confidence, and evidence used for an
+accepted retarget. The current source
 discovery path does not produce that verified mapping, so parsed payloads remain
 ineligible by default. Synthetic OSD fallback remains separately labeled and
 does not count as recovered source morph data.

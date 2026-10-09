@@ -30894,7 +30894,10 @@ public sealed class OutputCompletenessTests
                         RetargetMapVerified: true,
                         RetargetMapMethod: "test-verified-map",
                         RetargetMapConfidence: 0.99d,
-                        RetargetMapEvidence: ["fixture correspondence"]),
+                        RetargetMapEvidence: ["fixture correspondence"],
+                        SourceShapeName: "SourceBody",
+                        TargetShapeName: "TargetBody",
+                        ShapeCorrespondenceEvidence: ["named shape correspondence"]),
                     null)
             };
 

@@ -19,11 +19,13 @@ public sealed class ConversionPerformanceRegressionTests
                 new SourceMorphPayload(
                     slider, false, "bsd", 2, [(1f, 0f, 0f), (2f, 0f, 0f)],
                     ShapeIdentityStatus: "verified", VertexOrderStatus: "verified", RetargetMapVerified: true,
-                    RetargetMapMethod: "test-verified-map", RetargetMapConfidence: 0.99d, RetargetMapEvidence: ["test fixture correspondence"]),
+                    RetargetMapMethod: "test-verified-map", RetargetMapConfidence: 0.99d, RetargetMapEvidence: ["test fixture correspondence"],
+                    SourceShapeName: "SourceBody", TargetShapeName: "TargetBody", ShapeCorrespondenceEvidence: ["named shape mapping"]),
                 new SourceMorphPayload(
                     slider, true, "bsd", 2, [(2f, 0f, 0f), (3f, 0f, 0f)],
                     ShapeIdentityStatus: "verified", VertexOrderStatus: "verified", RetargetMapVerified: true,
-                    RetargetMapMethod: "test-verified-map", RetargetMapConfidence: 0.99d, RetargetMapEvidence: ["test fixture correspondence"])));
+                    RetargetMapMethod: "test-verified-map", RetargetMapConfidence: 0.99d, RetargetMapEvidence: ["test fixture correspondence"],
+                    SourceShapeName: "SourceBody", TargetShapeName: "TargetBody", ShapeCorrespondenceEvidence: ["named shape mapping"])));
         var method = GetMethod("BuildPayloadReuseSummary");
         method.Invoke(null, [sliders, payloads, 100_000, null]);
         var before = GC.GetAllocatedBytesForCurrentThread();
@@ -122,7 +124,10 @@ public sealed class ConversionPerformanceRegressionTests
                     RetargetMapVerified: true,
                     RetargetMapMethod: methodName,
                     RetargetMapConfidence: confidence,
-                    RetargetMapEvidence: includeEvidence ? ["source/target correspondence"] : []),
+                    RetargetMapEvidence: includeEvidence ? ["source/target correspondence"] : [],
+                    SourceShapeName: "SourceBody",
+                    TargetShapeName: "TargetBody",
+                    ShapeCorrespondenceEvidence: ["named shape correspondence"]),
                 null)
         };
 
@@ -147,7 +152,10 @@ public sealed class ConversionPerformanceRegressionTests
                     RetargetMapVerified: true,
                     RetargetMapMethod: "semantic-map",
                     RetargetMapConfidence: 0.97d,
-                    RetargetMapEvidence: ["named-shape ownership", "vertex correspondence"]),
+                    RetargetMapEvidence: ["named-shape ownership", "vertex correspondence"],
+                    SourceShapeName: "SourceBody",
+                    TargetShapeName: "TargetBody",
+                    ShapeCorrespondenceEvidence: ["matched named body shape"]),
                 null)
         };
 
@@ -159,6 +167,59 @@ public sealed class ConversionPerformanceRegressionTests
         Assert.Equal("semantic-map", evidence.Method);
         Assert.Equal(0.97d, evidence.Confidence);
         Assert.Equal(new[] { "named-shape ownership", "vertex correspondence" }, evidence.Evidence);
+        Assert.Equal("SourceBody", evidence.SourceShapeName);
+        Assert.Equal("TargetBody", evidence.TargetShapeName);
+    }
+
+    [Fact]
+    public void PayloadReuseSummary_ExactReuseRequiresMatchingShapeAndVertexOrderFingerprint()
+    {
+        var payloads = new Dictionary<string, SourceMorphPayloadVariants>
+        {
+            ["Belly"] = new(
+                new SourceMorphPayload(
+                    "Belly", false, "bsd", 2, [(0.1f, 0f, 0f), (0.2f, 0f, 0f)],
+                    ShapeIdentityStatus: "verified",
+                    VertexOrderStatus: "verified",
+                    SourceShapeName: "Body",
+                    TargetShapeName: "Body",
+                    SourceVertexOrderFingerprint: "source-order",
+                    TargetVertexOrderFingerprint: "target-order",
+                    ShapeCorrespondenceEvidence: ["matched named shape"]),
+                null)
+        };
+
+        var summary = (MorphPayloadReuseSummary)GetMethod("BuildPayloadReuseSummary")
+            .Invoke(null, [new[] { "Belly" }, payloads, 2, null])!;
+
+        Assert.Equal(0, summary.ReusedVariantCount);
+        Assert.Equal(2, summary.FallbackVariantCount);
+    }
+
+    [Fact]
+    public void PayloadReuseSummary_AllowsExactReuseWithShapeAndOrderEvidence()
+    {
+        var payloads = new Dictionary<string, SourceMorphPayloadVariants>
+        {
+            ["Belly"] = new(
+                new SourceMorphPayload(
+                    "Belly", false, "bsd", 2, [(0.1f, 0f, 0f), (0.2f, 0f, 0f)],
+                    ShapeIdentityStatus: "verified",
+                    VertexOrderStatus: "verified",
+                    SourceShapeName: "Body",
+                    TargetShapeName: "Body",
+                    SourceVertexOrderFingerprint: "identical-order",
+                    TargetVertexOrderFingerprint: "identical-order",
+                    ShapeCorrespondenceEvidence: ["matched named shape"]),
+                null)
+        };
+
+        var summary = (MorphPayloadReuseSummary)GetMethod("BuildPayloadReuseSummary")
+            .Invoke(null, [new[] { "Belly" }, payloads, 2, null])!;
+
+        Assert.Equal(1, summary.ReusedVariantCount);
+        Assert.Equal(1, summary.FallbackVariantCount);
+        Assert.Equal(new[] { "Belly_1" }, summary.FallbackVariants);
     }
 
     [Theory]

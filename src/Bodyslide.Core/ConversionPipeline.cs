@@ -246,7 +246,12 @@ public sealed record SourceMorphPayload(
     bool RetargetMapVerified = false,
     string RetargetMapMethod = "unverified",
     double RetargetMapConfidence = 0,
-    IReadOnlyList<string>? RetargetMapEvidence = null);
+    IReadOnlyList<string>? RetargetMapEvidence = null,
+    string? SourceShapeName = null,
+    string? TargetShapeName = null,
+    string? SourceVertexOrderFingerprint = null,
+    string? TargetVertexOrderFingerprint = null,
+    IReadOnlyList<string>? ShapeCorrespondenceEvidence = null);
 public sealed record SourceMorphPayloadVariants(
     SourceMorphPayload? LowWeight = null,
     SourceMorphPayload? HighWeight = null);
@@ -287,7 +292,9 @@ public sealed record MorphRetargetEvidence(
     string SliderVariant,
     string Method,
     double Confidence,
-    IReadOnlyList<string> Evidence);
+    IReadOnlyList<string> Evidence,
+    string? SourceShapeName = null,
+    string? TargetShapeName = null);
 public sealed record MorphSet(
     string LowMorph,
     string HighMorph,
@@ -24126,12 +24133,16 @@ internal sealed class LocalExportService(
             payload.RetargetMapMethod,
             payload.RetargetMapConfidence,
             payload.RetargetMapEvidence,
-            ReuseEligibility = string.Equals(payload.ShapeIdentityStatus, "verified", StringComparison.OrdinalIgnoreCase) &&
-                               string.Equals(payload.VertexOrderStatus, "verified", StringComparison.OrdinalIgnoreCase)
-                ? payload.RetargetMapVerified && IsVerifiedRetargetMap(payload)
-                    ? "shape-order-and-retarget-map-verified"
-                    : "shape-and-order-verified"
-                : "blocked-shape-or-order-unverified"
+            payload.SourceShapeName,
+            payload.TargetShapeName,
+            payload.SourceVertexOrderFingerprint,
+            payload.TargetVertexOrderFingerprint,
+            payload.ShapeCorrespondenceEvidence,
+            ReuseEligibility = HasExactShapeAndVertexOrder(payload)
+                ? "exact-shape-and-vertex-order-verified"
+                : HasVerifiedShapeAndVertexOrder(payload) && IsVerifiedRetargetMap(payload)
+                    ? "shape-retarget-map-verified"
+                    : "blocked-correspondence-evidence"
         };
 
         return new
@@ -24151,7 +24162,7 @@ internal sealed class LocalExportService(
                     LowWeight = DescribePayload(pair.Value.LowWeight),
                     HighWeight = DescribePayload(pair.Value.HighWeight)
                 }),
-            SourceMorphReusePolicy = "Parsed TRI/BSD/OSD payloads are candidates only; exact reuse requires verified shape identity and vertex order, while topology retarget also requires an explicit verified map method, confidence >= 0.95, and evidence.",
+            SourceMorphReusePolicy = "Parsed TRI/BSD/OSD payloads are candidates only; exact reuse requires verified shape correspondence and matching shape/order fingerprints, while topology retarget also requires an explicit verified map method, confidence >= 0.95, and evidence.",
             morphs.SourceAssetSupport
         };
     }
@@ -40613,7 +40624,9 @@ internal sealed class LocalExportService(
                             variantName,
                             selectedPayload.RetargetMapMethod,
                             selectedPayload.RetargetMapConfidence,
-                            selectedPayload.RetargetMapEvidence ?? []));
+                            selectedPayload.RetargetMapEvidence ?? [],
+                            selectedPayload.SourceShapeName,
+                            selectedPayload.TargetShapeName));
                         if (usedExtremeAdaptation)
                         {
                             extremelyAdaptedVariants.Add(variantName);
@@ -41035,8 +41048,7 @@ internal sealed class LocalExportService(
                 return false;
             }
 
-            if (!string.Equals(candidate.ShapeIdentityStatus, "verified", StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(candidate.VertexOrderStatus, "verified", StringComparison.OrdinalIgnoreCase) ||
+            if (!HasVerifiedShapeAndVertexOrder(candidate) ||
                 candidate.VertexCount <= 0 ||
                 candidate.Deltas.Count != candidate.VertexCount)
             {
@@ -41050,6 +41062,11 @@ internal sealed class LocalExportService(
 
             if (candidate.VertexCount == vertexCount)
             {
+                if (!HasExactShapeAndVertexOrder(candidate))
+                {
+                    return false;
+                }
+
                 payload = candidate;
                 return true;
             }
@@ -41078,12 +41095,30 @@ internal sealed class LocalExportService(
 
         private static bool IsVerifiedRetargetMap(SourceMorphPayload payload) =>
             payload.RetargetMapVerified &&
+            !string.IsNullOrWhiteSpace(payload.SourceShapeName) &&
+            !string.IsNullOrWhiteSpace(payload.TargetShapeName) &&
             !string.IsNullOrWhiteSpace(payload.RetargetMapMethod) &&
             !payload.RetargetMapMethod.Equals("unverified", StringComparison.OrdinalIgnoreCase) &&
             double.IsFinite(payload.RetargetMapConfidence) &&
             payload.RetargetMapConfidence >= 0.95d &&
             payload.RetargetMapEvidence is { Count: > 0 } evidence &&
+            evidence.All(static item => !string.IsNullOrWhiteSpace(item)) &&
+            payload.ShapeCorrespondenceEvidence is { Count: > 0 } shapeEvidence &&
+            shapeEvidence.All(static item => !string.IsNullOrWhiteSpace(item));
+
+        private static bool HasVerifiedShapeAndVertexOrder(SourceMorphPayload payload) =>
+            string.Equals(payload.ShapeIdentityStatus, "verified", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(payload.VertexOrderStatus, "verified", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(payload.SourceShapeName) &&
+            !string.IsNullOrWhiteSpace(payload.TargetShapeName) &&
+            payload.ShapeCorrespondenceEvidence is { Count: > 0 } evidence &&
             evidence.All(static item => !string.IsNullOrWhiteSpace(item));
+
+        private static bool HasExactShapeAndVertexOrder(SourceMorphPayload payload) =>
+            HasVerifiedShapeAndVertexOrder(payload) &&
+            string.Equals(payload.SourceShapeName, payload.TargetShapeName, StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(payload.SourceVertexOrderFingerprint) &&
+            string.Equals(payload.SourceVertexOrderFingerprint, payload.TargetVertexOrderFingerprint, StringComparison.Ordinal);
 
         private static IReadOnlyList<(float X, float Y, float Z)> BlendRetargetedMorphPayloadForHardDivergence(
             string sliderName,
