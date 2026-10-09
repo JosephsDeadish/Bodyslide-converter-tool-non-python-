@@ -65,12 +65,12 @@ foreach ($requiredPath in @($manifestPath, $resultPath)) {
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
 $contractVersion = Get-Value $result @("ContractVersion", "Version")
-if ([string]::IsNullOrWhiteSpace([string]$contractVersion)) {
-    throw "The proof result bundle has no contractVersion."
+if ([string]$contractVersion -ne "1.1") {
+    throw "The proof result bundle must use contractVersion 1.1 to include required compatibility observations."
 }
 
 $artifactReferences = [Collections.Generic.List[string]]::new()
-foreach ($propertyName in @("ComponentResults", "Components", "ScenarioResults", "ProbeResults")) {
+foreach ($propertyName in @("ComponentResults", "Components", "ScenarioResults", "ProbeResults", "ValidationObservations")) {
     $records = Get-Value $result @($propertyName)
     foreach ($record in @($records)) {
         if ($null -eq $record) {
@@ -81,6 +81,39 @@ foreach ($propertyName in @("ComponentResults", "Components", "ScenarioResults",
                 $artifactReferences.Add([string]$reference)
             }
         }
+    }
+}
+
+$requiredObservationTypes = @("bodyslide-build", "output-inspection", "deformation-observation")
+$observations = @(Get-Value $result @("ValidationObservations"))
+foreach ($observationType in $requiredObservationTypes) {
+    $matches = @($observations | Where-Object {
+        [string](Get-Value $_ @("ObservationType")) -ieq $observationType
+    })
+    if ($matches.Count -ne 1) {
+        throw "The proof result bundle must contain exactly one '$observationType' validation observation."
+    }
+
+    $observation = $matches[0]
+    if ([string](Get-Value $observation @("Status")) -ine "pass") {
+        throw "The '$observationType' validation observation must have status 'pass'."
+    }
+    if ([string]::IsNullOrWhiteSpace([string](Get-Value $observation @("Tool"))) -or
+        [string]::IsNullOrWhiteSpace([string](Get-Value $observation @("ToolVersion")))) {
+        throw "The '$observationType' validation observation must identify its tool and version."
+    }
+
+    $observedAtUtc = [string](Get-Value $observation @("ObservedAtUtc"))
+    $parsedObservedAt = [DateTimeOffset]::MinValue
+    if (-not [DateTimeOffset]::TryParse(
+            $observedAtUtc,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind,
+            [ref]$parsedObservedAt)) {
+        throw "The '$observationType' validation observation must have a valid ObservedAtUtc timestamp."
+    }
+    if (@(Get-Value $observation @("EvidenceArtifacts")).Count -eq 0) {
+        throw "The '$observationType' validation observation must reference at least one evidence artifact."
     }
 }
 
@@ -155,15 +188,17 @@ foreach ($reference in $references) {
 }
 
 $report = [ordered]@{
-    ContractVersion = "1.0"
+    ContractVersion = "1.1"
     GeneratedAtUtc = [DateTime]::UtcNow.ToString("O")
     HarnessContractVersion = Get-Value $manifest @("ContractVersion")
     ResultContractVersion = $contractVersion
     ReferencedArtifactCount = $references.Count
     VerifiedFileCount = $indexedFiles.Count
+    RequiredValidationObservationTypes = $requiredObservationTypes
+    PassingValidationObservationCount = $observations.Count
     MissingReferences = @($missing)
     VerifiedFiles = @($indexedFiles | Sort-Object Path -Unique)
-    Scope = "Evidence path existence and SHA-256 inventory only; does not verify evidence contents, tool behavior, deformation, MO2 integration, or in-game behavior."
+    Scope = "Checks compatibility observation metadata and inventories referenced files with SHA-256; does not verify observation truth, evidence contents, BodySlide behavior, deformation quality, MO2 integration, or in-game behavior."
 }
 
 $reportPath = Join-Path $root "proof-evidence-integrity.json"

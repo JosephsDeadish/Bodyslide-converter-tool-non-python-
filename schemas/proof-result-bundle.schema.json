@@ -15,10 +15,11 @@
     "MissingExpectedScenarios",
     "MissingExpectedProbes",
     "MissingExpectedFlows",
+    "ValidationObservations",
     "Notes"
   ],
   "properties": {
-    "ContractVersion": { "const": "1.0" },
+    "ContractVersion": { "const": "1.1" },
     "HarnessKind": { "type": "string", "minLength": 1 },
     "OverallStatus": { "type": "string", "minLength": 1 },
     "Host": {
@@ -88,6 +89,11 @@
     "MissingExpectedScenarios": { "$ref": "#/$defs/stringList" },
     "MissingExpectedProbes": { "$ref": "#/$defs/stringList" },
     "MissingExpectedFlows": { "$ref": "#/$defs/stringList" },
+    "ValidationObservations": {
+      "type": "array",
+      "minItems": 3,
+      "items": { "$ref": "#/$defs/validationObservation" }
+    },
     "Notes": { "$ref": "#/$defs/stringList" }
   },
   "additionalProperties": true,
@@ -95,6 +101,38 @@
     "stringList": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "validationObservation": {
+      "type": "object",
+      "required": [
+        "ObservationType",
+        "Status",
+        "Tool",
+        "ToolVersion",
+        "ObservedAtUtc",
+        "EvidenceArtifacts",
+        "Notes"
+      ],
+      "properties": {
+        "ObservationType": {
+          "enum": [
+            "bodyslide-build",
+            "output-inspection",
+            "deformation-observation"
+          ]
+        },
+        "Status": { "enum": [ "pass", "fail", "inconclusive" ] },
+        "Tool": { "type": "string", "minLength": 1 },
+        "ToolVersion": { "type": "string", "minLength": 1 },
+        "ObservedAtUtc": { "type": "string", "format": "date-time" },
+        "EvidenceArtifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "Notes": { "$ref": "#/$defs/stringList" }
+      },
+      "additionalProperties": false
     }
   }
 }
