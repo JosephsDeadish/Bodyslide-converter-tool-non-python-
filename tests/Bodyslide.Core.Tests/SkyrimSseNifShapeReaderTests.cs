@@ -91,6 +91,27 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void ParsedShapeTopologyKeepsComponentsAndBoundaryEdgesShapeLocal()
+    {
+        var shapes = SkyrimSseNifShapeReader.Read(CreateNif(
+        [
+            new TestShape("Body", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)]),
+            new TestShape("Accessory", [(60f, 0f, 0f), (90f, 0f, 10f), (60f, 20f, 20f)])
+        ])).Shapes;
+
+        var topology = LocalExportService.BuildParsedShapeTopologySummary(shapes);
+
+        Assert.NotNull(topology);
+        Assert.Equal(6, topology!.VertexCount);
+        Assert.Equal(topology.ComponentIds[0], topology.ComponentIds[1]);
+        Assert.Equal(topology.ComponentIds[1], topology.ComponentIds[2]);
+        Assert.Equal(topology.ComponentIds[3], topology.ComponentIds[4]);
+        Assert.Equal(topology.ComponentIds[4], topology.ComponentIds[5]);
+        Assert.NotEqual(topology.ComponentIds[0], topology.ComponentIds[3]);
+        Assert.All(topology.BoundaryVertexFlags, Assert.True);
+    }
+
+    [Fact]
     public void RejectsNonSseStreamProfile()
     {
         var result = SkyrimSseNifShapeReader.Read(CreateNif([new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])], streamVersion: 83));

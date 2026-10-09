@@ -25556,6 +25556,7 @@ internal sealed class LocalExportService(
             var parsedVertexStreams = parsedGeometry.Shapes
                 .Select(static shape => (Offset: shape.VertexDataOffset, Count: shape.Vertices.Count, Stride: shape.VertexStride))
                 .ToArray();
+            var parsedTopology = BuildParsedShapeTopologySummary(parsedGeometry.Shapes);
             if (parsedVertexStreams.All(static stream => stream.Offset >= 0 && stream.Count > 0 && stream.Stride >= 3 * sizeof(float)))
             {
                 return TryApplyNifInterleavedFloatVertexTransform(
@@ -25563,7 +25564,8 @@ internal sealed class LocalExportService(
                     sourcePath,
                     regionalMorphing,
                     deformationCage,
-                    parsedVertexStreams);
+                    parsedVertexStreams,
+                    parsedTopology);
             }
         }
 
@@ -25747,7 +25749,8 @@ internal sealed class LocalExportService(
         string? sourcePath,
         IReadOnlyDictionary<string, double> regionalMorphing,
         DeformationCage? deformationCage,
-        IReadOnlyList<(int Offset, int Count, int Stride)>? parsedVertexStreams = null)
+        IReadOnlyList<(int Offset, int Count, int Stride)>? parsedVertexStreams = null,
+        NifGeometrySignatureReader.MeshTopologySummary? parsedTopology = null)
     {
         IReadOnlyList<(int Offset, int Count, int Stride)> vertexStreams;
         if (parsedVertexStreams is not null)
@@ -25818,7 +25821,7 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var topologyContext = ResolveSharedTopologyTransformContext(sourceBytes, sourcePath, rawVertices);
+        var topologyContext = ResolveSharedTopologyTransformContext(sourceBytes, sourcePath, rawVertices, parsedTopology);
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
@@ -25983,8 +25986,21 @@ internal sealed class LocalExportService(
     private static TopologyTransformContext? ResolveSharedTopologyTransformContext(
         byte[] sourceBytes,
         string? sourcePath,
-        IReadOnlyList<(float X, float Y, float Z)> rawVertices)
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        NifGeometrySignatureReader.MeshTopologySummary? parsedTopology = null)
     {
+        if (parsedTopology is not null &&
+            parsedTopology.VertexCount == rawVertices.Count &&
+            parsedTopology.ComponentIds.Length == rawVertices.Count &&
+            parsedTopology.BoundaryVertexFlags.Length == rawVertices.Count)
+        {
+            var parsedContext = BuildTopologyTransformContext(rawVertices, parsedTopology);
+            if (parsedContext is not null)
+            {
+                return parsedContext;
+            }
+        }
+
         var sharedSnapshot = ResolveSharedTopologySnapshotForTransform(sourceBytes, sourcePath);
         if (sharedSnapshot is not null &&
             sharedSnapshot.Vertices.Count == rawVertices.Count)
@@ -25999,6 +26015,98 @@ internal sealed class LocalExportService(
         return BuildTopologyTransformContext(
             rawVertices,
             sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
+    }
+
+    internal static NifGeometrySignatureReader.MeshTopologySummary? BuildParsedShapeTopologySummary(
+        IReadOnlyList<SkyrimSseNifShape> shapes)
+    {
+        var vertexCount = shapes.Sum(static shape => shape.Vertices.Count);
+        if (vertexCount == 0 || shapes.Any(static shape => shape.TriangleIndices.Count == 0 || shape.TriangleIndices.Count % 3 != 0))
+        {
+            return null;
+        }
+
+        var parents = Enumerable.Range(0, vertexCount).ToArray();
+        var boundaryVertexFlags = new bool[vertexCount];
+        var offset = 0;
+        foreach (var shape in shapes)
+        {
+            var edgeUseCounts = new Dictionary<(int Left, int Right), int>();
+            for (var triangleOffset = 0; triangleOffset < shape.TriangleIndices.Count; triangleOffset += 3)
+            {
+                var a = shape.TriangleIndices[triangleOffset];
+                var b = shape.TriangleIndices[triangleOffset + 1];
+                var c = shape.TriangleIndices[triangleOffset + 2];
+                if (a >= shape.Vertices.Count || b >= shape.Vertices.Count || c >= shape.Vertices.Count)
+                {
+                    return null;
+                }
+
+                Union(offset + a, offset + b);
+                Union(offset + b, offset + c);
+                Union(offset + c, offset + a);
+                CountEdge(a, b);
+                CountEdge(b, c);
+                CountEdge(c, a);
+            }
+
+            foreach (var ((left, right), useCount) in edgeUseCounts)
+            {
+                if (useCount == 1)
+                {
+                    boundaryVertexFlags[offset + left] = true;
+                    boundaryVertexFlags[offset + right] = true;
+                }
+            }
+
+            offset += shape.Vertices.Count;
+
+            void CountEdge(int left, int right)
+            {
+                var edge = left <= right ? (left, right) : (right, left);
+                edgeUseCounts[edge] = edgeUseCounts.GetValueOrDefault(edge) + 1;
+            }
+        }
+
+        var componentIdsByRoot = new Dictionary<int, int>();
+        var componentIds = new int[vertexCount];
+        for (var vertexIndex = 0; vertexIndex < vertexCount; vertexIndex++)
+        {
+            var root = Find(vertexIndex);
+            if (!componentIdsByRoot.TryGetValue(root, out var componentId))
+            {
+                componentId = componentIdsByRoot.Count;
+                componentIdsByRoot.Add(root, componentId);
+            }
+            componentIds[vertexIndex] = componentId;
+        }
+
+        return new NifGeometrySignatureReader.MeshTopologySummary(
+            vertexCount,
+            componentIds,
+            BoundaryLoopCount: 0,
+            boundaryVertexFlags.Count(static isBoundary => isBoundary),
+            boundaryVertexFlags);
+
+        int Find(int index)
+        {
+            while (parents[index] != index)
+            {
+                parents[index] = parents[parents[index]];
+                index = parents[index];
+            }
+            return index;
+        }
+
+        void Union(int left, int right)
+        {
+            var leftRoot = Find(left);
+            var rightRoot = Find(right);
+            if (leftRoot != rightRoot)
+            {
+                parents[rightRoot] = leftRoot;
+            }
+        }
     }
 
     private static bool TryApplyHalfFloatVertexBlockTransform(
