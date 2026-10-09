@@ -31025,6 +31025,14 @@ public sealed class OutputCompletenessTests
         Assert.False(Assert.IsType<bool>(select!.Invoke(null, arguments)));
         Assert.Null(arguments[5]);
 
+        var mismatchedShapeCase = candidate with { TargetShapeName = "body" };
+        candidates["Waist"] = new SourceMorphPayloadVariants(
+            mismatchedShapeCase,
+            Payloads: [mismatchedShapeCase]);
+        arguments = [candidates, "Waist", false, 2, null, null, null, null];
+        Assert.False(Assert.IsType<bool>(select.Invoke(null, arguments)));
+        Assert.Null(arguments[5]);
+
         candidates["Waist"] = new SourceMorphPayloadVariants(candidate, Payloads: [candidate]);
         arguments = [candidates, "Waist", false, 2, null, null, null, null];
         Assert.True(Assert.IsType<bool>(select.Invoke(null, arguments)));

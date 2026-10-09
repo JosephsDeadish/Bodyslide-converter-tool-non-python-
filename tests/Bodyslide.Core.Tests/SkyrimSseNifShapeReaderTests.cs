@@ -57,6 +57,8 @@ public sealed class SkyrimSseNifShapeReaderTests
             [new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])])).Shapes);
         var differentName = Assert.Single(SkyrimSseNifShapeReader.Read(CreateNif(
             [new TestShape("BodyDetail", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])])).Shapes);
+        var differentNameCase = Assert.Single(SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])])).Shapes);
         var reorderedVertices = Assert.Single(SkyrimSseNifShapeReader.Read(CreateNif(
             [new TestShape("Body", [(1f, 0f, 0f), (0f, 0f, 0f), (0f, 1f, 0f)])])).Shapes);
         var differentTopology = Assert.Single(SkyrimSseNifShapeReader.Read(CreateNif(
@@ -65,6 +67,7 @@ public sealed class SkyrimSseNifShapeReaderTests
             [new TestShape("Body", [(-0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])])).Shapes);
 
         Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, differentName, out _));
+        Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, differentNameCase, out _));
         Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, reorderedVertices, out _));
         Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, differentTopology, out _));
         Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, negativeZero, out _));

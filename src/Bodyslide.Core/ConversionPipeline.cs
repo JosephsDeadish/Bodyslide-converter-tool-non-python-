@@ -41155,7 +41155,7 @@ internal sealed class LocalExportService(
 
         private static bool HasExactShapeAndVertexOrder(SourceMorphPayload payload) =>
             HasVerifiedShapeAndVertexOrder(payload) &&
-            string.Equals(payload.SourceShapeName, payload.TargetShapeName, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(payload.SourceShapeName, payload.TargetShapeName, StringComparison.Ordinal) &&
             !string.IsNullOrWhiteSpace(payload.SourceVertexOrderFingerprint) &&
             string.Equals(payload.SourceVertexOrderFingerprint, payload.TargetVertexOrderFingerprint, StringComparison.Ordinal);
 
