@@ -244,7 +244,7 @@ public sealed class SkyrimSseNifShapeReaderTests
         writer.Write(shape.SkinInstance);
         writer.Write(-1);
         writer.Write(-1);
-        var descriptor = (ulong)(shape.VertexStride / 4) | (1UL << 44);
+        var descriptor = (ulong)(uint)(shape.VertexStride / 4) | (1UL << 44);
         writer.Write(descriptor);
         var triangles = shape.Triangles ?? [shape.Triangle ?? (0, 1, 2)];
         writer.Write((ushort)triangles.Count);
