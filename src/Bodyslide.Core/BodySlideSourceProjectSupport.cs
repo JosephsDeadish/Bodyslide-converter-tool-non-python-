@@ -328,7 +328,8 @@ internal static class BodySlideSourceProjectSupport
                         SourcePriority.TriPayloadBase,
                         IsHighWeightVariant(morph.Name),
                         "tri",
-                        out var candidate))
+                        out var candidate,
+                        Path.GetFileName(filePath)))
                     {
                         continue;
                     }
@@ -1595,7 +1596,8 @@ internal static class BodySlideSourceProjectSupport
                 payload.IsHighWeight ? SourcePriority.BsdHighWeightBase : SourcePriority.BsdLowWeightBase,
                 payload.IsHighWeight,
                 "bsd",
-                out candidate);
+                out candidate,
+                Path.GetFileName(filePath));
         }
 
         var sliderName = NormalizeSliderFileName(Path.GetFileNameWithoutExtension(filePath));
@@ -1652,7 +1654,8 @@ internal static class BodySlideSourceProjectSupport
                 SourcePriority.OsdPayloadBase,
                 IsHighWeightVariant(morph.Name),
                 "osd",
-                out var candidate))
+                out var candidate,
+                Path.GetFileName(filePath)))
             {
                 extracted.Add(candidate);
             }
@@ -1779,7 +1782,8 @@ internal static class BodySlideSourceProjectSupport
         int basePriority,
         bool isHighWeight,
         string payloadKind,
-        out SourceSliderCandidate candidate)
+        out SourceSliderCandidate candidate,
+        string? sourceAssetName = null)
     {
         var isZap = IsLikelyZapSliderName(sliderName);
         if (string.IsNullOrWhiteSpace(sliderName))
@@ -1800,7 +1804,15 @@ internal static class BodySlideSourceProjectSupport
             basePriority + ComputePayloadPriorityOffset(stats),
             isZap,
             stats,
-            new SourceMorphPayload(sliderName, isHighWeight, payloadKind, deltas.Count, deltas));
+            new SourceMorphPayload(
+                sliderName,
+                isHighWeight,
+                payloadKind,
+                deltas.Count,
+                deltas,
+                sourceAssetName,
+                ShapeIdentityStatus: "unresolved",
+                VertexOrderStatus: "unverified"));
         return true;
     }
 
@@ -2000,7 +2012,10 @@ internal static class BodySlideSourceProjectSupport
                     : fallbackInference is not null
                         ? "inferred-not-externally-verified"
                         : "not-observed",
-                UnsupportedOspSemantics = UnsupportedOspSemantics ?? []
+                UnsupportedOspSemantics = UnsupportedOspSemantics ?? [],
+                SourcePayloadCorrespondenceStatus = ReusableMorphPayloads.Count > 0
+                    ? "shape-identity-and-vertex-order-unverified"
+                    : "no-source-payload-candidates"
             };
         }
     }

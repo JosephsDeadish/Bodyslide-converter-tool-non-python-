@@ -20,7 +20,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - **deformation profile modifier** — fine-tunes regional morphs using 8 named profiles (balanced, curvy, slim, petite, athletic, muscular, lean, anime)
 - **BodySlide `.osp` project generation** — outputs a valid BodySlide slider-set XML alongside each converted armor when slider export is enabled
 - incomplete-source BodySlide fallback recovery that can infer likely source-body slider families plus fallback deformation-profile hints from nearby reference/body asset names when OSP/TRI/BSD support files are missing
-- source morph discovery can conservatively retarget topology-mismatched TRI/BSD deltas, but generated in-game TRI files are withheld unless shape identity and vertex order can be proven
+- source TRI/BSD/OSD payloads are recorded as candidates with asset-name provenance; parsed candidates remain ineligible for reuse until both target-shape identity and vertex-order correspondence are verified, and topology retargeting additionally requires an explicit verified map
 - **texture analysis** — detects DDS textures, classifies diffuse / normal / specular / glow / parallax / subsurface, identifies missing normal maps
 - **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths, including modular device-style armor packs that split body/head/world variants
 - export package + manifest/log output
@@ -91,7 +91,7 @@ works in every Skyrim installation.
 | Inputs | Single NIF, plugin sidecars, folders, and ZIP/7z/TAR-family archives are handled by the import/conversion paths. Folder and ZIP batch flows have end-to-end fixture coverage. | Every archive variant/layout, installed mod, or MO2 virtualized file view. |
 | NIF meshes | Geometry-family readers, topology/partition checks, weight variants, explicit unsupported-layout diagnostics, and reporting of textual/binary header versions plus user-version fields have synthetic regression coverage. Per-mesh reports label this evidence `automated-file-inspection-only` and external compatibility `untested`. Unknown or unsupported layouts are review cases, not safe conversions. | An exhaustive NIF-version/block-type matrix or every real-world mesh exporter. A parser `supported` status or recognized header does not establish installed-tool or in-game compatibility; no Skyrim edition is certified by the synthetic fixtures alone. |
 | Body profiles | Embedded profiles provide aliases, detection/reference tokens, slider names, transformations, skeleton framework labels, physics defaults, and expected support regions. Catalog integrity is checked in tests/readiness. | Exact values for every installed body-mod release, slider range, reference mesh, morph payload, or real outfit fit. Profile presence is not a real-asset compatibility test. |
-| BodySlide | OSP/ShapeData generation, source-project discovery, TRI/BSD parsing/reuse, and report-level output checks have regression coverage. | A successful build by the actual BodySlide/Outfit Studio executable, on a user’s installed project set, or in-game slider/morph behavior. |
+| BodySlide | OSP/ShapeData generation, source-project discovery, TRI/BSD parsing and provenance labeling, and report-level output checks have regression coverage. | Parsed source morph payloads are not reused based on vertex count alone; successful BodySlide/Outfit Studio builds and in-game slider/morph behavior remain unverified. |
 | Plugins and packaging | Synthetic plugin parsing/rewrite, ambiguity gates, Data-relative output, ZIP packaging, and MO2 metadata have regression coverage. | Correctness against every load order, installer choice, plugin combination, or MO2/Vortex installation. |
 | Skeleton and physics | Catalog bone resolution, mapping diagnostics, generated CBPC/SMP configuration, and readiness reports are checked by tests. | That a particular game installation has the required skeleton/runtime, or that the generated weights/chains simulate correctly in live gameplay. |
 | Desktop / MO2 / game | Startup routing and launcher argument behavior have automated tests; external proof harnesses describe Windows/UI/runtime/game checks. | A passing Windows desktop flow through MO2, live-game animation/collision testing, or proof for a specific load order until external evidence is imported. |
@@ -304,13 +304,14 @@ up to 16,777,216 pixels (64 MiB of base-level pixels). Larger or unsupported
 sources use the neutral fallback without loading their pixel payload for derivation;
 original textures are still copied unchanged. Derived DDS files contain a valid
 single-level header, and derivation checks cancellation during processing.
-Morph-reuse diagnostics use the same topology context as binary export and classify
-reuse/fallback without generating and discarding full retargeted vertex arrays.
-Morph diagnostics in `morphs.json` and the conversion manifest retain slider,
-weight, format, vertex-count and delta-count metadata rather than duplicating
-per-vertex source payload arrays. Full deltas remain available to BodySlide
-BSD/TRI/OSD generation. This bounds diagnostic growth by slider count, not by
-slider count multiplied by vertex count; it does not limit required mesh assets.
+Morph diagnostics in `morphs.json` and the conversion manifest describe parsed
+source payloads as candidates, recording the source asset filename and explicit
+shape-identity/vertex-order verification states without duplicating per-vertex
+arrays. The current source readers mark shape identity unresolved and vertex order
+unverified, so exact vertex-count matches are not enough to reuse a payload.
+Topology retargeting is also withheld unless an explicit retarget map is verified.
+Generated OSD fallback deltas remain synthetic, while generated TRI files remain
+withheld until shape identity and vertex order are proven.
 Readable BodySlide projects no longer automatically force every pack texture into
 each armor export: their resolved input NIFs participate in shader dependency
 checks, including `ShapeData`/`DataFolder` references. Morph-only OSD files do not

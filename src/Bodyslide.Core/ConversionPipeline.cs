@@ -239,7 +239,11 @@ public sealed record SourceMorphPayload(
     bool IsHighWeight,
     string PayloadKind,
     int VertexCount,
-    IReadOnlyList<(float X, float Y, float Z)> Deltas);
+    IReadOnlyList<(float X, float Y, float Z)> Deltas,
+    string? SourceAssetName = null,
+    string ShapeIdentityStatus = "unresolved",
+    string VertexOrderStatus = "unverified",
+    bool RetargetMapVerified = false);
 public sealed record SourceMorphPayloadVariants(
     SourceMorphPayload? LowWeight = null,
     SourceMorphPayload? HighWeight = null);
@@ -250,7 +254,7 @@ public sealed record SourceAssetSupportMetrics(
     bool HasReferenceAssets,
     bool UsedFallbackSliders,
     IReadOnlyList<string>? MissingAssets = null,
-    int ReusablePayloadSliderCount = 0,
+    int SourcePayloadCandidateSliderCount = 0,
     string? InferredSourceBody = null,
     IReadOnlyList<string>? InferenceSignals = null,
     string? InferredDeformationProfile = null,
@@ -263,6 +267,7 @@ public sealed record SourceAssetSupportMetrics(
     public string SliderDataProvenance { get; init; } = "unknown";
     public string SliderDataVerificationStatus { get; init; } = "not-validated";
     public IReadOnlyList<string> UnsupportedOspSemantics { get; init; } = [];
+    public string SourcePayloadCorrespondenceStatus { get; init; } = "unknown";
 }
 public sealed record MorphPayloadReuseSummary(
     int RequestedVariantCount,
@@ -24104,7 +24109,17 @@ internal sealed class LocalExportService(
             payload.IsHighWeight,
             payload.PayloadKind,
             payload.VertexCount,
-            DeltaCount = payload.Deltas.Count
+            DeltaCount = payload.Deltas.Count,
+            payload.SourceAssetName,
+            payload.ShapeIdentityStatus,
+            payload.VertexOrderStatus,
+            payload.RetargetMapVerified,
+            ReuseEligibility = string.Equals(payload.ShapeIdentityStatus, "verified", StringComparison.OrdinalIgnoreCase) &&
+                               string.Equals(payload.VertexOrderStatus, "verified", StringComparison.OrdinalIgnoreCase)
+                ? payload.RetargetMapVerified
+                    ? "shape-order-and-retarget-map-verified"
+                    : "shape-and-order-verified"
+                : "blocked-shape-or-order-unverified"
         };
 
         return new
@@ -24117,13 +24132,14 @@ internal sealed class LocalExportService(
             morphs.SourceBodyMatchRatio,
             SourceBodyMatchRatioMeaning = "Heuristic weighting/profile confidence; not measured body-fit accuracy.",
             morphs.SourceMorphQuality,
-            ReusableSourceMorphPayloads = morphs.ReusableSourceMorphPayloads?.ToDictionary(
+            SourceMorphPayloadCandidates = morphs.ReusableSourceMorphPayloads?.ToDictionary(
                 pair => pair.Key,
                 pair => new
                 {
                     LowWeight = DescribePayload(pair.Value.LowWeight),
                     HighWeight = DescribePayload(pair.Value.HighWeight)
                 }),
+            SourceMorphReusePolicy = "Parsed TRI/BSD/OSD payloads are candidates only; source shape identity and vertex order must both be verified before reuse.",
             morphs.SourceAssetSupport
         };
     }
@@ -41058,6 +41074,17 @@ internal sealed class LocalExportService(
 
             var candidate = isHighWeight ? variants.HighWeight : variants.LowWeight;
             if (candidate is null)
+            {
+                return false;
+            }
+
+            if (!string.Equals(candidate.ShapeIdentityStatus, "verified", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(candidate.VertexOrderStatus, "verified", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (candidate.VertexCount != vertexCount && !candidate.RetargetMapVerified)
             {
                 return false;
             }

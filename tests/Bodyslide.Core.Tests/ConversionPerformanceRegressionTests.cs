@@ -16,8 +16,12 @@ public sealed class ConversionPerformanceRegressionTests
         var sliders = Enumerable.Range(0, 20).Select(index => $"Slider{index}").ToArray();
         var payloads = sliders.ToDictionary(slider => slider, slider =>
             new SourceMorphPayloadVariants(
-                new SourceMorphPayload(slider, false, "bsd", 2, [(1f, 0f, 0f), (2f, 0f, 0f)]),
-                new SourceMorphPayload(slider, true, "bsd", 2, [(2f, 0f, 0f), (3f, 0f, 0f)])));
+                new SourceMorphPayload(
+                    slider, false, "bsd", 2, [(1f, 0f, 0f), (2f, 0f, 0f)],
+                    ShapeIdentityStatus: "verified", VertexOrderStatus: "verified", RetargetMapVerified: true),
+                new SourceMorphPayload(
+                    slider, true, "bsd", 2, [(2f, 0f, 0f), (3f, 0f, 0f)],
+                    ShapeIdentityStatus: "verified", VertexOrderStatus: "verified", RetargetMapVerified: true)));
         var method = GetMethod("BuildPayloadReuseSummary");
         method.Invoke(null, [sliders, payloads, 100_000, null]);
         var before = GC.GetAllocatedBytesForCurrentThread();
@@ -28,6 +32,54 @@ public sealed class ConversionPerformanceRegressionTests
         Assert.Equal(40, summary.RetargetedVariantCount);
         Assert.Equal(0, summary.FallbackVariantCount);
         Assert.True(allocated < 1_000_000, $"Metadata-only summary allocated {allocated} bytes.");
+    }
+
+    [Theory]
+    [InlineData("unresolved", "verified")]
+    [InlineData("verified", "unverified")]
+    [InlineData("unresolved", "unverified")]
+    public void PayloadReuseSummary_RejectsExactVertexCountWithoutShapeAndOrderProvenance(
+        string shapeIdentityStatus,
+        string vertexOrderStatus)
+    {
+        var payloads = new Dictionary<string, SourceMorphPayloadVariants>
+        {
+            ["Belly"] = new(
+                new SourceMorphPayload(
+                    "Belly", false, "bsd", 2, [(0.1f, 0f, 0f), (0.2f, 0f, 0f)], "Belly.bsd",
+                    shapeIdentityStatus, vertexOrderStatus),
+                new SourceMorphPayload(
+                    "Belly", true, "bsd", 2, [(0.2f, 0f, 0f), (0.3f, 0f, 0f)], "Belly_1.bsd",
+                    shapeIdentityStatus, vertexOrderStatus))
+        };
+
+        var summary = (MorphPayloadReuseSummary)GetMethod("BuildPayloadReuseSummary")
+            .Invoke(null, [new[] { "Belly" }, payloads, 2, null])!;
+
+        Assert.Equal(0, summary.ReusedVariantCount);
+        Assert.Equal(0, summary.RetargetedVariantCount);
+        Assert.Equal(2, summary.FallbackVariantCount);
+        Assert.Equal(new[] { "Belly", "Belly_1" }, summary.FallbackVariants);
+    }
+
+    [Fact]
+    public void PayloadReuseSummary_RejectsTopologyRetargetWithoutVerifiedRetargetMap()
+    {
+        var payloads = new Dictionary<string, SourceMorphPayloadVariants>
+        {
+            ["Belly"] = new(
+                new SourceMorphPayload(
+                    "Belly", false, "bsd", 2, [(0.1f, 0f, 0f), (0.2f, 0f, 0f)],
+                    ShapeIdentityStatus: "verified", VertexOrderStatus: "verified"),
+                null)
+        };
+
+        var summary = (MorphPayloadReuseSummary)GetMethod("BuildPayloadReuseSummary")
+            .Invoke(null, [new[] { "Belly" }, payloads, 5, null])!;
+
+        Assert.Equal(0, summary.ReusedVariantCount);
+        Assert.Equal(0, summary.RetargetedVariantCount);
+        Assert.Equal(2, summary.FallbackVariantCount);
     }
 
     [Theory]
@@ -171,7 +223,7 @@ public sealed class ConversionPerformanceRegressionTests
             var nif = Path.Combine(root, "armor.nif");
             await File.WriteAllTextAsync(nif, "mesh");
             var deltas = Enumerable.Repeat((1f, 2f, 3f), 100_000).ToArray();
-            var payload = new SourceMorphPayload("TestSlider", false, "bsd", deltas.Length, deltas);
+            var payload = new SourceMorphPayload("TestSlider", false, "bsd", deltas.Length, deltas, "TestSlider.bsd");
             var morphs = new MorphSet("low", "high", true, SliderCount: 1,
                 ReusableSourceMorphPayloads: new Dictionary<string, SourceMorphPayloadVariants>
                 {
@@ -187,9 +239,14 @@ public sealed class ConversionPerformanceRegressionTests
                 using var json = JsonDocument.Parse(await File.ReadAllTextAsync(path));
                 var summary = name == "morphs.json" ? json.RootElement : json.RootElement.GetProperty("Morphs");
                 Assert.Equal(1, summary.GetProperty("SliderCount").GetInt32());
-                var low = summary.GetProperty("ReusableSourceMorphPayloads").GetProperty("TestSlider").GetProperty("LowWeight");
+                var low = summary.GetProperty("SourceMorphPayloadCandidates").GetProperty("TestSlider").GetProperty("LowWeight");
                 Assert.Equal(deltas.Length, low.GetProperty("DeltaCount").GetInt32());
                 Assert.False(low.TryGetProperty("Deltas", out _));
+                Assert.Equal("TestSlider.bsd", low.GetProperty("SourceAssetName").GetString());
+                Assert.Equal("unresolved", low.GetProperty("ShapeIdentityStatus").GetString());
+                Assert.Equal("unverified", low.GetProperty("VertexOrderStatus").GetString());
+                Assert.Equal("blocked-shape-or-order-unverified", low.GetProperty("ReuseEligibility").GetString());
+                Assert.Contains("must both be verified", summary.GetProperty("SourceMorphReusePolicy").GetString());
             }
 
             Assert.Same(deltas, payload.Deltas);

@@ -12014,6 +12014,8 @@ public sealed class BsdSliderDataTests
         Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
         Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
         Assert.True(resolved.SourceAssetSupport.HasReferenceAssets);
+        Assert.True(resolved.SourceAssetSupport.SourcePayloadCandidateSliderCount > 0);
+        Assert.Equal("shape-identity-and-vertex-order-unverified", resolved.SourceAssetSupport.SourcePayloadCorrespondenceStatus);
         Assert.DoesNotContain("morph-payloads", resolved.SourceAssetSupport.MissingAssets ?? []);
         Assert.DoesNotContain("reference-assets", resolved.SourceAssetSupport.MissingAssets ?? []);
         Assert.NotNull(resolved.ReusableMorphPayloads);
@@ -12022,6 +12024,9 @@ public sealed class BsdSliderDataTests
         Assert.NotNull(wingPayloads.HighWeight);
         Assert.Equal("bsd", wingPayloads.LowWeight!.PayloadKind);
         Assert.Equal("bsd", wingPayloads.HighWeight!.PayloadKind);
+        Assert.EndsWith(".bsd", wingPayloads.LowWeight.SourceAssetName, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("unresolved", wingPayloads.LowWeight.ShapeIdentityStatus);
+        Assert.Equal("unverified", wingPayloads.LowWeight.VertexOrderStatus);
         Assert.True(resolved.ReusableMorphPayloads.TryGetValue("AbdomenLength", out var abdomenPayloads));
         Assert.NotNull(abdomenPayloads.LowWeight);
         Assert.Equal("tri", abdomenPayloads.LowWeight!.PayloadKind);
@@ -30235,7 +30240,7 @@ public sealed class OutputCompletenessTests
                     HasReferenceAssets: true,
                     UsedFallbackSliders: true,
                     MissingAssets: [],
-                    ReusablePayloadSliderCount: 0,
+                    SourcePayloadCandidateSliderCount: 0,
                     InferredSourceBody: null,
                     InferenceSignals: [],
                     InferredDeformationProfile: null,
@@ -30880,7 +30885,10 @@ public sealed class OutputCompletenessTests
                         12,
                         Enumerable.Range(0, 12)
                             .Select(index => (X: 0.05f + (index * 0.01f), Y: 0f, Z: 0.02f))
-                            .ToArray()),
+                            .ToArray(),
+                        ShapeIdentityStatus: "verified",
+                        VertexOrderStatus: "verified",
+                        RetargetMapVerified: true),
                     null)
             };
 
