@@ -354,7 +354,7 @@ internal static class SkyrimSseNifShapeCorrespondence
 
         if (source.Vertices.Count == 0 ||
             source.Vertices.Count != target.Vertices.Count ||
-            !source.Vertices.SequenceEqual(target.Vertices) ||
+            !HasExactVertexOrder(source.Vertices, target.Vertices) ||
             source.TriangleIndices.Count != target.TriangleIndices.Count ||
             !source.TriangleIndices.SequenceEqual(target.TriangleIndices))
         {
@@ -365,10 +365,36 @@ internal static class SkyrimSseNifShapeCorrespondence
         return true;
     }
 
+    private static bool HasExactVertexOrder(
+        IReadOnlyList<MeshVertex> source,
+        IReadOnlyList<MeshVertex> target)
+    {
+        for (var index = 0; index < source.Count; index++)
+        {
+            var sourceVertex = source[index];
+            var targetVertex = target[index];
+            if (BitConverter.SingleToInt32Bits(sourceVertex.X) != BitConverter.SingleToInt32Bits(targetVertex.X) ||
+                BitConverter.SingleToInt32Bits(sourceVertex.Y) != BitConverter.SingleToInt32Bits(targetVertex.Y) ||
+                BitConverter.SingleToInt32Bits(sourceVertex.Z) != BitConverter.SingleToInt32Bits(targetVertex.Z))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static string ComputeFingerprint(SkyrimSseNifShape shape)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         Span<byte> value = stackalloc byte[sizeof(uint)];
+        hash.AppendData("SlideSmith.ExactShapeCorrespondence.v1\0"u8);
+        var shapeName = Encoding.UTF8.GetBytes(shape.Name);
+        BinaryPrimitives.WriteInt32LittleEndian(value, shapeName.Length);
+        hash.AppendData(value);
+        hash.AppendData(shapeName);
+        BinaryPrimitives.WriteInt32LittleEndian(value, shape.Vertices.Count);
+        hash.AppendData(value);
         foreach (var vertex in shape.Vertices)
         {
             BinaryPrimitives.WriteInt32LittleEndian(value, BitConverter.SingleToInt32Bits(vertex.X));
@@ -379,6 +405,8 @@ internal static class SkyrimSseNifShapeCorrespondence
             hash.AppendData(value);
         }
 
+        BinaryPrimitives.WriteInt32LittleEndian(value, shape.TriangleIndices.Count);
+        hash.AppendData(value);
         Span<byte> triangleIndex = stackalloc byte[sizeof(ushort)];
         foreach (var index in shape.TriangleIndices)
         {
