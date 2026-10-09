@@ -1271,6 +1271,29 @@ internal static class BodySlideSourceProjectSupport
                 semantics.Add("source-slider-data-links");
             }
 
+            var sliderRangeElements = slider.Elements().Where(static element =>
+                element.Name.LocalName.Equals("Low", StringComparison.OrdinalIgnoreCase) ||
+                element.Name.LocalName.Equals("High", StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (sliderRangeElements.Length > 0)
+            {
+                semantics.Add("slider-weight-ranges-rebuilt");
+                if (sliderRangeElements.Any(static element =>
+                        element.Attributes().Any(attribute =>
+                            !attribute.Name.LocalName.Equals("value", StringComparison.OrdinalIgnoreCase)) ||
+                        element.Elements().Any()))
+                {
+                    semantics.Add("slider-weight-range-options");
+                }
+            }
+
+            var knownSliderChildren = new HashSet<string>(
+                ["Data", "Low", "High"],
+                StringComparer.OrdinalIgnoreCase);
+            if (slider.Elements().Any(element => !knownSliderChildren.Contains(element.Name.LocalName)))
+            {
+                semantics.Add("slider-unknown-elements");
+            }
+
             if (new[] { "default", "small", "big" }.Any(attributeName =>
                     double.TryParse(
                         slider.Attribute(attributeName)?.Value,

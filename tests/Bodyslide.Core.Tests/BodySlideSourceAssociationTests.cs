@@ -114,6 +114,9 @@ public sealed class BodySlideSourceAssociationTests
                     <OutputFile gender="female" GenWeights="true" options="custom">jacket</OutputFile>
                     <Slider name="Fit" default="0.25" small="0.1" big="0.8" invert="true" uv="true">
                       <Data target="Torso">shared.osd#Fit</Data>
+                      <Low value="5" custom="true" />
+                      <High value="95" />
+                      <CustomSliderSetting enabled="true" />
                     </Slider>
                     <Reference>reference.nif</Reference>
                     <Zap target="Sleeves" />
@@ -137,6 +140,9 @@ public sealed class BodySlideSourceAssociationTests
                     "output-path-rebuilt",
                     "seam-or-lock-normal-settings",
                     "slider-set-unknown-attributes",
+                    "slider-unknown-elements",
+                    "slider-weight-range-options",
+                    "slider-weight-ranges-rebuilt",
                     "source-osp-version",
                     "source-path-options",
                     "source-reference-links",

@@ -123,7 +123,8 @@ or counted as a successful build. Synthetic or retargeted OSD morph records are
 reported as fallback data, not recovered source morphs.
 Matched source OSP settings that the exporter reconstructs differently—including
 custom slider-set/path options, source output-path relocation, defaults, zaps,
-weight-output mode, references, and seam/normal flags—are listed in
+weight-output mode and nested `<Low>`/`<High>` slider ranges, references, and
+seam/normal flags—are listed in
 `SourceAssetSupport.UnsupportedOspSemantics` and produce the medium-severity
 `source-osp-semantics-not-preserved` validation issue. These diagnostics identify
 settings needing review; they do not claim those settings were preserved.
