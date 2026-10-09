@@ -19,7 +19,7 @@
     "Notes"
   ],
   "properties": {
-    "ContractVersion": { "const": "1.1" },
+    "ContractVersion": { "const": "1.2" },
     "HarnessKind": { "type": "string", "minLength": 1 },
     "OverallStatus": { "type": "string", "minLength": 1 },
     "Host": {
@@ -111,6 +111,7 @@
         "ToolVersion",
         "ObservedAtUtc",
         "EvidenceArtifacts",
+        "Details",
         "Notes"
       ],
       "properties": {
@@ -130,7 +131,73 @@
           "minItems": 1,
           "items": { "type": "string", "minLength": 1 }
         },
+        "Details": { "type": "object" },
         "Notes": { "$ref": "#/$defs/stringList" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "ObservationType": { "const": "bodyslide-build" } } },
+          "then": { "properties": { "Details": { "$ref": "#/$defs/bodySlideBuildDetails" } } }
+        },
+        {
+          "if": { "properties": { "ObservationType": { "const": "output-inspection" } } },
+          "then": { "properties": { "Details": { "$ref": "#/$defs/outputInspectionDetails" } } }
+        },
+        {
+          "if": { "properties": { "ObservationType": { "const": "deformation-observation" } } },
+          "then": { "properties": { "Details": { "$ref": "#/$defs/deformationObservationDetails" } } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "evidenceFile": {
+      "type": "object",
+      "required": [ "Path", "SizeBytes", "Sha256" ],
+      "properties": {
+        "Path": { "type": "string", "minLength": 1 },
+        "SizeBytes": { "type": "integer", "minimum": 0 },
+        "Sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "bodySlideBuildDetails": {
+      "type": "object",
+      "required": [ "OutfitName", "PresetName", "Arguments", "TargetDirectoryWasEmpty", "ExitCode", "Outputs" ],
+      "properties": {
+        "OutfitName": { "type": "string", "minLength": 1 },
+        "PresetName": { "type": "string", "minLength": 1 },
+        "Arguments": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "TargetDirectoryWasEmpty": { "const": true },
+        "ExitCode": { "const": 0 },
+        "Outputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidenceFile" } }
+      },
+      "additionalProperties": false
+    },
+    "outputInspectionDetails": {
+      "type": "object",
+      "required": [ "InspectedFiles", "SourceAndOutputHashesCompared", "ShapeTargetsVerified", "OsdRecordsVerified", "VertexIndicesVerified", "Findings" ],
+      "properties": {
+        "InspectedFiles": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidenceFile" } },
+        "SourceAndOutputHashesCompared": { "const": true },
+        "ShapeTargetsVerified": { "const": true },
+        "OsdRecordsVerified": { "const": true },
+        "VertexIndicesVerified": { "const": true },
+        "Findings": { "$ref": "#/$defs/stringList" }
+      },
+      "additionalProperties": false
+    },
+    "deformationObservationDetails": {
+      "type": "object",
+      "required": [ "ShapeName", "SliderName", "LowEndpointValue", "HighEndpointValue", "LowEndpointDeformedTarget", "HighEndpointDeformedTarget", "LowEndpointEvidence", "HighEndpointEvidence" ],
+      "properties": {
+        "ShapeName": { "type": "string", "minLength": 1 },
+        "SliderName": { "type": "string", "minLength": 1 },
+        "LowEndpointValue": { "type": "number" },
+        "HighEndpointValue": { "type": "number" },
+        "LowEndpointDeformedTarget": { "const": true },
+        "HighEndpointDeformedTarget": { "const": true },
+        "LowEndpointEvidence": { "type": "string", "minLength": 1 },
+        "HighEndpointEvidence": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     }

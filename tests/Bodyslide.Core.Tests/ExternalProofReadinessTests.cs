@@ -1,4 +1,5 @@
 using Bodyslide.Core;
+using System.Text.Json;
 
 namespace Bodyslide.Core.Tests;
 
@@ -60,7 +61,7 @@ public sealed class ExternalProofReadinessTests
     public void ExternalCompatibilityProof_RequiresBuildInspectionAndDeformationObservations()
     {
         var proof = ExternalProofHarnessSupport.BuildExternalCompatibilityProof(
-            "1.1",
+            "1.2",
             [
                 CreateObservation("bodyslide-build", "proof-evidence/validation/bodyslide-build/build.log"),
                 CreateObservation("output-inspection", "proof-evidence/validation/output-inspection/inspection.txt")
@@ -75,7 +76,7 @@ public sealed class ExternalProofReadinessTests
     public void ExternalCompatibilityProof_RejectsAutomatedInspectionAsDeformationEvidence()
     {
         var proof = ExternalProofHarnessSupport.BuildExternalCompatibilityProof(
-            "1.1",
+            "1.2",
             [
                 CreateObservation("bodyslide-build", "proof-evidence/validation/bodyslide-build/build.log"),
                 CreateObservation("output-inspection", "proof-evidence/validation/output-inspection/inspection.txt"),
@@ -91,7 +92,7 @@ public sealed class ExternalProofReadinessTests
     public void ExternalCompatibilityProof_AcceptsOnlyVersionedCategorizedObservations()
     {
         var proof = ExternalProofHarnessSupport.BuildExternalCompatibilityProof(
-            "1.1",
+            "1.2",
             [
                 CreateObservation("bodyslide-build", "proof-evidence/validation/bodyslide-build/build.log"),
                 CreateObservation("output-inspection", "proof-evidence/validation/output-inspection/inspection.txt"),
@@ -103,6 +104,21 @@ public sealed class ExternalProofReadinessTests
         Assert.Empty(proof.MissingItems);
     }
 
+    [Fact]
+    public void ExternalCompatibilityProof_RejectsPassingObservationsWithoutDetails()
+    {
+        var proof = ExternalProofHarnessSupport.BuildExternalCompatibilityProof(
+            "1.2",
+            [
+                CreateObservation("bodyslide-build", "proof-evidence/validation/bodyslide-build/build.log") with { Details = null },
+                CreateObservation("output-inspection", "proof-evidence/validation/output-inspection/inspection.txt"),
+                CreateObservation("deformation-observation", "proof-evidence/validation/deformation-observation/observation.txt")
+            ]);
+
+        Assert.False(proof.StrictProofSatisfied);
+        Assert.Contains("observation:bodyslide-build:required-details", proof.MissingItems);
+    }
+
     private static ImportedProofValidationObservation CreateObservation(string type, string evidencePath) =>
         new(
             type,
@@ -110,6 +126,48 @@ public sealed class ExternalProofReadinessTests
             "ExternalValidationTool",
             "1.0",
             "2026-10-09T12:00:00Z",
-            [evidencePath],
-            []);
+            type is "bodyslide-build" or "output-inspection"
+                ? [evidencePath, "output.nif"]
+                : [evidencePath],
+            [],
+            JsonSerializer.SerializeToElement<object>(type switch
+            {
+                "bodyslide-build" => new
+                {
+                    OutfitName = "TestOutfit",
+                    PresetName = "TestPreset",
+                    Arguments = new[] { "--build", "TestOutfit" },
+                    TargetDirectoryWasEmpty = true,
+                    ExitCode = 0,
+                    Outputs = new[] { ProofFile("output.nif") }
+                },
+                "output-inspection" => new
+                {
+                    InspectedFiles = new[] { ProofFile("output.nif") },
+                    SourceAndOutputHashesCompared = true,
+                    ShapeTargetsVerified = true,
+                    OsdRecordsVerified = true,
+                    VertexIndicesVerified = true,
+                    Findings = Array.Empty<string>()
+                },
+                "deformation-observation" => new
+                {
+                    ShapeName = "Body",
+                    SliderName = "TestSlider",
+                    LowEndpointValue = 0,
+                    HighEndpointValue = 100,
+                    LowEndpointDeformedTarget = true,
+                    HighEndpointDeformedTarget = true,
+                    LowEndpointEvidence = evidencePath,
+                    HighEndpointEvidence = evidencePath
+                },
+                _ => new { }
+            }));
+
+    private static object ProofFile(string path) => new
+    {
+        Path = path,
+        SizeBytes = 1,
+        Sha256 = new string('a', 64)
+    };
 }

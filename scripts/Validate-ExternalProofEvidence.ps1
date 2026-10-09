@@ -65,8 +65,8 @@ foreach ($requiredPath in @($manifestPath, $resultPath)) {
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
 $contractVersion = Get-Value $result @("ContractVersion", "Version")
-if ([string]$contractVersion -ne "1.1") {
-    throw "The proof result bundle must use contractVersion 1.1 to include required compatibility observations."
+if ([string]$contractVersion -ne "1.2") {
+    throw "The proof result bundle must use contractVersion 1.2 to include detailed compatibility observations."
 }
 
 $artifactReferences = [Collections.Generic.List[string]]::new()
@@ -129,6 +129,83 @@ foreach ($observationType in $requiredObservationTypes) {
     if (-not $hasCategorizedArtifact) {
         throw "The '$observationType' validation observation must reference an artifact under '$evidencePrefix'."
     }
+
+    $details = Get-Value $observation @("Details")
+    if ($null -eq $details) {
+        throw "The '$observationType' validation observation must include structured Details."
+    }
+
+    switch ($observationType) {
+        "bodyslide-build" {
+            if ([string]::IsNullOrWhiteSpace([string](Get-Value $details @("OutfitName"))) -or
+                [string]::IsNullOrWhiteSpace([string](Get-Value $details @("PresetName"))) -or
+                @(Get-Value $details @("Arguments")).Count -eq 0 -or
+                @(Get-Value $details @("Arguments") | Where-Object { [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0 -or
+                (Get-Value $details @("TargetDirectoryWasEmpty")) -ne $true -or
+                (Get-Value $details @("ExitCode")) -ne 0) {
+                throw "The 'bodyslide-build' validation observation has invalid build details."
+            }
+            $detailFiles = @(Get-Value $details @("Outputs"))
+        }
+        "output-inspection" {
+            if ((Get-Value $details @("SourceAndOutputHashesCompared")) -ne $true -or
+                (Get-Value $details @("ShapeTargetsVerified")) -ne $true -or
+                (Get-Value $details @("OsdRecordsVerified")) -ne $true -or
+                (Get-Value $details @("VertexIndicesVerified")) -ne $true -or
+                @(Get-Value $details @("Findings")).Count -gt 0) {
+                throw "The 'output-inspection' validation observation has invalid inspection details."
+            }
+            $detailFiles = @(Get-Value $details @("InspectedFiles"))
+        }
+        "deformation-observation" {
+            if ([string]::IsNullOrWhiteSpace([string](Get-Value $details @("ShapeName"))) -or
+                [string]::IsNullOrWhiteSpace([string](Get-Value $details @("SliderName"))) -or
+                (Get-Value $details @("LowEndpointDeformedTarget")) -ne $true -or
+                (Get-Value $details @("HighEndpointDeformedTarget")) -ne $true) {
+                throw "The 'deformation-observation' validation observation has invalid endpoint details."
+            }
+            foreach ($endpointProperty in @("LowEndpointValue", "HighEndpointValue")) {
+                $endpointValue = 0.0
+                if (-not [double]::TryParse(
+                        [string](Get-Value $details @($endpointProperty)),
+                        [Globalization.NumberStyles]::Float,
+                        [Globalization.CultureInfo]::InvariantCulture,
+                        [ref]$endpointValue) -or
+                    [double]::IsNaN($endpointValue) -or
+                    [double]::IsInfinity($endpointValue)) {
+                    throw "The 'deformation-observation' validation observation has an invalid $endpointProperty."
+                }
+            }
+            foreach ($endpointEvidenceProperty in @("LowEndpointEvidence", "HighEndpointEvidence")) {
+                $endpointEvidence = [string](Get-Value $details @($endpointEvidenceProperty))
+                if ([string]::IsNullOrWhiteSpace($endpointEvidence) -or
+                    @((Get-Value $observation @("EvidenceArtifacts")) | Where-Object {
+                        [string]$_ -ieq $endpointEvidence
+                    }).Count -eq 0) {
+                    throw "The 'deformation-observation' must reference each endpoint evidence artifact."
+                }
+            }
+            $detailFiles = @()
+        }
+    }
+
+    if ($observationType -in @("bodyslide-build", "output-inspection")) {
+        if ($detailFiles.Count -eq 0) {
+            throw "The '$observationType' observation must identify at least one output file."
+        }
+        foreach ($detailFile in $detailFiles) {
+            $filePath = [string](Get-Value $detailFile @("Path"))
+            $fileSize = 0L
+            $fileHash = [string](Get-Value $detailFile @("Sha256"))
+            if ([string]::IsNullOrWhiteSpace($filePath) -or
+                -not [long]::TryParse([string](Get-Value $detailFile @("SizeBytes")), [ref]$fileSize) -or
+                $fileSize -lt 0 -or
+                $fileHash -notmatch '^[A-Fa-f0-9]{64}$') {
+                throw "The '$observationType' observation contains an invalid output file record."
+            }
+            $artifactReferences.Add($filePath)
+        }
+    }
 }
 
 $componentResults = Get-Value $result @("ComponentResults", "Components")
@@ -145,6 +222,7 @@ if ($references.Count -eq 0) {
 
 $rootPrefix = $root.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 $indexedFiles = [Collections.Generic.List[object]]::new()
+$indexedFileByPath = @{}
 $missing = [Collections.Generic.List[string]]::new()
 foreach ($reference in $references) {
     $relativePath = $reference.Replace('\', '/')
@@ -198,11 +276,39 @@ foreach ($reference in $references) {
             Length = $file.Length
             Sha256 = $hash.Hash.ToLowerInvariant()
         })
+        $indexedFileByPath[[IO.Path]::GetRelativePath($root, $file.FullName).Replace('\', '/')] = @{
+            Length = $file.Length
+            Sha256 = $hash.Hash.ToLowerInvariant()
+        }
+    }
+}
+
+foreach ($observation in $observations) {
+    $details = Get-Value $observation @("Details")
+    foreach ($propertyName in @("Outputs", "InspectedFiles")) {
+        $detailFiles = Get-Value $details @($propertyName)
+        if ($null -eq $detailFiles) {
+            continue
+        }
+        foreach ($detailFile in @($detailFiles)) {
+            if ($null -eq $detailFile) {
+                continue
+            }
+            $relativePath = ([string](Get-Value $detailFile @("Path"))).Replace('\', '/')
+            if (-not $indexedFileByPath.ContainsKey($relativePath)) {
+                throw "A validation detail file is not present in the evidence inventory: $relativePath"
+            }
+            $actual = $indexedFileByPath[$relativePath]
+            if ([long](Get-Value $detailFile @("SizeBytes")) -ne [long]$actual.Length -or
+                [string](Get-Value $detailFile @("Sha256")) -ine [string]$actual.Sha256) {
+                throw "A validation detail file's size or SHA-256 does not match the evidence file: $relativePath"
+            }
+        }
     }
 }
 
 $report = [ordered]@{
-    ContractVersion = "1.1"
+    ContractVersion = "1.2"
     GeneratedAtUtc = [DateTime]::UtcNow.ToString("O")
     HarnessContractVersion = Get-Value $manifest @("ContractVersion")
     ResultContractVersion = $contractVersion

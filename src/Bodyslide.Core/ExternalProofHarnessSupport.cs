@@ -140,7 +140,8 @@ public sealed record ImportedProofValidationObservation(
     string ToolVersion,
     string ObservedAtUtc,
     IReadOnlyList<string> EvidenceArtifacts,
-    IReadOnlyList<string> Notes);
+    IReadOnlyList<string> Notes,
+    JsonElement? Details = null);
 
 public sealed record ProofExecutionState(
     string Axis,
@@ -184,7 +185,7 @@ internal static class ExternalProofHarnessSupport
     public const string ResultBundleFileName = "proof-result-bundle.json";
     public const string EvidenceRootDirectory = "proof-evidence";
     public const string ContractVersion = "1.0";
-    public const string ResultBundleContractVersion = "1.1";
+    public const string ResultBundleContractVersion = "1.2";
     private static readonly (string Type, string EvidenceDirectory)[] RequiredValidationObservations =
     [
         ("bodyslide-build", "bodyslide-build"),
@@ -797,16 +798,20 @@ internal static class ExternalProofHarnessSupport
 
             var evidencePrefix = $"{EvidenceRootDirectory}/validation/{evidenceDirectory}/";
             var hasCategorizedEvidence = observation.EvidenceArtifacts.Count > 0 &&
-                observation.EvidenceArtifacts.All(artifact =>
+                observation.EvidenceArtifacts.All(IsSafeRelativeEvidencePath) &&
+                observation.EvidenceArtifacts.Any(artifact =>
             {
                 var relativePath = artifact.Replace('\\', '/');
-                return !Path.IsPathRooted(relativePath) &&
-                       !relativePath.Split('/').Any(segment => segment is "." or "..") &&
-                       relativePath.StartsWith(evidencePrefix, StringComparison.OrdinalIgnoreCase);
+                return relativePath.StartsWith(evidencePrefix, StringComparison.OrdinalIgnoreCase);
             });
             if (!hasCategorizedEvidence)
             {
                 missing.Add($"observation:{type}:categorized-evidence");
+            }
+
+            if (!HasValidObservationDetails(observation))
+            {
+                missing.Add($"observation:{type}:required-details");
             }
         }
 
@@ -830,6 +835,136 @@ internal static class ExternalProofHarnessSupport
             EvidenceArtifacts: evidence,
             HostDetails: [],
             Notes: notes);
+    }
+
+    private static bool HasValidObservationDetails(ImportedProofValidationObservation observation)
+    {
+        if (observation.Details is not JsonElement details || details.ValueKind is not JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        return observation.ObservationType.ToLowerInvariant() switch
+        {
+            "bodyslide-build" =>
+                HasNonEmptyString(details, "OutfitName") &&
+                HasNonEmptyString(details, "PresetName") &&
+                HasNonEmptyStringArray(details, "Arguments") &&
+                HasBoolean(details, "TargetDirectoryWasEmpty", true) &&
+                HasInteger(details, "ExitCode", 0) &&
+                HasEvidenceFileArray(details, "Outputs", observation.EvidenceArtifacts),
+            "output-inspection" =>
+                HasEvidenceFileArray(details, "InspectedFiles", observation.EvidenceArtifacts) &&
+                HasBoolean(details, "SourceAndOutputHashesCompared", true) &&
+                HasBoolean(details, "ShapeTargetsVerified", true) &&
+                HasBoolean(details, "OsdRecordsVerified", true) &&
+                HasBoolean(details, "VertexIndicesVerified", true) &&
+                HasEmptyStringArray(details, "Findings"),
+            "deformation-observation" =>
+                HasNonEmptyString(details, "ShapeName") &&
+                HasNonEmptyString(details, "SliderName") &&
+                HasFiniteNumber(details, "LowEndpointValue") &&
+                HasFiniteNumber(details, "HighEndpointValue") &&
+                HasBoolean(details, "LowEndpointDeformedTarget", true) &&
+                HasBoolean(details, "HighEndpointDeformedTarget", true) &&
+                HasNonEmptyString(details, "LowEndpointEvidence") &&
+                HasNonEmptyString(details, "HighEndpointEvidence") &&
+                observation.EvidenceArtifacts.Contains(
+                    ReadStringProperty(details, "LowEndpointEvidence") ?? string.Empty,
+                    StringComparer.OrdinalIgnoreCase) &&
+                observation.EvidenceArtifacts.Contains(
+                    ReadStringProperty(details, "HighEndpointEvidence") ?? string.Empty,
+                    StringComparer.OrdinalIgnoreCase),
+            _ => false
+        };
+    }
+
+    private static bool HasEvidenceFileArray(
+        JsonElement details,
+        string propertyName,
+        IReadOnlyList<string> evidenceArtifacts)
+    {
+        var value = TryGetProperty(details, propertyName);
+        if (value is not JsonElement files || files.ValueKind is not JsonValueKind.Array || files.GetArrayLength() == 0)
+        {
+            return false;
+        }
+
+        return files.EnumerateArray().All(file =>
+            file.ValueKind is JsonValueKind.Object &&
+            HasNonEmptyString(file, "Path") &&
+            IsSafeRelativeEvidencePath(ReadStringProperty(file, "Path")) &&
+            HasIntegerAtLeast(file, "SizeBytes", 0) &&
+            ReadStringProperty(file, "Sha256") is { } hash &&
+            hash.Length == 64 &&
+            hash.All(Uri.IsHexDigit) &&
+            evidenceArtifacts.Contains(ReadStringProperty(file, "Path") ?? string.Empty, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static bool IsSafeRelativeEvidencePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        var normalized = path.Replace('\\', '/');
+        return !Path.IsPathRooted(normalized) &&
+               !normalized.Contains(':') &&
+               !normalized.Split('/').Any(static segment => segment is "" or "." or "..");
+    }
+
+    private static bool HasNonEmptyString(JsonElement element, string propertyName) =>
+        !string.IsNullOrWhiteSpace(ReadStringProperty(element, propertyName));
+
+    private static bool HasNonEmptyStringArray(JsonElement element, string propertyName)
+    {
+        var value = TryGetProperty(element, propertyName);
+        return value is JsonElement array &&
+               array.ValueKind is JsonValueKind.Array &&
+               array.GetArrayLength() > 0 &&
+               array.EnumerateArray().All(static item =>
+                   item.ValueKind is JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()));
+    }
+
+    private static bool HasEmptyStringArray(JsonElement element, string propertyName)
+    {
+        var value = TryGetProperty(element, propertyName);
+        return value is JsonElement array &&
+               array.ValueKind is JsonValueKind.Array &&
+               array.GetArrayLength() == 0;
+    }
+
+    private static bool HasBoolean(JsonElement element, string propertyName, bool expected)
+    {
+        var value = TryGetProperty(element, propertyName);
+        return value is JsonElement boolean &&
+               boolean.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+               boolean.GetBoolean() == expected;
+    }
+
+    private static bool HasInteger(JsonElement element, string propertyName, int expected)
+    {
+        var value = TryGetProperty(element, propertyName);
+        return value is JsonElement number &&
+               number.TryGetInt32(out var actual) &&
+               actual == expected;
+    }
+
+    private static bool HasIntegerAtLeast(JsonElement element, string propertyName, long minimum)
+    {
+        var value = TryGetProperty(element, propertyName);
+        return value is JsonElement number &&
+               number.TryGetInt64(out var actual) &&
+               actual >= minimum;
+    }
+
+    private static bool HasFiniteNumber(JsonElement element, string propertyName)
+    {
+        var value = TryGetProperty(element, propertyName);
+        return value is JsonElement number &&
+               number.TryGetDouble(out var actual) &&
+               double.IsFinite(actual);
     }
 
     private static ProofExecutionState BuildRuntimeProofExecution(
@@ -1683,7 +1818,8 @@ internal static class ExternalProofHarnessSupport
                 ReadStringProperty(item, "ToolVersion", "toolVersion") ?? string.Empty,
                 ReadStringProperty(item, "ObservedAtUtc", "observedAtUtc") ?? string.Empty,
                 ReadStringArrayProperty(item, "EvidenceArtifacts", "evidenceArtifacts"),
-                ReadStringArrayProperty(item, "Notes", "notes")));
+                ReadStringArrayProperty(item, "Notes", "notes"),
+                TryGetProperty(item, "Details", "details") is JsonElement details ? details.Clone() : null));
         }
 
         return result;

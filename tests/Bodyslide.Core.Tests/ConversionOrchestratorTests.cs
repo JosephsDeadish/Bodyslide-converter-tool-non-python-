@@ -20866,7 +20866,7 @@ public sealed class RealisticModPackFixtureTests
 
             var payload = new
             {
-                ContractVersion = "1.1",
+                ContractVersion = "1.2",
                 HarnessKind = "external-proof-roundtrip-runner",
                 OverallStatus = status,
                 Host = new
@@ -21085,7 +21085,7 @@ public sealed class RealisticModPackFixtureTests
 
             var payload = new
             {
-                ContractVersion = "1.1",
+                ContractVersion = "1.2",
                 HarnessKind = "external-proof-runner",
                 Status = "pass",
                 HostDetails = new
@@ -21504,7 +21504,7 @@ public sealed class RealisticModPackFixtureTests
 
             var payload = new
             {
-                ContractVersion = "1.1",
+                ContractVersion = "1.2",
                 HarnessKind = "external-proof-evidence-check",
                 OverallStatus = "pass",
                 Host = new
@@ -21916,7 +21916,7 @@ public sealed class RealisticModPackFixtureTests
 
             var payload = new
             {
-                ContractVersion = "1.1",
+                ContractVersion = "1.2",
                 HarnessKind = "external-proof-dot-prefix-coverage",
                 OverallStatus = "pass",
                 Host = new
@@ -22119,7 +22119,7 @@ public sealed class RealisticModPackFixtureTests
 
             var payload = new
             {
-                ContractVersion = "1.1",
+                ContractVersion = "1.2",
                 HarnessKind = "external-proof-stale-missing-expected-artifacts",
                 OverallStatus = "pass",
                 Host = new
@@ -22963,8 +22963,17 @@ public sealed class RealisticModPackFixtureTests
             Tool = "BodySlide",
             ToolVersion = "5.6",
             ObservedAtUtc = "2026-10-09T12:00:00Z",
-            EvidenceArtifacts = new[] { "proof-evidence/validation/bodyslide-build/build.log" },
-            Notes = Array.Empty<string>()
+            EvidenceArtifacts = new[] { "proof-evidence/validation/bodyslide-build/build.log", "output.nif" },
+            Notes = Array.Empty<string>(),
+            Details = new
+            {
+                OutfitName = "TestOutfit",
+                PresetName = "TestPreset",
+                Arguments = new[] { "--build", "TestOutfit" },
+                TargetDirectoryWasEmpty = true,
+                ExitCode = 0,
+                Outputs = new[] { new { Path = "output.nif", SizeBytes = 1, Sha256 = new string('a', 64) } }
+            }
         },
         new
         {
@@ -22973,8 +22982,17 @@ public sealed class RealisticModPackFixtureTests
             Tool = "Outfit Studio",
             ToolVersion = "1.6",
             ObservedAtUtc = "2026-10-09T12:01:00Z",
-            EvidenceArtifacts = new[] { "proof-evidence/validation/output-inspection/inspection.txt" },
-            Notes = Array.Empty<string>()
+            EvidenceArtifacts = new[] { "proof-evidence/validation/output-inspection/inspection.txt", "output.nif" },
+            Notes = Array.Empty<string>(),
+            Details = new
+            {
+                InspectedFiles = new[] { new { Path = "output.nif", SizeBytes = 1, Sha256 = new string('a', 64) } },
+                SourceAndOutputHashesCompared = true,
+                ShapeTargetsVerified = true,
+                OsdRecordsVerified = true,
+                VertexIndicesVerified = true,
+                Findings = Array.Empty<string>()
+            }
         },
         new
         {
@@ -22984,7 +23002,18 @@ public sealed class RealisticModPackFixtureTests
             ToolVersion = "1.6",
             ObservedAtUtc = "2026-10-09T12:02:00Z",
             EvidenceArtifacts = new[] { "proof-evidence/validation/deformation-observation/observation.txt" },
-            Notes = Array.Empty<string>()
+            Notes = Array.Empty<string>(),
+            Details = new
+            {
+                ShapeName = "Body",
+                SliderName = "TestSlider",
+                LowEndpointValue = 0,
+                HighEndpointValue = 100,
+                LowEndpointDeformedTarget = true,
+                HighEndpointDeformedTarget = true,
+                LowEndpointEvidence = "proof-evidence/validation/deformation-observation/observation.txt",
+                HighEndpointEvidence = "proof-evidence/validation/deformation-observation/observation.txt"
+            }
         }
     ];
 }
