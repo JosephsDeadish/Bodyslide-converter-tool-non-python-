@@ -1667,9 +1667,8 @@ internal static class BodySlideSourceProjectSupport
             return false;
         }
 
-        var resolvedVertexCount = ResolveOsdPayloadVertexCount(filePath, payload.InferredVertexCount);
-        if (resolvedVertexCount > MorphPayloadLimits.MaximumVertices ||
-            (long)resolvedVertexCount * payload.Morphs.Count > MorphPayloadLimits.MaximumExpandedDeltas)
+        if (payload.InferredVertexCount > MorphPayloadLimits.MaximumVertices ||
+            (long)payload.InferredVertexCount * payload.Morphs.Count > MorphPayloadLimits.MaximumExpandedDeltas)
         {
             return false;
         }
@@ -1677,9 +1676,9 @@ internal static class BodySlideSourceProjectSupport
         foreach (var morph in payload.Morphs)
         {
             var sliderName = NormalizeSliderFileName(morph.Name);
-            var vertexCount = Math.Max(resolvedVertexCount, morph.SparseDeltas.Count == 0
+            var vertexCount = morph.SparseDeltas.Count == 0
                 ? payload.InferredVertexCount
-                : morph.SparseDeltas.Max(static delta => delta.Index + 1));
+                : morph.SparseDeltas.Max(static delta => delta.Index + 1);
             if (vertexCount <= 0)
             {
                 continue;
@@ -1783,27 +1782,6 @@ internal static class BodySlideSourceProjectSupport
     }
 
     private static int ResolveTriPayloadVertexCount(string filePath, int inferredVertexCount)
-    {
-        var resolved = Math.Max(0, inferredVertexCount);
-        var directory = Path.GetDirectoryName(filePath);
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-        {
-            return resolved;
-        }
-
-        foreach (var nifPath in Directory.EnumerateFiles(directory, "*.nif", SearchOption.TopDirectoryOnly))
-        {
-            var vertices = NifGeometrySignatureReader.TryReadFullVertices(nifPath);
-            if (vertices is { Count: > 0 })
-            {
-                resolved = Math.Max(resolved, vertices.Count);
-            }
-        }
-
-        return resolved;
-    }
-
-    private static int ResolveOsdPayloadVertexCount(string filePath, int inferredVertexCount)
     {
         var resolved = Math.Max(0, inferredVertexCount);
         var directory = Path.GetDirectoryName(filePath);

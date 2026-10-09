@@ -11714,7 +11714,9 @@ public sealed class BsdSliderDataTests
             </SliderSetInfo>
             """);
         await File.WriteAllBytesAsync(triPath, BuildInlineTriPayload(1, ("NordicWaist", [(0.125f, 0f, 0f)])));
-        await File.WriteAllBytesAsync(referencePath, new byte[64]);
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(
+            referencePath,
+            SyntheticNifTestData.CreateBodyVertices(12));
 
         var unrelatedShapeData = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "ShapeData", "UnrelatedSupport");
         Directory.CreateDirectory(unrelatedShapeData);
@@ -11832,6 +11834,8 @@ public sealed class BsdSliderDataTests
             Assert.NotNull(osdPayloads.HighWeight);
             Assert.Equal("osd", osdPayloads.LowWeight!.PayloadKind);
             Assert.Equal(3, osdPayloads.LowWeight.VertexCount);
+            Assert.Equal("unresolved", osdPayloads.LowWeight.ShapeIdentityStatus);
+            Assert.Equal("unverified", osdPayloads.LowWeight.VertexOrderStatus);
             Assert.Equal(0.125f, osdPayloads.LowWeight.Deltas[0].X, 3);
             Assert.Equal(0f, osdPayloads.LowWeight.Deltas[1].X, 3);
             Assert.Equal(0.375f, osdPayloads.HighWeight!.Deltas[1].X, 3);
