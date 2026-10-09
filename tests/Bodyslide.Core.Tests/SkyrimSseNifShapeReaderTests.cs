@@ -35,6 +35,35 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void ExactShapeCorrespondenceRequiresMatchingOrderedGeometryAndTopology()
+    {
+        var source = Assert.Single(SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])])).Shapes);
+        var target = Assert.Single(SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])])).Shapes);
+
+        Assert.True(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, target, out var evidence));
+        Assert.StartsWith("exact-ordered-shape-geometry-and-topology-sha256:", evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExactShapeCorrespondenceRejectsShapeNameVertexOrderAndTopologyMismatches()
+    {
+        var source = Assert.Single(SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])])).Shapes);
+        var differentName = Assert.Single(SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("BodyDetail", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])])).Shapes);
+        var reorderedVertices = Assert.Single(SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("Body", [(1f, 0f, 0f), (0f, 0f, 0f), (0f, 1f, 0f)])])).Shapes);
+        var differentTopology = Assert.Single(SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)], Triangle: (0, 2, 1))])).Shapes);
+
+        Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, differentName, out _));
+        Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, reorderedVertices, out _));
+        Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, differentTopology, out _));
+    }
+
+    [Fact]
     public void WriterUsesParsedVertexStreamForSupportedSingleShapeNif()
     {
         var source = CreateNif(

@@ -375,6 +375,13 @@ retained per declared shape with separate vertex counts; duplicate shape names
 are rejected because they make shape association ambiguous. A declared name
 does not by itself verify source-to-target shape identity or vertex order, so
 TRI morphs remain ineligible for reuse until correspondence is established.
+The current exact-shape verifier accepts only identical ordinal shape names,
+per-index vertex positions, and ordered triangle indexes, and emits a SHA-256
+fingerprint as evidence. Similar names, vertex counts, or topology alone do not
+pass. This strict verifier is groundwork only: source morph discovery does not
+yet establish the required source-to-exported-target pairing, and no new payload
+is made reusable by it. These synthetic-fixture checks are not external
+BodySlide, MO2, or Skyrim compatibility evidence.
 
 Completed per-item conversions write `output-size-inventory.json` beside their
 timing reports. This metadata-only inventory separates physical mesh, texture,

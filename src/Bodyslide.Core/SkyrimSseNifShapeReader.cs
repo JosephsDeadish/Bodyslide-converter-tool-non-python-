@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Bodyslide.Core;
@@ -336,4 +337,55 @@ internal static class SkyrimSseNifShapeReader
 
     private static SkyrimSseNifShapeReadResult Unsupported(string diagnostic) =>
         new(false, diagnostic, []);
+}
+
+internal static class SkyrimSseNifShapeCorrespondence
+{
+    public static bool TryVerifyExactOrderedMatch(
+        SkyrimSseNifShape source,
+        SkyrimSseNifShape target,
+        out string evidence)
+    {
+        evidence = string.Empty;
+        if (!string.Equals(source.Name, target.Name, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (source.Vertices.Count == 0 ||
+            source.Vertices.Count != target.Vertices.Count ||
+            !source.Vertices.SequenceEqual(target.Vertices) ||
+            source.TriangleIndices.Count != target.TriangleIndices.Count ||
+            !source.TriangleIndices.SequenceEqual(target.TriangleIndices))
+        {
+            return false;
+        }
+
+        evidence = $"exact-ordered-shape-geometry-and-topology-sha256:{ComputeFingerprint(source)}";
+        return true;
+    }
+
+    private static string ComputeFingerprint(SkyrimSseNifShape shape)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Span<byte> value = stackalloc byte[sizeof(uint)];
+        foreach (var vertex in shape.Vertices)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(value, BitConverter.SingleToInt32Bits(vertex.X));
+            hash.AppendData(value);
+            BinaryPrimitives.WriteInt32LittleEndian(value, BitConverter.SingleToInt32Bits(vertex.Y));
+            hash.AppendData(value);
+            BinaryPrimitives.WriteInt32LittleEndian(value, BitConverter.SingleToInt32Bits(vertex.Z));
+            hash.AppendData(value);
+        }
+
+        Span<byte> triangleIndex = stackalloc byte[sizeof(ushort)];
+        foreach (var index in shape.TriangleIndices)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(triangleIndex, index);
+            hash.AppendData(triangleIndex);
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
 }
