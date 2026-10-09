@@ -1,4 +1,5 @@
 using Bodyslide.Core;
+using System.Text;
 
 namespace Bodyslide.Core.Tests;
 
@@ -188,5 +189,78 @@ public sealed class BodySlideSourceAssociationTests
                 result.SourceAssetSupport!.UnsupportedOspSemantics);
         }
         finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task BodyTriMorphsRetainTheirSourceShapeThroughSliderAssociation()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            var meshDirectory = Path.Combine(root, "meshes", "armor", "traveler");
+            var projectDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+            var shapeDataDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+            Directory.CreateDirectory(meshDirectory);
+            Directory.CreateDirectory(projectDirectory);
+            Directory.CreateDirectory(shapeDataDirectory);
+
+            var mesh = Path.Combine(meshDirectory, "traveler_0.nif");
+            var project = Path.Combine(projectDirectory, "traveler.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <SliderSet name="TravelerProject">
+                    <DataFolder>TravelerProject</DataFolder>
+                    <OutputPath>meshes\armor\traveler\</OutputPath>
+                    <OutputFile>traveler_0.nif</OutputFile>
+                    <Slider name="Waist" />
+                    <Slider name="Chest" />
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "traveler.tri"),
+                BodyTri(
+                    ("Waist", "Waist", (ushort)0, (short)2),
+                    ("Chest", "Chest", (ushort)2, (short)3)));
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            Assert.NotNull(result.ReusableMorphPayloads);
+            var waist = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
+            Assert.Equal("Waist", waist.SourceShapeName);
+            Assert.Equal("unresolved", waist.ShapeIdentityStatus);
+            Assert.Equal("unverified", waist.VertexOrderStatus);
+            var chest = Assert.Single(result.ReusableMorphPayloads["Chest"].Payloads!);
+            Assert.Equal("Chest", chest.SourceShapeName);
+            Assert.Equal(3, chest.VertexCount);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    private static byte[] BodyTri(params (string Shape, string Morph, ushort Index, short X)[] shapes)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8);
+        writer.Write("PIRT"u8);
+        writer.Write((ushort)shapes.Length);
+        foreach (var (shape, morph, index, x) in shapes)
+        {
+            var shapeBytes = Encoding.UTF8.GetBytes(shape);
+            var morphBytes = Encoding.UTF8.GetBytes(morph);
+            writer.Write((byte)shapeBytes.Length);
+            writer.Write(shapeBytes);
+            writer.Write((ushort)1);
+            writer.Write((byte)morphBytes.Length);
+            writer.Write(morphBytes);
+            writer.Write(1f);
+            writer.Write((ushort)1);
+            writer.Write(index);
+            writer.Write(x);
+            writer.Write((short)0);
+            writer.Write((short)0);
+        }
+        return stream.ToArray();
     }
 }

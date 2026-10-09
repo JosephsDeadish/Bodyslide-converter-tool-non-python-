@@ -30998,6 +30998,40 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void TrySelectReusableMorphPayload_RejectsAmbiguousVerifiedShapeCandidates()
+    {
+        var select = typeof(LocalExportService).GetMethod("TrySelectReusableMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(select);
+        var candidate = new SourceMorphPayload(
+            "Waist",
+            false,
+            "tri",
+            2,
+            [(0f, 0f, 0f), (0f, 0f, 0f)],
+            ShapeIdentityStatus: "verified",
+            VertexOrderStatus: "verified",
+            SourceShapeName: "Body",
+            TargetShapeName: "Body",
+            SourceVertexOrderFingerprint: "vertex-order",
+            TargetVertexOrderFingerprint: "vertex-order",
+            ShapeCorrespondenceEvidence: ["exact shape correspondence"]);
+        var payloads = new SourceMorphPayloadVariants(candidate, Payloads: [candidate, candidate with { SourceAssetName = "second.tri" }]);
+        var candidates = new Dictionary<string, SourceMorphPayloadVariants>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Waist"] = payloads
+        };
+        var arguments = new object?[] { candidates, "Waist", false, 2, null, null, null, null };
+
+        Assert.False(Assert.IsType<bool>(select!.Invoke(null, arguments)));
+        Assert.Null(arguments[5]);
+
+        candidates["Waist"] = new SourceMorphPayloadVariants(candidate, Payloads: [candidate]);
+        arguments = [candidates, "Waist", false, 2, null, null, null, null];
+        Assert.True(Assert.IsType<bool>(select.Invoke(null, arguments)));
+        Assert.Same(candidate, arguments[5]);
+    }
+
+    [Fact]
     public async Task RetargetMorphPayload_UsesNearestSurfaceMappingWhenVertexGeometryIsAvailable()
     {
         var method = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
