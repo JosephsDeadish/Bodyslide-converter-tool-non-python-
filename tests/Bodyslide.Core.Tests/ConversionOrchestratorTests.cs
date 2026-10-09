@@ -21711,7 +21711,7 @@ public sealed class RealisticModPackFixtureTests
                 static gap => gap is not null && gap.Contains("broader body coverage", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
-                static gap => gap is not null && gap.Contains("External live-game validation is still pending", StringComparison.OrdinalIgnoreCase));
+                static gap => gap is not null && gap.Contains("External runtime, desktop, and live-game proof is still pending", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 packProof.RootElement.GetProperty("DistinctSupportTiers").EnumerateArray().Select(static item => item.GetString()),
                 static tier => string.Equals(tier, "experimental-manual-cleanup", StringComparison.OrdinalIgnoreCase));
@@ -21859,7 +21859,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 desktopSnapshot.SummaryRows,
                 row => string.Equals(row.Property, "Blocking proof gaps", StringComparison.OrdinalIgnoreCase) &&
-                       row.Value.Contains("External live-game validation is still pending", StringComparison.OrdinalIgnoreCase));
+                       row.Value.Contains("External runtime, desktop, and live-game proof is still pending", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
