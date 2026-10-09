@@ -40543,72 +40543,6 @@ internal sealed class LocalExportService(
         !string.IsNullOrWhiteSpace(sliderName) &&
         System.Text.Encoding.UTF8.GetByteCount(sliderName) <= byte.MaxValue;
 
-    /// <summary>
-    /// Builds a TRI morph binary payload for all sliders of one weight variant.
-    /// <para>
-    /// TRI file layout (little-endian):
-    /// <list type="bullet">
-    ///   <item>8 bytes — magic "FRTRI003" (matches the BodySlide / Outfit Studio TRI header)</item>
-        ///   <item>4 bytes — vertex count</item>
-    ///   <item>4 bytes — morph count (number of sliders)</item>
-    ///   <item>For each morph:
-    ///     <list type="bullet">
-    ///       <item>2 bytes — morph name length</item>
-    ///       <item>N bytes — morph name (UTF-8)</item>
-        ///       <item>4 bytes — delta count (equals vertex count)</item>
-    ///     </list>
-    ///   </item>
-        ///   <item>For each morph: delta payload (delta count × XYZ int16 triplets)</item>
-        /// </list>
-        /// </para>
-        /// </summary>
-        private static byte[] BuildTriBytes(
-            string projectName,
-            IReadOnlyList<string> sliders,
-            bool isHighWeight,
-            int vertexCount,
-            IReadOnlyDictionary<string, double> regionalMorphing,
-            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null,
-            MorphTransferContext? morphTransferContext = null)
-        {
-            vertexCount = Math.Clamp(vertexCount, 1, 250_000);
-            using var ms = new System.IO.MemoryStream();
-            using var w  = new System.IO.BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
-
-            // Magic header matches BodySlide / Outfit Studio TRI format.
-            w.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
-            w.Write((uint)vertexCount);
-            w.Write((uint)sliders.Count);      // morph count
-
-            foreach (var slider in sliders)
-            {
-                // For the high-weight TRI the morph name gets a "_1" suffix to match BodySlide conventions.
-                var morphName = isHighWeight ? $"{slider}_1" : slider;
-                var nameBytes = System.Text.Encoding.UTF8.GetBytes(morphName);
-                w.Write((ushort)nameBytes.Length);
-                w.Write(nameBytes);
-                w.Write((uint)vertexCount);
-            }
-
-            foreach (var slider in sliders)
-            {
-                foreach (var (x, y, z) in ResolveMorphDeltas(
-                    slider,
-                    isHighWeight,
-                    vertexCount,
-                    regionalMorphing,
-                    reusableSourceMorphPayloads,
-                    morphTransferContext))
-                {
-                    w.Write(QuantizeTriDelta(x));
-                    w.Write(QuantizeTriDelta(y));
-                    w.Write(QuantizeTriDelta(z));
-                }
-            }
-
-            return ms.ToArray();
-        }
-
         private static MorphPayloadReuseSummary BuildPayloadReuseSummary(
             IReadOnlyList<string> sliders,
             IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
@@ -44408,55 +44342,6 @@ internal sealed class LocalExportService(
                     (vertex.Y - minY) / depth,
                     (vertex.Z - minZ) / height))
                 .ToList();
-        }
-
-        private static int EstimateMorphVertexCount(IReadOnlyList<string> writtenNifs, string targetBody)
-        {
-            var best = 0;
-            foreach (var nifPath in writtenNifs)
-            {
-                if (!File.Exists(nifPath) || !Path.GetExtension(nifPath).Equals(".nif", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    var vertices = NifGeometrySignatureReader.TryReadFullVertices(nifPath);
-                    if (vertices is { Count: > 0 } && vertices.Count > best)
-                    {
-                        best = vertices.Count;
-                    }
-                }
-                catch (IOException)
-                {
-                    // Ignore unreadable files and continue with fallback hints.
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    // Ignore unreadable files and continue with fallback hints.
-                }
-            }
-
-            if (best > 0)
-            {
-                return best;
-            }
-
-            var bodyTemplate = VanillaBodySignatureDatabase.Templates
-                .FirstOrDefault(template => string.Equals(template.Body, targetBody, StringComparison.OrdinalIgnoreCase));
-            if (bodyTemplate is not null && bodyTemplate.VertexCountMax > bodyTemplate.VertexCountMin && bodyTemplate.VertexCountMin > 0)
-            {
-                return (bodyTemplate.VertexCountMin + bodyTemplate.VertexCountMax) / 2;
-            }
-
-            return 4096;
-        }
-
-        private static short QuantizeTriDelta(float value)
-        {
-            var scaled = (int)Math.Round(value * 2048f);
-            return (short)Math.Clamp(scaled, short.MinValue, short.MaxValue);
         }
 
         private static (float X, float Y, float Z) ComputeMorphDelta(
