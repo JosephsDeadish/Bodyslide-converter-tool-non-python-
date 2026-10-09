@@ -121,6 +121,12 @@ layout the tool can verify. Missing, unreadable, or unsupported source NIFs and
 OSD ranges that cannot be encoded must be treated as review-required, not guessed
 or counted as a successful build. Synthetic or retargeted OSD morph records are
 reported as fallback data, not recovered source morphs.
+TRI files are a separate in-game morph format, not substitutes for OSD shape
+deltas. Current TRI generation still estimates one project-wide vertex count
+from the largest parsed NIF vertex list and does not preserve per-shape identity
+or prove vertex-order correspondence. Treat generated TRI behavior as
+unverified until that mapping is made shape-aware and the Windows build/game
+checks below pass.
 
 On a Windows test host:
 
