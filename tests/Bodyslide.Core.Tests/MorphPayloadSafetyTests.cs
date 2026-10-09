@@ -87,17 +87,39 @@ public sealed class MorphPayloadSafetyTests
     {
         var bytes = BodyTriWithUv(hasPositionMorph, hasUvMorph);
         Assert.True(TriMorphReader.TryRead(bytes, out var payload));
-        Assert.Equal(hasPositionMorph ? 1 : 0, payload!.Morphs.Count);
-        Assert.Equal(hasPositionMorph ? "S" : null, payload.ShapeName);
-        if (hasPositionMorph) Assert.Equal((1f, 0f, 0f), Assert.Single(payload.Morphs).Deltas[0]);
+        Assert.Equal(hasPositionMorph ? 1 : 0, payload!.Shapes.Count);
+        if (hasPositionMorph)
+        {
+            var shape = Assert.Single(payload.Shapes);
+            Assert.Equal("S", shape.Name);
+            Assert.Equal((1f, 0f, 0f), Assert.Single(shape.Morphs).Deltas[0]);
+        }
         Assert.False(TriMorphReader.TryRead(bytes[..^1], out _));
         Assert.False(TriMorphReader.TryRead(bytes.Concat(new byte[] { 1 }).ToArray(), out _));
     }
 
     [Fact]
-    public void BodyTriRejectsMultipleShapesRatherThanDroppingShapeMorphs()
+    public void BodyTriPreservesMorphsAndVertexCountsForEachShape()
     {
-        Assert.False(TriMorphReader.TryRead(BodyTriWithShapes("ShapeA", "ShapeB"), out _));
+        Assert.True(TriMorphReader.TryRead(
+            BodyTriWithShapes(("ShapeA", "Waist", (ushort)0, (short)2), ("ShapeB", "Chest", (ushort)2, (short)3)),
+            out var payload));
+
+        var shapes = payload!.Shapes;
+        Assert.Equal(2, shapes.Count);
+        Assert.Equal(("ShapeA", 1, "Waist", (2f, 0f, 0f)),
+            (shapes[0].Name, shapes[0].VertexCount, shapes[0].Morphs[0].Name, shapes[0].Morphs[0].Deltas[0]));
+        Assert.Equal(("ShapeB", 3, "Chest", (0f, 0f, 0f)),
+            (shapes[1].Name, shapes[1].VertexCount, shapes[1].Morphs[0].Name, shapes[1].Morphs[0].Deltas[0]));
+        Assert.Equal((3f, 0f, 0f), shapes[1].Morphs[0].Deltas[2]);
+    }
+
+    [Fact]
+    public void BodyTriRejectsDuplicateShapeNamesThatWouldMakeAssociationAmbiguous()
+    {
+        Assert.False(TriMorphReader.TryRead(
+            BodyTriWithShapes(("Duplicate", "Waist", (ushort)0, (short)1), ("Duplicate", "Chest", (ushort)1, (short)1)),
+            out _));
     }
 
     [Fact]
@@ -201,18 +223,27 @@ public sealed class MorphPayloadSafetyTests
         return stream.ToArray();
     }
 
-    private static byte[] BodyTriWithShapes(params string[] shapeNames)
+    private static byte[] BodyTriWithShapes(params (string ShapeName, string MorphName, ushort Index, short X)[] shapes)
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8);
         writer.Write("PIRT"u8);
-        writer.Write((ushort)shapeNames.Length);
-        foreach (var shapeName in shapeNames)
+        writer.Write((ushort)shapes.Length);
+        foreach (var (shapeName, morphName, index, x) in shapes)
         {
-            var name = Encoding.UTF8.GetBytes(shapeName);
-            writer.Write((byte)name.Length);
-            writer.Write(name);
-            writer.Write((ushort)0);
+            var encodedShapeName = Encoding.UTF8.GetBytes(shapeName);
+            var encodedMorphName = Encoding.UTF8.GetBytes(morphName);
+            writer.Write((byte)encodedShapeName.Length);
+            writer.Write(encodedShapeName);
+            writer.Write((ushort)1);
+            writer.Write((byte)encodedMorphName.Length);
+            writer.Write(encodedMorphName);
+            writer.Write(1f);
+            writer.Write((ushort)1);
+            writer.Write(index);
+            writer.Write(x);
+            writer.Write((short)0);
+            writer.Write((short)0);
         }
         return stream.ToArray();
     }

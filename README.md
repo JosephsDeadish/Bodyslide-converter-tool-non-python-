@@ -370,10 +370,11 @@ morph support. OSD parsing tries exact 16/32-bit layouts before padded layouts,
 preventing 32-bit indexes and deltas from being silently read as 16-bit data.
 BodySlide TRI files may include an optional UV morph section; its structure is
 validated without treating UV offsets as position displacements. Legacy files
-ending after position morphs remain supported. Body TRI payloads with multiple
-shapes are currently rejected rather than flattening or silently dropping
-shape-specific morphs; a single-shape payload's declared shape name is retained,
-but does not by itself verify source-to-target shape identity or vertex order.
+ending after position morphs remain supported. Body TRI position morphs are
+retained per declared shape with separate vertex counts; duplicate shape names
+are rejected because they make shape association ambiguous. A declared name
+does not by itself verify source-to-target shape identity or vertex order, so
+TRI morphs remain ineligible for reuse until correspondence is established.
 
 Completed per-item conversions write `output-size-inventory.json` beside their
 timing reports. This metadata-only inventory separates physical mesh, texture,

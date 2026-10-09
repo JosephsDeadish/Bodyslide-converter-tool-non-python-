@@ -315,34 +315,36 @@ internal static class BodySlideSourceProjectSupport
                 }
             }
             else if (extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) &&
-                     TryReadTriPayload(filePath, out var triPayload, out var resolvedTriVertexCount) &&
+                     TryReadTriPayload(filePath, out var triPayload) &&
                      triPayload is not null)
             {
-                foreach (var morph in triPayload.Morphs)
+                foreach (var shape in triPayload.Shapes)
                 {
-                    var sliderName = NormalizeSliderFileName(morph.Name);
-                    var deltas = ResizePayloadDeltas(morph.Deltas, resolvedTriVertexCount);
-                    if (!TryCreatePayloadCandidate(
-                        sliderName,
-                        deltas,
-                        SourcePriority.TriPayloadBase,
-                        IsHighWeightVariant(morph.Name),
-                        "tri",
-                        out var candidate,
-                        Path.GetFileName(filePath),
-                        sourceShapeName: triPayload.ShapeName))
+                    foreach (var morph in shape.Morphs)
                     {
-                        continue;
-                    }
+                        var sliderName = NormalizeSliderFileName(morph.Name);
+                        if (!TryCreatePayloadCandidate(
+                            sliderName,
+                            morph.Deltas,
+                            SourcePriority.TriPayloadBase,
+                            IsHighWeightVariant(morph.Name),
+                            "tri",
+                            out var candidate,
+                            Path.GetFileName(filePath),
+                            sourceShapeName: shape.Name))
+                        {
+                            continue;
+                        }
 
-                    hasTriPayloads |= candidate.ReusablePayload is not null;
-                    if (candidate.IsZap)
-                    {
-                        zapSliders.Add(candidate);
-                    }
-                    else
-                    {
-                        sliders.Add(candidate);
+                        hasTriPayloads |= candidate.ReusablePayload is not null;
+                        if (candidate.IsZap)
+                        {
+                            zapSliders.Add(candidate);
+                        }
+                        else
+                        {
+                            sliders.Add(candidate);
+                        }
                     }
                 }
             }
@@ -1715,11 +1717,9 @@ internal static class BodySlideSourceProjectSupport
 
     private static bool TryReadTriPayload(
         string filePath,
-        out TriMorphPayload? payload,
-        out int resolvedVertexCount)
+        out TriMorphPayload? payload)
     {
         payload = null;
-        resolvedVertexCount = 0;
         if (!File.Exists(filePath))
         {
             return false;
@@ -1744,33 +1744,13 @@ internal static class BodySlideSourceProjectSupport
             return false;
         }
 
-        resolvedVertexCount = payload.VertexCount;
-        if (resolvedVertexCount > MorphPayloadLimits.MaximumVertices ||
-            (long)resolvedVertexCount * payload.Morphs.Count > MorphPayloadLimits.MaximumExpandedDeltas)
+        if (payload.Shapes.Any(shape => shape.VertexCount > MorphPayloadLimits.MaximumVertices) ||
+            payload.Shapes.Sum(shape => (long)shape.VertexCount * shape.Morphs.Count) > MorphPayloadLimits.MaximumExpandedDeltas)
         {
             payload = null;
             return false;
         }
         return true;
-    }
-
-    private static IReadOnlyList<(float X, float Y, float Z)> ResizePayloadDeltas(
-        IReadOnlyList<(float X, float Y, float Z)> deltas,
-        int resolvedVertexCount)
-    {
-        if (resolvedVertexCount <= 0 || resolvedVertexCount == deltas.Count)
-        {
-            return deltas;
-        }
-
-        var resized = new (float X, float Y, float Z)[resolvedVertexCount];
-        var copyCount = Math.Min(resolvedVertexCount, deltas.Count);
-        for (var index = 0; index < copyCount; index++)
-        {
-            resized[index] = deltas[index];
-        }
-
-        return resized;
     }
 
     private static bool TryCreatePayloadCandidate(
@@ -1837,7 +1817,7 @@ internal static class BodySlideSourceProjectSupport
         return candidates
             .Where(static candidate => IsLikelySliderName(candidate.Name))
             .GroupBy(
-                static candidate => $"{candidate.Name}\u001f{candidate.IsZap}\u001f{candidate.ReusablePayload?.IsHighWeight ?? false}",
+                static candidate => $"{candidate.Name}\u001f{candidate.IsZap}\u001f{candidate.ReusablePayload?.IsHighWeight ?? false}\u001f{candidate.ReusablePayload?.SourceShapeName}",
                 StringComparer.OrdinalIgnoreCase)
             .Select(static group => group
                 .OrderByDescending(static candidate => candidate.Priority)
@@ -2031,6 +2011,11 @@ internal static class BodySlideSourceProjectSupport
                 static group => group.Key,
                 static group =>
                 {
+                    var payloads = group
+                        .Select(static candidate => candidate.ReusablePayload)
+                        .Where(static payload => payload is not null)
+                        .Select(static payload => payload!)
+                        .ToArray();
                     var lowWeight = group
                         .Where(static candidate => candidate.ReusablePayload?.IsHighWeight is false)
                         .OrderByDescending(static candidate => candidate.Priority)
@@ -2042,7 +2027,7 @@ internal static class BodySlideSourceProjectSupport
                         .Select(static candidate => candidate.ReusablePayload)
                         .FirstOrDefault();
 
-                    return new SourceMorphPayloadVariants(lowWeight, highWeight);
+                    return new SourceMorphPayloadVariants(lowWeight, highWeight, payloads);
                 },
                 StringComparer.OrdinalIgnoreCase);
     }

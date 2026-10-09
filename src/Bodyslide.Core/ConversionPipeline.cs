@@ -254,7 +254,8 @@ public sealed record SourceMorphPayload(
     IReadOnlyList<string>? ShapeCorrespondenceEvidence = null);
 public sealed record SourceMorphPayloadVariants(
     SourceMorphPayload? LowWeight = null,
-    SourceMorphPayload? HighWeight = null);
+    SourceMorphPayload? HighWeight = null,
+    IReadOnlyList<SourceMorphPayload>? Payloads = null);
 public sealed record SourceAssetSupportMetrics(
     bool HasOsp,
     bool HasTriPayloads,
@@ -12779,7 +12780,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
                 {
                     if (TriMorphReader.TryRead(file, out var triPayload) && triPayload is not null)
                     {
-                        foreach (var morph in triPayload.Morphs)
+                        foreach (var morph in triPayload.Shapes.SelectMany(static shape => shape.Morphs))
                         {
                             if (!string.IsNullOrWhiteSpace(morph.Name))
                             {
@@ -28711,7 +28712,7 @@ internal sealed class LocalExportService(
                     {
                         var fileStem = Path.GetFileNameWithoutExtension(triPath) ?? string.Empty;
                         var isHighWeight = HasHighWeightVariantSuffix(fileStem);
-                        foreach (var morph in triPayload!.Morphs)
+                        foreach (var morph in triPayload!.Shapes.SelectMany(static shape => shape.Morphs))
                         {
                             if (!string.IsNullOrWhiteSpace(morph.Name))
                             {
@@ -40938,43 +40939,33 @@ internal sealed class LocalExportService(
                 return false;
             }
 
-            var candidate = isHighWeight ? variants.HighWeight : variants.LowWeight;
-            if (candidate is null)
+            var candidateOptions = variants.Payloads is { Count: > 0 } candidates
+                ? candidates.Where(candidate => candidate.IsHighWeight == isHighWeight)
+                : new[] { isHighWeight ? variants.HighWeight : variants.LowWeight }
+                    .Where(static candidate => candidate is not null)
+                    .Select(static candidate => candidate!);
+            var applicableCandidates = candidateOptions
+                .Where(candidate =>
+                    HasVerifiedShapeAndVertexOrder(candidate) &&
+                    candidate.VertexCount > 0 &&
+                    candidate.Deltas.Count == candidate.VertexCount &&
+                    (candidate.VertexCount == vertexCount
+                        ? HasExactShapeAndVertexOrder(candidate)
+                        : candidate.Deltas.Count > 0 &&
+                          vertexCount > 0 &&
+                          IsVerifiedRetargetMap(candidate)))
+                .Take(2)
+                .ToArray();
+            if (applicableCandidates.Length != 1)
             {
                 return false;
             }
 
-            if (!HasVerifiedShapeAndVertexOrder(candidate) ||
-                candidate.VertexCount <= 0 ||
-                candidate.Deltas.Count != candidate.VertexCount)
-            {
-                return false;
-            }
-
-            if (candidate.VertexCount != vertexCount && !candidate.RetargetMapVerified)
-            {
-                return false;
-            }
-
+            var candidate = applicableCandidates[0];
             if (candidate.VertexCount == vertexCount)
             {
-                if (!HasExactShapeAndVertexOrder(candidate))
-                {
-                    return false;
-                }
-
                 payload = candidate;
                 return true;
-            }
-
-            if (candidate.Deltas.Count == 0 || vertexCount <= 0)
-            {
-                return false;
-            }
-
-            if (!IsVerifiedRetargetMap(candidate))
-            {
-                return false;
             }
 
             usedExtremeAdaptation = IsExtremeTopologyAdaptation(candidate.VertexCount, vertexCount, morphTransferContext);

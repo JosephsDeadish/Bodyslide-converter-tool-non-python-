@@ -7,7 +7,8 @@ internal sealed record BsdMorphPayload(string SliderName, bool IsHighWeight, int
 internal sealed record OsdMorphEntry(string Name, IReadOnlyList<(int Index, float X, float Y, float Z)> SparseDeltas);
 internal sealed record OsdMorphPayload(int InferredVertexCount, IReadOnlyList<OsdMorphEntry> Morphs);
 internal sealed record TriMorphEntry(string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas);
-internal sealed record TriMorphPayload(int VertexCount, IReadOnlyList<TriMorphEntry> Morphs, string? ShapeName = null);
+internal sealed record TriMorphShape(string? Name, int VertexCount, IReadOnlyList<TriMorphEntry> Morphs);
+internal sealed record TriMorphPayload(IReadOnlyList<TriMorphShape> Shapes);
 internal readonly record struct MorphDeltaStats(int TotalCount, int MeaningfulCount, float TotalMagnitude, float MaxMagnitude)
 {
     public float MeaningfulRatio => TotalCount <= 0 ? 0f : MeaningfulCount / (float)TotalCount;
@@ -344,7 +345,7 @@ internal static class TriMorphReader
             return false;
         }
 
-        payload = new TriMorphPayload(vertexCount, morphs);
+        payload = new TriMorphPayload([new TriMorphShape(null, vertexCount, morphs)]);
         return true;
     }
 
@@ -366,19 +367,14 @@ internal static class TriMorphReader
         {
             var emptyOffset = 6;
             if (!TryConsumeBodyTriUvSection(bytes, ref emptyOffset)) return false;
-            payload = new TriMorphPayload(0, []);
+            payload = new TriMorphPayload([]);
             return true;
         }
 
-        if (shapeCount > 1)
-        {
-            return false;
-        }
-
         var offset = 6;
-        List<TriMorphEntry>? firstShapeMorphs = null;
-        var firstShapeVertexCount = 0;
-        string? firstShapeName = null;
+        var shapes = new List<TriMorphShape>(shapeCount);
+        var shapeNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        long expandedDeltaCount = 0;
 
         for (var shapeIndex = 0; shapeIndex < shapeCount; shapeIndex++)
         {
@@ -393,8 +389,8 @@ internal static class TriMorphReader
                 return false;
             }
 
-            firstShapeName = Encoding.UTF8.GetString(bytes.Slice(offset, shapeNameLength));
-            if (string.IsNullOrWhiteSpace(firstShapeName))
+            var shapeName = Encoding.UTF8.GetString(bytes.Slice(offset, shapeNameLength));
+            if (string.IsNullOrWhiteSpace(shapeName) || !shapeNames.Add(shapeName))
             {
                 return false;
             }
@@ -406,7 +402,7 @@ internal static class TriMorphReader
                 return false;
             }
 
-            var shapeMorphs = shapeIndex == 0 ? new List<(string Name, List<(int Index, float X, float Y, float Z)> Sparse)>(morphCount) : null;
+            var shapeMorphs = new List<(string Name, List<(int Index, float X, float Y, float Z)> Sparse)>(morphCount);
             var shapeVertexCount = 0;
             for (var morphIndex = 0; morphIndex < morphCount; morphIndex++)
             {
@@ -442,19 +438,18 @@ internal static class TriMorphReader
                     return false;
                 }
 
-                if (shapeMorphs is null)
-                {
-                    offset += expectedBytes;
-                    continue;
-                }
-
                 var sparse = new List<(int Index, float X, float Y, float Z)>(deltaCount);
+                var vertexIndexes = new HashSet<int>();
                 for (var deltaIndex = 0; deltaIndex < deltaCount; deltaIndex++)
                 {
                     var vertexIndex = (int)BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]);
                     if (vertexIndex < 0 || vertexIndex > 250_000)
                     {
                         payload = default;
+                        return false;
+                    }
+                    if (!vertexIndexes.Add(vertexIndex))
+                    {
                         return false;
                     }
 
@@ -473,37 +468,34 @@ internal static class TriMorphReader
                 shapeMorphs.Add((morphName, sparse));
             }
 
-            if (shapeIndex == 0)
+            expandedDeltaCount += (long)shapeVertexCount * morphCount;
+            if (expandedDeltaCount > MorphPayloadLimits.MaximumExpandedDeltas ||
+                shapeVertexCount > MorphPayloadLimits.MaximumVertices)
             {
-                if ((long)shapeVertexCount * morphCount > MorphPayloadLimits.MaximumExpandedDeltas)
-                {
-                    return false;
-                }
-                firstShapeMorphs = shapeMorphs?
-                    .Select(morph =>
-                    {
-                        var deltas = new (float X, float Y, float Z)[shapeVertexCount];
-                        foreach (var (index, x, y, z) in morph.Sparse)
-                        {
-                            if (index >= 0 && index < deltas.Length)
-                            {
-                                deltas[index] = (x, y, z);
-                            }
-                        }
-
-                        return new TriMorphEntry(morph.Name, deltas);
-                    })
-                    .ToList() ?? [];
-                firstShapeVertexCount = shapeVertexCount;
+                return false;
             }
+
+            var morphEntries = shapeMorphs
+                .Select(morph =>
+                {
+                    var deltas = new (float X, float Y, float Z)[shapeVertexCount];
+                    foreach (var (index, x, y, z) in morph.Sparse)
+                    {
+                        deltas[index] = (x, y, z);
+                    }
+
+                    return new TriMorphEntry(morph.Name, deltas);
+                })
+                .ToList();
+            shapes.Add(new TriMorphShape(shapeName, shapeVertexCount, morphEntries));
         }
 
-        if (firstShapeMorphs is null || !TryConsumeBodyTriUvSection(bytes, ref offset))
+        if (!TryConsumeBodyTriUvSection(bytes, ref offset))
         {
             return false;
         }
 
-        payload = new TriMorphPayload(firstShapeVertexCount, firstShapeMorphs, firstShapeName);
+        payload = new TriMorphPayload(shapes);
         return true;
     }
 

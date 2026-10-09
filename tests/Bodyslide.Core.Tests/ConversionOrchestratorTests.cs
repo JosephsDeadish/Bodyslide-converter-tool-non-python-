@@ -12588,12 +12588,13 @@ public sealed class BsdSliderDataTests
 
             Assert.True(ok);
             Assert.NotNull(payload);
-            Assert.Equal(2, payload!.VertexCount);
-            Assert.Equal(2, payload.Morphs.Count);
-            Assert.Equal("BreastLift", payload.Morphs[0].Name);
-            Assert.Equal(0.125f, payload.Morphs[0].Deltas[0].X, 3);
-            Assert.Equal("HideCape_1", payload.Morphs[1].Name);
-            Assert.Equal(0.5f, payload.Morphs[1].Deltas[1].Z, 3);
+            var shape = Assert.Single(payload!.Shapes);
+            Assert.Equal(2, shape.VertexCount);
+            Assert.Equal(2, shape.Morphs.Count);
+            Assert.Equal("BreastLift", shape.Morphs[0].Name);
+            Assert.Equal(0.125f, shape.Morphs[0].Deltas[0].X, 3);
+            Assert.Equal("HideCape_1", shape.Morphs[1].Name);
+            Assert.Equal(0.5f, shape.Morphs[1].Deltas[1].Z, 3);
         }
 
         [Fact]
@@ -12608,12 +12609,13 @@ public sealed class BsdSliderDataTests
 
             Assert.True(ok);
             Assert.NotNull(payload);
-            Assert.Equal(2, payload!.VertexCount);
-            Assert.Equal(2, payload.Morphs.Count);
-            Assert.Equal("BreastLift", payload.Morphs[0].Name);
-            Assert.Equal(0.125f, payload.Morphs[0].Deltas[0].X, 3);
-            Assert.Equal("HideCape_1", payload.Morphs[1].Name);
-            Assert.Equal(0.5f, payload.Morphs[1].Deltas[1].Z, 3);
+            var shape = Assert.Single(payload!.Shapes);
+            Assert.Equal(2, shape.VertexCount);
+            Assert.Equal(2, shape.Morphs.Count);
+            Assert.Equal("BreastLift", shape.Morphs[0].Name);
+            Assert.Equal(0.125f, shape.Morphs[0].Deltas[0].X, 3);
+            Assert.Equal("HideCape_1", shape.Morphs[1].Name);
+            Assert.Equal(0.5f, shape.Morphs[1].Deltas[1].Z, 3);
         }
 
         [Fact]
@@ -12629,14 +12631,15 @@ public sealed class BsdSliderDataTests
 
             Assert.True(ok);
             Assert.NotNull(payload);
-            Assert.Equal(3, payload!.VertexCount);
-            Assert.Equal(2, payload.Morphs.Count);
-            Assert.Equal("BreastLift", payload.Morphs[0].Name);
-            Assert.Equal(0.125f, payload.Morphs[0].Deltas[0].X, 3);
-            Assert.Equal(0f, payload.Morphs[0].Deltas[1].X, 3);
-            Assert.Equal(0.125f, payload.Morphs[0].Deltas[2].Z, 3);
-            Assert.Equal("HideCape_1", payload.Morphs[1].Name);
-            Assert.Equal(-0.25f, payload.Morphs[1].Deltas[1].Y, 3);
+            var shape = Assert.Single(payload!.Shapes);
+            Assert.Equal(3, shape.VertexCount);
+            Assert.Equal(2, shape.Morphs.Count);
+            Assert.Equal("BreastLift", shape.Morphs[0].Name);
+            Assert.Equal(0.125f, shape.Morphs[0].Deltas[0].X, 3);
+            Assert.Equal(0f, shape.Morphs[0].Deltas[1].X, 3);
+            Assert.Equal(0.125f, shape.Morphs[0].Deltas[2].Z, 3);
+            Assert.Equal("HideCape_1", shape.Morphs[1].Name);
+            Assert.Equal(-0.25f, shape.Morphs[1].Deltas[1].Y, 3);
         }
 
         [Fact]
@@ -12648,8 +12651,7 @@ public sealed class BsdSliderDataTests
 
             Assert.True(ok);
             Assert.NotNull(payload);
-            Assert.Equal(0, payload!.VertexCount);
-            Assert.Empty(payload.Morphs);
+            Assert.Empty(payload!.Shapes);
         }
 
         [Fact]
@@ -12697,10 +12699,11 @@ public sealed class BsdSliderDataTests
 
             Assert.True(ok);
             Assert.NotNull(payload);
-            Assert.Equal(2, payload!.VertexCount);
-            Assert.Single(payload.Morphs);
-            Assert.Equal(0.125f, payload.Morphs[0].Deltas[0].X, 3);
-            Assert.Equal(0f, payload.Morphs[0].Deltas[1].X, 3);
+            var shape = Assert.Single(payload!.Shapes);
+            Assert.Equal(2, shape.VertexCount);
+            Assert.Single(shape.Morphs);
+            Assert.Equal(0.125f, shape.Morphs[0].Deltas[0].X, 3);
+            Assert.Equal(0f, shape.Morphs[0].Deltas[1].X, 3);
         }
 
         [Fact]
@@ -12714,11 +12717,12 @@ public sealed class BsdSliderDataTests
 
             Assert.True(ok);
             Assert.NotNull(payload);
-            Assert.Equal(3, payload!.VertexCount);
-            Assert.Single(payload.Morphs);
-            Assert.Equal(0f, payload.Morphs[0].Deltas[0].X, 3);
-            Assert.Equal(0f, payload.Morphs[0].Deltas[1].X, 3);
-            Assert.Equal(0.125f, payload.Morphs[0].Deltas[2].X, 3);
+            var shape = Assert.Single(payload!.Shapes);
+            Assert.Equal(3, shape.VertexCount);
+            Assert.Single(shape.Morphs);
+            Assert.Equal(0f, shape.Morphs[0].Deltas[0].X, 3);
+            Assert.Equal(0f, shape.Morphs[0].Deltas[1].X, 3);
+            Assert.Equal(0.125f, shape.Morphs[0].Deltas[2].X, 3);
         }
 
         [Fact]
