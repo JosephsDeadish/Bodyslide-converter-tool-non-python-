@@ -91,6 +91,53 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void WriterPreservesExtendedVertexAttributesAndTopology()
+    {
+        var source = CreateNif(
+        [
+            new TestShape(
+                "Body",
+                [
+                    (0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f),
+                    (60f, 0f, 5f), (90f, 0f, 15f), (60f, 20f, 25f)
+                ],
+                VertexStride: 24,
+                Triangles: [(0, 1, 2), (3, 4, 5)])
+        ]);
+
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        var sourceShape = Assert.Single(SkyrimSseNifShapeReader.Read(source).Shapes);
+        var transformedShape = Assert.Single(SkyrimSseNifShapeReader.Read(transformed).Shapes);
+        Assert.Equal(24, sourceShape.VertexStride);
+        Assert.Equal(sourceShape.TriangleIndices, transformedShape.TriangleIndices);
+        Assert.NotEqual(sourceShape.Vertices, transformedShape.Vertices);
+        var sourceTopology = LocalExportService.BuildParsedShapeTopologySummary([sourceShape]);
+        Assert.NotNull(sourceTopology);
+        Assert.NotEqual(sourceTopology!.ComponentIds[0], sourceTopology.ComponentIds[3]);
+
+        for (var vertexIndex = 0; vertexIndex < sourceShape.Vertices.Count; vertexIndex++)
+        {
+            var sourceAttributeOffset = sourceShape.VertexDataOffset + (vertexIndex * sourceShape.VertexStride) + 12;
+            var transformedAttributeOffset = transformedShape.VertexDataOffset + (vertexIndex * transformedShape.VertexStride) + 12;
+            Assert.Equal(
+                source.AsSpan(sourceAttributeOffset, 12).ToArray(),
+                transformed.AsSpan(transformedAttributeOffset, 12).ToArray());
+        }
+    }
+
+    [Fact]
     public void ParsedShapeTopologyKeepsComponentsAndBoundaryEdgesShapeLocal()
     {
         var shapes = SkyrimSseNifShapeReader.Read(CreateNif(
@@ -197,22 +244,29 @@ public sealed class SkyrimSseNifShapeReaderTests
         writer.Write(shape.SkinInstance);
         writer.Write(-1);
         writer.Write(-1);
-        var descriptor = 4UL | (1UL << 44);
+        var descriptor = (ulong)(shape.VertexStride / 4) | (1UL << 44);
         writer.Write(descriptor);
-        writer.Write((ushort)1);
+        var triangles = shape.Triangles ?? [shape.Triangle ?? (0, 1, 2)];
+        writer.Write((ushort)triangles.Count);
         writer.Write((ushort)shape.Vertices.Count);
-        writer.Write((uint)(shape.Vertices.Count * 16 + (3 * sizeof(ushort))));
-        foreach (var (x, y, z) in shape.Vertices)
+        writer.Write((uint)(shape.Vertices.Count * shape.VertexStride + triangles.Count * 3 * sizeof(ushort)));
+        for (var vertexIndex = 0; vertexIndex < shape.Vertices.Count; vertexIndex++)
         {
+            var (x, y, z) = shape.Vertices[vertexIndex];
             writer.Write(x);
             writer.Write(y);
             writer.Write(z);
-            writer.Write(0f);
+            for (var attributeByte = 12; attributeByte < shape.VertexStride; attributeByte++)
+            {
+                writer.Write((byte)(0xA0 + vertexIndex + attributeByte));
+            }
         }
-        var triangle = shape.Triangle ?? (0, 1, 2);
-        writer.Write((ushort)triangle.Item1);
-        writer.Write((ushort)triangle.Item2);
-        writer.Write((ushort)triangle.Item3);
+        foreach (var (a, b, c) in triangles)
+        {
+            writer.Write((ushort)a);
+            writer.Write((ushort)b);
+            writer.Write((ushort)c);
+        }
         return stream.ToArray();
     }
 
@@ -227,7 +281,9 @@ public sealed class SkyrimSseNifShapeReaderTests
         string Name,
         IReadOnlyList<(float X, float Y, float Z)> Vertices,
         int SkinInstance = -1,
-        (int, int, int)? Triangle = null)
+        (int, int, int)? Triangle = null,
+        int VertexStride = 16,
+        IReadOnlyList<(int A, int B, int C)>? Triangles = null)
     {
         public int NameIndex { get; init; }
     }
