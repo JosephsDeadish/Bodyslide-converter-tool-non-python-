@@ -86,15 +86,22 @@ foreach ($propertyName in @("ComponentResults", "Components", "ScenarioResults",
 
 $requiredObservationTypes = @("bodyslide-build", "output-inspection", "deformation-observation")
 $observations = @(Get-Value $result @("ValidationObservations"))
+$unexpectedObservations = @($observations | Where-Object {
+    $requiredObservationTypes -notcontains [string](Get-Value $_ @("ObservationType"))
+})
+if ($unexpectedObservations.Count -gt 0) {
+    throw "The proof result bundle contains an unsupported validation observation type."
+}
+
 foreach ($observationType in $requiredObservationTypes) {
-    $matches = @($observations | Where-Object {
+    $matchedObservations = @($observations | Where-Object {
         [string](Get-Value $_ @("ObservationType")) -ieq $observationType
     })
-    if ($matches.Count -ne 1) {
+    if ($matchedObservations.Count -ne 1) {
         throw "The proof result bundle must contain exactly one '$observationType' validation observation."
     }
 
-    $observation = $matches[0]
+    $observation = $matchedObservations[0]
     if ([string](Get-Value $observation @("Status")) -ine "pass") {
         throw "The '$observationType' validation observation must have status 'pass'."
     }
@@ -109,11 +116,18 @@ foreach ($observationType in $requiredObservationTypes) {
             $observedAtUtc,
             [Globalization.CultureInfo]::InvariantCulture,
             [Globalization.DateTimeStyles]::RoundtripKind,
-            [ref]$parsedObservedAt)) {
-        throw "The '$observationType' validation observation must have a valid ObservedAtUtc timestamp."
+            [ref]$parsedObservedAt) -or $parsedObservedAt.Offset -ne [TimeSpan]::Zero) {
+        throw "The '$observationType' validation observation must have a valid UTC ObservedAtUtc timestamp."
     }
     if (@(Get-Value $observation @("EvidenceArtifacts")).Count -eq 0) {
         throw "The '$observationType' validation observation must reference at least one evidence artifact."
+    }
+    $evidencePrefix = "proof-evidence/validation/$observationType/"
+    $hasCategorizedArtifact = @((Get-Value $observation @("EvidenceArtifacts")) | Where-Object {
+        ([string]$_).Replace('\', '/').StartsWith($evidencePrefix, [StringComparison]::OrdinalIgnoreCase)
+    }).Count -gt 0
+    if (-not $hasCategorizedArtifact) {
+        throw "The '$observationType' validation observation must reference an artifact under '$evidencePrefix'."
     }
 }
 

@@ -133,6 +133,15 @@ public sealed record ImportedProofProbeResult(
     IReadOnlyList<string> EvidenceArtifacts,
     IReadOnlyList<string> Notes);
 
+public sealed record ImportedProofValidationObservation(
+    string ObservationType,
+    string Status,
+    string Tool,
+    string ToolVersion,
+    string ObservedAtUtc,
+    IReadOnlyList<string> EvidenceArtifacts,
+    IReadOnlyList<string> Notes);
+
 public sealed record ProofExecutionState(
     string Axis,
     string PlannedStatus,
@@ -155,6 +164,7 @@ public sealed record ImportedProofResultBundle(
     IReadOnlyList<ImportedProofComponentResult> ComponentResults,
     IReadOnlyList<ImportedProofScenarioResult> ScenarioResults,
     IReadOnlyList<ImportedProofProbeResult> ProbeResults,
+    IReadOnlyList<ImportedProofValidationObservation> ValidationObservations,
     IReadOnlyList<string> MissingExpectedArtifacts,
     IReadOnlyList<string> MissingExpectedScenarios,
     IReadOnlyList<string> MissingExpectedProbes,
@@ -165,7 +175,8 @@ internal sealed record ImportedProofBundleSummary(
     ImportedProofResultBundle? Bundle,
     ProofExecutionState RuntimeProof,
     ProofExecutionState LiveGameProof,
-    ProofExecutionState DesktopProof);
+    ProofExecutionState DesktopProof,
+    ProofExecutionState OutputValidationProof);
 
 internal static class ExternalProofHarnessSupport
 {
@@ -173,6 +184,13 @@ internal static class ExternalProofHarnessSupport
     public const string ResultBundleFileName = "proof-result-bundle.json";
     public const string EvidenceRootDirectory = "proof-evidence";
     public const string ContractVersion = "1.0";
+    public const string ResultBundleContractVersion = "1.1";
+    private static readonly (string Type, string EvidenceDirectory)[] RequiredValidationObservations =
+    [
+        ("bodyslide-build", "bodyslide-build"),
+        ("output-inspection", "output-inspection"),
+        ("deformation-observation", "deformation-observation")
+    ];
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -433,7 +451,7 @@ internal static class ExternalProofHarnessSupport
             ]);
 
         var resultContract = new ProofResultBundleContract(
-            ContractVersion: ContractVersion,
+            ContractVersion: ResultBundleContractVersion,
             ResultFile: ResultBundleFileName,
             EvidenceRoot: EvidenceRootDirectory,
             ExpectedComponentNames: ["runtime-automation", "live-game-execution", "desktop-e2e"],
@@ -449,6 +467,7 @@ internal static class ExternalProofHarnessSupport
                 "MissingExpectedArtifacts",
                 "MissingExpectedScenarios",
                 "MissingExpectedProbes",
+                "ValidationObservations",
                 "Notes"
             ],
             EvidenceLocations: evidenceLocations,
@@ -579,6 +598,8 @@ internal static class ExternalProofHarnessSupport
                 "desktop-e2e" => UpdateProofAxis(axis, summary.DesktopProof),
                 _ => axis
             })
+            .Where(static axis => !string.Equals(axis.Axis, "bodyslide-output-validation", StringComparison.OrdinalIgnoreCase))
+            .Append(CreateOutputValidationAxis(summary.OutputValidationProof))
             .ToArray();
 
         var missingProofAxes = updatedAxes
@@ -590,7 +611,7 @@ internal static class ExternalProofHarnessSupport
             : missingProofAxes.Length <= 2
                 ? "artifact-backed-with-targeted-gaps"
                 : "artifact-backed-with-major-gaps";
-        var proofExecutions = new[] { summary.RuntimeProof, summary.LiveGameProof, summary.DesktopProof };
+        var proofExecutions = new[] { summary.RuntimeProof, summary.LiveGameProof, summary.DesktopProof, summary.OutputValidationProof };
 
         var updatedProof = conversionMatrixProof with
         {
@@ -639,6 +660,19 @@ internal static class ExternalProofHarnessSupport
         };
     }
 
+    private static ConversionMatrixProofAxis CreateOutputValidationAxis(ProofExecutionState execution) =>
+        UpdateProofAxis(
+            new ConversionMatrixProofAxis(
+                Axis: execution.Axis,
+                PlannedCoverage: execution.PlannedStatus,
+                Coverage: execution.PlannedStatus,
+                StrictlyProven: false,
+                Signals: [],
+                RequiredArtifacts: RequiredValidationObservations
+                    .Select(item => $"{EvidenceRootDirectory}/validation/{item.EvidenceDirectory}/")
+                    .ToArray()),
+            execution);
+
     private static ImportedProofBundleSummary BuildImportedProofBundleSummary(
         string outputDirectory,
         RuntimeValidationExecutionPlan runtimePlan,
@@ -660,11 +694,16 @@ internal static class ExternalProofHarnessSupport
             windowsUiAutomation.PlannedCoverage,
             windowsUiAutomation.SupportedFlows.Count,
             "External Windows UI execution has not been imported yet.");
+        var plannedOutputValidation = CreatePlannedExecutionState(
+            "bodyslide-output-validation",
+            "external-validation-required",
+            RequiredValidationObservations.Length,
+            "BodySlide build, output inspection, and deformation observations have not been imported yet.");
 
         var resultBundlePath = GetResultBundlePath(outputDirectory);
         if (!File.Exists(resultBundlePath))
         {
-            return new ImportedProofBundleSummary(null, plannedRuntime, plannedLiveGame, plannedDesktop);
+            return new ImportedProofBundleSummary(null, plannedRuntime, plannedLiveGame, plannedDesktop, plannedOutputValidation);
         }
 
         try
@@ -676,7 +715,8 @@ internal static class ExternalProofHarnessSupport
                     null,
                     plannedRuntime with { ExecutedStatus = "import-error", Notes = plannedRuntime.Notes.Concat(["proof-result-bundle.json could not be parsed."]).ToArray() },
                     plannedLiveGame with { ExecutedStatus = "import-error", Notes = plannedLiveGame.Notes.Concat(["proof-result-bundle.json could not be parsed."]).ToArray() },
-                    plannedDesktop with { ExecutedStatus = "import-error", Notes = plannedDesktop.Notes.Concat(["proof-result-bundle.json could not be parsed."]).ToArray() });
+                    plannedDesktop with { ExecutedStatus = "import-error", Notes = plannedDesktop.Notes.Concat(["proof-result-bundle.json could not be parsed."]).ToArray() },
+                    plannedOutputValidation with { ExecutedStatus = "import-error", Notes = plannedOutputValidation.Notes.Concat(["proof-result-bundle.json could not be parsed."]).ToArray() });
             }
 
             var hostDetails = BuildHostDetails(bundle.Host);
@@ -684,7 +724,8 @@ internal static class ExternalProofHarnessSupport
             var runtimeProof = BuildRuntimeProofExecution(bundle, runtimePlan, hostDetails);
             var liveGameProof = BuildLiveGameProofExecution(bundle, liveGameExecution, hostDetails, hostLooksWindows);
             var desktopProof = BuildDesktopProofExecution(bundle, windowsUiAutomation, hostDetails, hostLooksWindows);
-            return new ImportedProofBundleSummary(bundle, runtimeProof, liveGameProof, desktopProof);
+            var outputValidationProof = BuildExternalCompatibilityProof(bundle.ContractVersion, bundle.ValidationObservations);
+            return new ImportedProofBundleSummary(bundle, runtimeProof, liveGameProof, desktopProof, outputValidationProof);
         }
         catch (Exception ex)
         {
@@ -692,8 +733,103 @@ internal static class ExternalProofHarnessSupport
                 null,
                 plannedRuntime with { ExecutedStatus = "import-error", Notes = plannedRuntime.Notes.Concat([$"proof-result-bundle.json import failed: {ex.Message}"]).ToArray() },
                 plannedLiveGame with { ExecutedStatus = "import-error", Notes = plannedLiveGame.Notes.Concat([$"proof-result-bundle.json import failed: {ex.Message}"]).ToArray() },
-                plannedDesktop with { ExecutedStatus = "import-error", Notes = plannedDesktop.Notes.Concat([$"proof-result-bundle.json import failed: {ex.Message}"]).ToArray() });
+                plannedDesktop with { ExecutedStatus = "import-error", Notes = plannedDesktop.Notes.Concat([$"proof-result-bundle.json import failed: {ex.Message}"]).ToArray() },
+                plannedOutputValidation with { ExecutedStatus = "import-error", Notes = plannedOutputValidation.Notes.Concat([$"proof-result-bundle.json import failed: {ex.Message}"]).ToArray() });
         }
+    }
+
+    internal static ProofExecutionState BuildExternalCompatibilityProof(
+        string contractVersion,
+        IReadOnlyList<ImportedProofValidationObservation> observations)
+    {
+        var missing = new List<string>();
+        if (!string.Equals(contractVersion, ResultBundleContractVersion, StringComparison.Ordinal))
+        {
+            missing.Add($"result-contract-version:{ResultBundleContractVersion}");
+        }
+
+        var evidence = observations
+            .SelectMany(static observation => observation.EvidenceArtifacts)
+            .Where(static artifact => !string.IsNullOrWhiteSpace(artifact))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var notes = new List<string>
+        {
+            "Imported observations are external claims; the file inventory does not independently validate their truth."
+        };
+        if (observations.Any(observation =>
+                !RequiredValidationObservations.Any(required =>
+                    string.Equals(observation.ObservationType, required.Type, StringComparison.OrdinalIgnoreCase))))
+        {
+            missing.Add("observation:unsupported-type");
+        }
+
+        foreach (var (type, evidenceDirectory) in RequiredValidationObservations)
+        {
+            var matches = observations
+                .Where(observation => string.Equals(observation.ObservationType, type, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (matches.Length != 1)
+            {
+                missing.Add($"observation:{type}:missing-or-duplicate");
+                continue;
+            }
+
+            var observation = matches[0];
+            if (!string.Equals(observation.Status, "pass", StringComparison.OrdinalIgnoreCase))
+            {
+                missing.Add($"observation:{type}:not-passing");
+            }
+            if (string.IsNullOrWhiteSpace(observation.Tool) ||
+                string.IsNullOrWhiteSpace(observation.ToolVersion))
+            {
+                missing.Add($"observation:{type}:tool-metadata");
+            }
+            if (!DateTimeOffset.TryParse(
+                    observation.ObservedAtUtc,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind,
+                    out var observedAt) ||
+                observedAt.Offset != TimeSpan.Zero)
+            {
+                missing.Add($"observation:{type}:timestamp");
+            }
+
+            var evidencePrefix = $"{EvidenceRootDirectory}/validation/{evidenceDirectory}/";
+            var hasCategorizedEvidence = observation.EvidenceArtifacts.Count > 0 &&
+                observation.EvidenceArtifacts.All(artifact =>
+            {
+                var relativePath = artifact.Replace('\\', '/');
+                return !Path.IsPathRooted(relativePath) &&
+                       !relativePath.Split('/').Any(segment => segment is "." or "..") &&
+                       relativePath.StartsWith(evidencePrefix, StringComparison.OrdinalIgnoreCase);
+            });
+            if (!hasCategorizedEvidence)
+            {
+                missing.Add($"observation:{type}:categorized-evidence");
+            }
+        }
+
+        var strictlyProven = missing.Count == 0;
+        var failed = observations.Any(observation =>
+            RequiredValidationObservations.Any(required =>
+                string.Equals(observation.ObservationType, required.Type, StringComparison.OrdinalIgnoreCase)) &&
+            StatusMeansFail(observation.Status));
+        return new ProofExecutionState(
+            Axis: "bodyslide-output-validation",
+            PlannedStatus: "external-validation-required",
+            ExecutedStatus: strictlyProven ? "executed-pass" : failed ? "executed-fail" : "executed-incomplete",
+            ImportedResultAvailable: true,
+            StrictProofSatisfied: strictlyProven,
+            PlannedItemCount: RequiredValidationObservations.Length,
+            ExecutedItemCount: observations.Count(observation =>
+                RequiredValidationObservations.Any(required =>
+                    string.Equals(observation.ObservationType, required.Type, StringComparison.OrdinalIgnoreCase))),
+            MissingItemCount: missing.Count,
+            MissingItems: missing.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            EvidenceArtifacts: evidence,
+            HostDetails: [],
+            Notes: notes);
     }
 
     private static ProofExecutionState BuildRuntimeProofExecution(
@@ -1022,7 +1158,13 @@ internal static class ExternalProofHarnessSupport
 
     private static string DeriveOverallProofExecutionStatus(ImportedProofBundleSummary summary)
     {
-        var statuses = new[] { summary.RuntimeProof.ExecutedStatus, summary.LiveGameProof.ExecutedStatus, summary.DesktopProof.ExecutedStatus };
+        var statuses = new[]
+        {
+            summary.RuntimeProof.ExecutedStatus,
+            summary.LiveGameProof.ExecutedStatus,
+            summary.DesktopProof.ExecutedStatus,
+            summary.OutputValidationProof.ExecutedStatus
+        };
         if (statuses.All(static status => string.Equals(status, "planned-only", StringComparison.OrdinalIgnoreCase)))
         {
             return "planned-only";
@@ -1452,6 +1594,7 @@ internal static class ExternalProofHarnessSupport
             componentResults,
             scenarioResults,
             probeResults,
+            ReadValidationObservations(root),
             ReadStringArrayProperty(root, "MissingExpectedArtifacts", "missingExpectedArtifacts", "MissingArtifacts", "missingArtifacts"),
             ReadStringArrayProperty(root, "MissingExpectedScenarios", "missingExpectedScenarios", "MissingScenarios", "missingScenarios"),
             ReadStringArrayProperty(root, "MissingExpectedProbes", "missingExpectedProbes", "MissingProbes", "missingProbes"),
@@ -1522,6 +1665,24 @@ internal static class ExternalProofHarnessSupport
                 ReadStringArrayProperty(item, "ObservedSignals", "observedSignals"),
                 ReadStringArrayProperty(item, "MissingSignals", "missingSignals"),
                 ReadStringArrayProperty(item, "EvidenceArtifacts", "evidenceArtifacts", "EvidencePaths", "evidencePaths", "Artifacts", "artifacts"),
+                ReadStringArrayProperty(item, "Notes", "notes")));
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<ImportedProofValidationObservation> ReadValidationObservations(JsonElement root)
+    {
+        var result = new List<ImportedProofValidationObservation>();
+        foreach (var item in ReadObjectArrayProperty(root, "ValidationObservations", "validationObservations"))
+        {
+            result.Add(new ImportedProofValidationObservation(
+                ReadStringProperty(item, "ObservationType", "observationType") ?? string.Empty,
+                ReadStringProperty(item, "Status", "status") ?? string.Empty,
+                ReadStringProperty(item, "Tool", "tool") ?? string.Empty,
+                ReadStringProperty(item, "ToolVersion", "toolVersion") ?? string.Empty,
+                ReadStringProperty(item, "ObservedAtUtc", "observedAtUtc") ?? string.Empty,
+                ReadStringArrayProperty(item, "EvidenceArtifacts", "evidenceArtifacts"),
                 ReadStringArrayProperty(item, "Notes", "notes")));
         }
 

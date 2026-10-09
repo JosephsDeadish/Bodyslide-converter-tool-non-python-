@@ -20866,7 +20866,7 @@ public sealed class RealisticModPackFixtureTests
 
             var payload = new
             {
-                ContractVersion = "1.0",
+                ContractVersion = "1.1",
                 HarnessKind = "external-proof-roundtrip-runner",
                 OverallStatus = status,
                 Host = new
@@ -20933,6 +20933,7 @@ public sealed class RealisticModPackFixtureTests
                     EvidenceArtifacts = new[] { $"proof-evidence/probe-observations/{id}.json" },
                     Notes = Array.Empty<string>()
                 }).ToArray(),
+                ValidationObservations = complete ? CreatePassingValidationObservations() : Array.Empty<object>(),
                 MissingExpectedArtifacts = Array.Empty<string>(),
                 MissingExpectedScenarios = complete ? Array.Empty<string>() : scenarios.Keys.Except(selectedScenarioNames, StringComparer.OrdinalIgnoreCase).ToArray(),
                 MissingExpectedProbes = complete ? Array.Empty<string>() : probeIds.Except(selectedProbeIds, StringComparer.OrdinalIgnoreCase).ToArray(),
@@ -21084,7 +21085,7 @@ public sealed class RealisticModPackFixtureTests
 
             var payload = new
             {
-                ContractVersion = "1.0",
+                ContractVersion = "1.1",
                 HarnessKind = "external-proof-runner",
                 Status = "pass",
                 HostDetails = new
@@ -21144,6 +21145,7 @@ public sealed class RealisticModPackFixtureTests
                     EvidenceArtifacts = new[] { $"proof-evidence/probe-observations/{id}.json" },
                     Notes = Array.Empty<string>()
                 }).ToArray(),
+                ValidationObservations = CreatePassingValidationObservations(),
                 MissingExpectedArtifacts = Array.Empty<string>(),
                 MissingExpectedScenarios = Array.Empty<string>(),
                 MissingExpectedProbes = Array.Empty<string>(),
@@ -21502,7 +21504,7 @@ public sealed class RealisticModPackFixtureTests
 
             var payload = new
             {
-                ContractVersion = "1.0",
+                ContractVersion = "1.1",
                 HarnessKind = "external-proof-evidence-check",
                 OverallStatus = "pass",
                 Host = new
@@ -21914,7 +21916,7 @@ public sealed class RealisticModPackFixtureTests
 
             var payload = new
             {
-                ContractVersion = "1.0",
+                ContractVersion = "1.1",
                 HarnessKind = "external-proof-dot-prefix-coverage",
                 OverallStatus = "pass",
                 Host = new
@@ -21976,6 +21978,7 @@ public sealed class RealisticModPackFixtureTests
                     EvidenceArtifacts = new[] { $"./proof-evidence/probe-observations/{id}.json" },
                     Notes = Array.Empty<string>()
                 }).ToArray(),
+                ValidationObservations = CreatePassingValidationObservations(),
                 MissingExpectedArtifacts = Array.Empty<string>(),
                 MissingExpectedScenarios = Array.Empty<string>(),
                 MissingExpectedProbes = Array.Empty<string>(),
@@ -22116,7 +22119,7 @@ public sealed class RealisticModPackFixtureTests
 
             var payload = new
             {
-                ContractVersion = "1.0",
+                ContractVersion = "1.1",
                 HarnessKind = "external-proof-stale-missing-expected-artifacts",
                 OverallStatus = "pass",
                 Host = new
@@ -22178,6 +22181,7 @@ public sealed class RealisticModPackFixtureTests
                     EvidenceArtifacts = new[] { $"proof-evidence/probe-observations/{id}.json" },
                     Notes = Array.Empty<string>()
                 }).ToArray(),
+                ValidationObservations = CreatePassingValidationObservations(),
                 MissingExpectedArtifacts = new[]
                 {
                     "proof-evidence/runtime-logs/runtime.log",
@@ -22949,6 +22953,40 @@ public sealed class RealisticModPackFixtureTests
         data.CopyTo(bytes, 6);
         return bytes;
     }
+
+    private static object[] CreatePassingValidationObservations() =>
+    [
+        new
+        {
+            ObservationType = "bodyslide-build",
+            Status = "pass",
+            Tool = "BodySlide",
+            ToolVersion = "5.6",
+            ObservedAtUtc = "2026-10-09T12:00:00Z",
+            EvidenceArtifacts = new[] { "proof-evidence/validation/bodyslide-build/build.log" },
+            Notes = Array.Empty<string>()
+        },
+        new
+        {
+            ObservationType = "output-inspection",
+            Status = "pass",
+            Tool = "Outfit Studio",
+            ToolVersion = "1.6",
+            ObservedAtUtc = "2026-10-09T12:01:00Z",
+            EvidenceArtifacts = new[] { "proof-evidence/validation/output-inspection/inspection.txt" },
+            Notes = Array.Empty<string>()
+        },
+        new
+        {
+            ObservationType = "deformation-observation",
+            Status = "pass",
+            Tool = "Outfit Studio",
+            ToolVersion = "1.6",
+            ObservedAtUtc = "2026-10-09T12:02:00Z",
+            EvidenceArtifacts = new[] { "proof-evidence/validation/deformation-observation/observation.txt" },
+            Notes = Array.Empty<string>()
+        }
+    ];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

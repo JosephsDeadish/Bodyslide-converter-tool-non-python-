@@ -55,4 +55,61 @@ public sealed class ExternalProofReadinessTests
 
         Assert.Equal(expectedStatus, status);
     }
+
+    [Fact]
+    public void ExternalCompatibilityProof_RequiresBuildInspectionAndDeformationObservations()
+    {
+        var proof = ExternalProofHarnessSupport.BuildExternalCompatibilityProof(
+            "1.1",
+            [
+                CreateObservation("bodyslide-build", "proof-evidence/validation/bodyslide-build/build.log"),
+                CreateObservation("output-inspection", "proof-evidence/validation/output-inspection/inspection.txt")
+            ]);
+
+        Assert.False(proof.StrictProofSatisfied);
+        Assert.Equal("executed-incomplete", proof.ExecutedStatus);
+        Assert.Contains("observation:deformation-observation:missing-or-duplicate", proof.MissingItems);
+    }
+
+    [Fact]
+    public void ExternalCompatibilityProof_RejectsAutomatedInspectionAsDeformationEvidence()
+    {
+        var proof = ExternalProofHarnessSupport.BuildExternalCompatibilityProof(
+            "1.1",
+            [
+                CreateObservation("bodyslide-build", "proof-evidence/validation/bodyslide-build/build.log"),
+                CreateObservation("output-inspection", "proof-evidence/validation/output-inspection/inspection.txt"),
+                CreateObservation("deformation-observation", "proof-evidence/validation/output-inspection/automated-report.json")
+            ]);
+
+        Assert.False(proof.StrictProofSatisfied);
+        Assert.Equal("executed-incomplete", proof.ExecutedStatus);
+        Assert.Contains("observation:deformation-observation:categorized-evidence", proof.MissingItems);
+    }
+
+    [Fact]
+    public void ExternalCompatibilityProof_AcceptsOnlyVersionedCategorizedObservations()
+    {
+        var proof = ExternalProofHarnessSupport.BuildExternalCompatibilityProof(
+            "1.1",
+            [
+                CreateObservation("bodyslide-build", "proof-evidence/validation/bodyslide-build/build.log"),
+                CreateObservation("output-inspection", "proof-evidence/validation/output-inspection/inspection.txt"),
+                CreateObservation("deformation-observation", "proof-evidence/validation/deformation-observation/observation.txt")
+            ]);
+
+        Assert.True(proof.StrictProofSatisfied);
+        Assert.Equal("executed-pass", proof.ExecutedStatus);
+        Assert.Empty(proof.MissingItems);
+    }
+
+    private static ImportedProofValidationObservation CreateObservation(string type, string evidencePath) =>
+        new(
+            type,
+            "pass",
+            "ExternalValidationTool",
+            "1.0",
+            "2026-10-09T12:00:00Z",
+            [evidencePath],
+            []);
 }
