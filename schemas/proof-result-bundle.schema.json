@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SlideSmith external proof result bundle",
+  "description": "Imported external observations and evidence references. A structurally valid bundle does not establish that the recorded behavior is correct.",
+  "type": "object",
+  "required": [
+    "contractVersion",
+    "harnessKind",
+    "overallStatus",
+    "host",
+    "componentResults",
+    "scenarioResults",
+    "probeResults",
+    "missingExpectedArtifacts",
+    "missingExpectedScenarios",
+    "missingExpectedProbes",
+    "missingExpectedFlows",
+    "notes"
+  ],
+  "properties": {
+    "contractVersion": { "type": "string", "minLength": 1 },
+    "harnessKind": { "type": "string", "minLength": 1 },
+    "overallStatus": { "type": "string", "minLength": 1 },
+    "host": {
+      "type": "object",
+      "required": [ "operatingSystem", "harnessRunner", "capabilities" ],
+      "properties": {
+        "operatingSystem": { "type": "string", "minLength": 1 },
+        "harnessRunner": { "type": "string", "minLength": 1 },
+        "launcher": { "type": [ "string", "null" ] },
+        "modManager": { "type": [ "string", "null" ] },
+        "saveProfile": { "type": [ "string", "null" ] },
+        "observationMode": { "type": [ "string", "null" ] },
+        "capabilities": { "$ref": "#/$defs/stringList" }
+      },
+      "additionalProperties": true
+    },
+    "componentResults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [ "component", "status", "executedItems", "missingItems", "evidenceArtifacts", "notes" ],
+        "properties": {
+          "component": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 },
+          "executedItems": { "$ref": "#/$defs/stringList" },
+          "missingItems": { "$ref": "#/$defs/stringList" },
+          "evidenceArtifacts": { "$ref": "#/$defs/stringList" },
+          "notes": { "$ref": "#/$defs/stringList" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "scenarioResults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [ "scenario", "status", "validationSaveProfile", "observedSignals", "missingSignals", "evidenceArtifacts", "notes" ],
+        "properties": {
+          "scenario": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 },
+          "validationSaveProfile": { "type": "string", "minLength": 1 },
+          "observedSignals": { "$ref": "#/$defs/stringList" },
+          "missingSignals": { "$ref": "#/$defs/stringList" },
+          "evidenceArtifacts": { "$ref": "#/$defs/stringList" },
+          "notes": { "$ref": "#/$defs/stringList" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "probeResults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [ "probeId", "status", "observedSignals", "missingSignals", "evidenceArtifacts", "notes" ],
+        "properties": {
+          "probeId": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 },
+          "observedSignals": { "$ref": "#/$defs/stringList" },
+          "missingSignals": { "$ref": "#/$defs/stringList" },
+          "evidenceArtifacts": { "$ref": "#/$defs/stringList" },
+          "notes": { "$ref": "#/$defs/stringList" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "missingExpectedArtifacts": { "$ref": "#/$defs/stringList" },
+    "missingExpectedScenarios": { "$ref": "#/$defs/stringList" },
+    "missingExpectedProbes": { "$ref": "#/$defs/stringList" },
+    "missingExpectedFlows": { "$ref": "#/$defs/stringList" },
+    "notes": { "$ref": "#/$defs/stringList" }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

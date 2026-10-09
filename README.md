@@ -806,6 +806,8 @@ output/
 | `mod-stack-cross-validation.json` | Mixed plugin/race/body-family review summary: plugin/master counts, distinct mesh families, skeleton reliability, race warnings, and recommended runtime/load-order scenarios for large real mod stacks |
 | `desktop-workflow-automation.json` | Shared-output contract for Desktop/UI workflow coverage: preview/report state, artifact inventory, suggested GUI flow, and automation limitations for result-reload/report-rendering paths |
 | `proof-result-bundle.json` | External-harness result import written back into the output root; records host details, per-axis pass/fail status, scenario coverage, probe coverage, evidence references, and any missing proof inputs |
+| `proof-evidence-integrity.json` | Optional inventory from `scripts/Validate-ExternalProofEvidence.ps1`; records referenced evidence files, byte lengths, and SHA-256 hashes |
+| `schemas/proof-result-bundle.schema.json` | JSON Schema 2020-12 shape contract for imported external proof results |
 
 The optional output ZIP mirrors the installable game files only; the JSON review artifacts stay in the folder output so they remain easy to inspect without bloating the packaged mod archive.
 | `armor-pack-validation.json` | Batch-only pack validation rollup: per-item readiness status/score, dominant issue codes, and pack-level ready/review/high-risk counts for real armor-pack runs |
@@ -831,6 +833,9 @@ When `--targets` / `--presets` (or the desktop batch-entry boxes) are used, each
 3. Execute the required Desktop UI flows, runtime probes, and live-game scenarios on the target Windows/mod-stack/game install while writing evidence to the machine-readable locations declared in `proof-harness-bundle.json` (for example `proof-evidence/screenshots/`, `proof-evidence/runtime-logs/`, `proof-evidence/step-traces/`, `proof-evidence/probe-observations/`, and `proof-evidence/scenario-observations/`).
 4. Write the completed `proof-result-bundle.json` back into the output root with host details, per-axis status, executed flows/probes/scenarios, missing items, and evidence references keyed to the exported `ScenarioMatrix`/`ScenarioCatalog` names.
 5. Reload that output directory in SlideSmith/Desktop review. The app will re-ingest `proof-result-bundle.json`, refresh the files listed under `ImportTargets`, and surface the updated planned-vs-executed/imported proof state in reports/guidance.
+6. Optionally run `pwsh -NoProfile -File .\scripts\Validate-ExternalProofEvidence.ps1 -OutputDirectory "<conversion output>"` from the repository root before importing. It rejects unsafe or missing evidence references and writes a SHA-256 inventory. Use a JSON Schema 2020-12 validator with `schemas/proof-result-bundle.schema.json` to validate the result-bundle structure.
+
+The script proves only that referenced evidence files resolve inside the output directory and records their sizes and hashes at check time. It does not authenticate who produced them, interpret their contents, execute BodySlide/MO2/Skyrim, or prove a slider deforms correctly. A successful script run is not external proof completion and does not bypass SlideSmith's imported-proof readiness gate.
 
 ## Issue #2 progress comparison
 
