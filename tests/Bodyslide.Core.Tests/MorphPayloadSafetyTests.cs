@@ -88,7 +88,7 @@ public sealed class MorphPayloadSafetyTests
         var bytes = BodyTriWithUv(hasPositionMorph, hasUvMorph);
         Assert.True(TriMorphReader.TryRead(bytes, out var payload));
         Assert.Equal(hasPositionMorph ? 1 : 0, payload!.Morphs.Count);
-        Assert.Equal("S", payload.ShapeName);
+        Assert.Equal(hasPositionMorph ? "S" : null, payload.ShapeName);
         if (hasPositionMorph) Assert.Equal((1f, 0f, 0f), Assert.Single(payload.Morphs).Deltas[0]);
         Assert.False(TriMorphReader.TryRead(bytes[..^1], out _));
         Assert.False(TriMorphReader.TryRead(bytes.Concat(new byte[] { 1 }).ToArray(), out _));
