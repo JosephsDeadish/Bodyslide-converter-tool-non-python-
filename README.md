@@ -121,6 +121,12 @@ layout the tool can verify. Missing, unreadable, or unsupported source NIFs and
 OSD ranges that cannot be encoded must be treated as review-required, not guessed
 or counted as a successful build. Synthetic or retargeted OSD morph records are
 reported as fallback data, not recovered source morphs.
+Matched source OSP settings that the exporter reconstructs differently—including
+custom slider-set/path options, source output-path relocation, defaults, zaps,
+weight-output mode, references, and seam/normal flags—are listed in
+`SourceAssetSupport.UnsupportedOspSemantics` and produce the medium-severity
+`source-osp-semantics-not-preserved` validation issue. These diagnostics identify
+settings needing review; they do not claim those settings were preserved.
 TRI files are a separate in-game morph format, not substitutes for OSD shape
 deltas. The converter intentionally withholds generated TRI files because its
 current morph path cannot prove target-shape identity and vertex-order
