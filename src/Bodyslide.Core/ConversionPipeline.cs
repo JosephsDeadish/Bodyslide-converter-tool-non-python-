@@ -1871,7 +1871,8 @@ public sealed record ArmorPackValidationItem(
     bool HasFomodInfo = false,
     bool HasMetaIni = false,
     bool HasOutputZip = false,
-    bool PackagedInstallerReady = false);
+    bool PackagedInstallerReady = false,
+    string? ProofExecutionStatus = null);
 public sealed record ArmorPackValidationReport(
     string ConversionLabel,
     string TargetBody,
@@ -9593,6 +9594,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var manualCleanupLikely = qualityReport?.ManualCleanupLikely ?? false;
             var runtimeVerificationRequired = qualityReport?.RuntimeVerificationRequired ?? false;
             var canSafelyAnimate = qualityReport?.ConversionReadiness?.CanSafelyAnimate;
+            var proofExecutionStatus = TryReadConversionMatrixProofReport(result.OutputDirectory)?.ProofExecutionStatus
+                ?? "missing-proof-report";
             var requiresExternalGameHarness = TryReadRuntimeValidationPlanRequirement(
                 result.OutputDirectory,
                 static plan => plan.RequiresExternalGameHarness);
@@ -9609,7 +9612,13 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 supportTier,
                 manualCleanupLikely,
                 runtimeVerificationRequired,
-                canSafelyAnimate);
+                canSafelyAnimate,
+                proofExecutionStatus);
+            if (!IsExecutedPackProofStatus(proofExecutionStatus))
+            {
+                issueCodes.Add("external-proof-pending");
+                issueMessages.Add($"External runtime, desktop, and live-game proof is not complete (status: {proofExecutionStatus}).");
+            }
 
             items.Add(new ArmorPackValidationItem(
                 MeshFile: Path.GetFileName(meshFile),
@@ -9632,7 +9641,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 HasFomodInfo: hasFomodInfo,
                 HasMetaIni: hasMetaIni,
                 HasOutputZip: hasOutputZip,
-                PackagedInstallerReady: packagedInstallerReady));
+                PackagedInstallerReady: packagedInstallerReady,
+                ProofExecutionStatus: proofExecutionStatus));
         }
 
         var qualityReportCount = items.Count(item => item.ValidationScore.HasValue);
@@ -10095,7 +10105,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         var externalValidationPendingCount = items.Count - executedCompleteCount;
         if (externalValidationPendingCount > 0)
         {
-            blockingGaps.Add($"External live-game validation is still pending for {externalValidationPendingCount} of {items.Count} outputs (proof execution status not executed-pass).");
+            blockingGaps.Add($"External runtime, desktop, and live-game proof is still pending for {externalValidationPendingCount} of {items.Count} outputs (proof execution status not executed-complete).");
         }
 
         if (executedIncompleteCount > 0)
@@ -10150,8 +10160,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
     private static bool IsExecutedPackProofStatus(string? status) =>
         !string.IsNullOrWhiteSpace(status) &&
-        (status.Equals("executed-pass", StringComparison.OrdinalIgnoreCase) ||
-         status.Equals("executed-complete", StringComparison.OrdinalIgnoreCase));
+        status.Equals("executed-complete", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsIncompletePackProofStatus(string? status) =>
         !string.IsNullOrWhiteSpace(status) &&
@@ -10210,19 +10219,24 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         }
     }
 
-    private static string DeriveArmorPackValidationStatus(
+    internal static string DeriveArmorPackValidationStatus(
         string validationStatus,
         string? supportTier,
         bool manualCleanupLikely,
         bool runtimeVerificationRequired,
-        bool? canSafelyAnimate)
+        bool? canSafelyAnimate,
+        string? proofExecutionStatus = null)
     {
         if (validationStatus.Equals("failed", StringComparison.OrdinalIgnoreCase) ||
             validationStatus.Equals("high-risk", StringComparison.OrdinalIgnoreCase) ||
             validationStatus.Equals("missing-quality-report", StringComparison.OrdinalIgnoreCase) ||
             validationStatus.Equals("unclassified", StringComparison.OrdinalIgnoreCase))
         {
-            return validationStatus;
+            return IsExecutedPackProofStatus(proofExecutionStatus)
+                ? validationStatus
+                : string.Equals(validationStatus, "ready", StringComparison.OrdinalIgnoreCase)
+                    ? "needs-review"
+                    : validationStatus;
         }
 
         if (manualCleanupLikely ||

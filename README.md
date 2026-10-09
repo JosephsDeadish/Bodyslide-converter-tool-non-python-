@@ -165,6 +165,10 @@ On a Windows test host:
 This procedure describes the required external evidence; it is not evidence
 that the current generated projects pass. No BodySlide, MO2, or Skyrim runtime
 is available in this Linux validation environment.
+Batch armor-pack reports now keep otherwise-ready items at `needs-review` until
+the imported proof report marks runtime automation, Desktop E2E, and live-game
+execution complete. A partial `executed-pass` is not sufficient; the report
+lists pending proof status per item and includes it in pack-level blockers.
 
 `TargetBodySupport` in conversion reports now labels metadata as `embedded-built-in-catalog`,
 `custom-profile`, or `unavailable` and separately reports whether it was externally
