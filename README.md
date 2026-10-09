@@ -20,7 +20,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - **deformation profile modifier** — fine-tunes regional morphs using 8 named profiles (balanced, curvy, slim, petite, athletic, muscular, lean, anime)
 - **BodySlide `.osp` project generation** — outputs a valid BodySlide slider-set XML alongside each converted armor when slider export is enabled
 - incomplete-source BodySlide fallback recovery that can infer likely source-body slider families plus fallback deformation-profile hints from nearby reference/body asset names when OSP/TRI/BSD support files are missing
-- topology-mismatched TRI/BSD reuse can conservatively retarget source morph deltas before falling back to fully synthetic slider output
+- source morph discovery can conservatively retarget topology-mismatched TRI/BSD deltas, but generated in-game TRI files are withheld unless shape identity and vertex order can be proven
 - **texture analysis** — detects DDS textures, classifies diffuse / normal / specular / glow / parallax / subsurface, identifies missing normal maps
 - **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths, including modular device-style armor packs that split body/head/world variants
 - export package + manifest/log output
@@ -122,13 +122,13 @@ OSD ranges that cannot be encoded must be treated as review-required, not guesse
 or counted as a successful build. Synthetic or retargeted OSD morph records are
 reported as fallback data, not recovered source morphs.
 TRI files are a separate in-game morph format, not substitutes for OSD shape
-deltas. Current TRI generation still estimates one project-wide vertex count
-from the largest parsed NIF vertex list and does not preserve per-shape identity
-or prove vertex-order correspondence. Treat generated TRI behavior as
-unverified until that mapping is made shape-aware and the Windows build/game
-checks below pass. Generated TRI output now adds the
-`bodyslide-tri-shape-mapping-unverified` review issue, preventing the conversion
-validation summary from reporting `ready` while that limitation remains.
+deltas. The converter intentionally withholds generated TRI files because its
+current morph path cannot prove target-shape identity and vertex-order
+correspondence. This avoids presenting project-wide vertex-count estimates or
+synthetic deltas as usable in-game morphs. Conversion quality reports the
+high-severity `bodyslide-tri-payload-withheld` issue, so this output is not
+reported as ready. BodySlide may generate TRI files during its own validated
+build; inspect and test those files independently before packaging.
 
 On a Windows test host:
 
@@ -156,7 +156,7 @@ On a Windows test host:
 
    Save the exact arguments, process exit code, BodySlide log, MO2 `usvfs` /
    `mo_interface` logs, and a file listing of the output directory. Confirm
-   both expected weight meshes are produced, the TRI output is present when
+   both expected weight meshes are produced, BodySlide generates the TRI when
    requested, and the build does not silently copy an unchanged source mesh.
 4. In Outfit Studio, open the generated project and verify the expected shape
    names and every slider. Move representative sliders to both endpoints and

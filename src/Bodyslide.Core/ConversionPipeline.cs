@@ -1348,8 +1348,8 @@ internal static class ConversionValidationGuidance
                 "Review each generated shape's OSD morphs in Outfit Studio and replace synthetic fallback deltas with shape-matched source morphs before treating the multi-shape project as production-ready.",
             "bodyslide-shape-data-links-missing" =>
                 "Open the generated OSP and verify every supported Shape/Slider/Data reference resolves to its OSD record; unsupported NIF layouts and zap semantics require manual review.",
-            "bodyslide-tri-shape-mapping-unverified" =>
-                "Do not rely on the generated TRI for in-game morphs yet: its project-wide vertex count does not prove the target shape or vertex order. Supply a shape-matched TRI or wait for shape-aware TRI generation and validate it in game.",
+            "bodyslide-tri-payload-withheld" =>
+                "The converter intentionally withheld TRI data because it cannot prove the target shape and vertex order. Supply a verified shape-matched TRI or build the project in BodySlide, inspect the output, and validate the intended in-game morph behavior before packaging.",
             "bodyslide-semantic-mismatch" =>
                 "Open the generated BodySlide OSP and ShapeData, then verify the OSP slider list, referenced source NIFs, and TRI/OSD payload slider coverage all agree before shipping the project to BodySlide or Outfit Studio users.",
             "missing-xedit-script" =>
@@ -1482,7 +1482,7 @@ internal static class ConversionValidationGuidance
             "missing-bodyslide-slider-groups" =>
                 ["CalienteTools/BodySlide/SliderGroups/", "conversion-quality.json"],
             "missing-bodyslide-shape-data" or "missing-bodyslide-reference-nif" or "missing-bodyslide-slider-payload" or
-            "bodyslide-tri-shape-mapping-unverified" or "bodyslide-semantic-mismatch" =>
+            "bodyslide-tri-payload-withheld" or "bodyslide-semantic-mismatch" =>
                 ["CalienteTools/BodySlide/ShapeData/", "conversion-quality.json"],
             "missing-xedit-script" or "missing-plugin-patch-report" or "plugin-patch-semantic-mismatch" =>
                 ["plugin-patches.json", "conversion-quality.json"],
@@ -22381,7 +22381,6 @@ internal sealed class LocalExportService(
         mesh = mesh with { DeformationCage = BuildExportDeformationCage(armor.MeshFiles, mesh.DeformationCage) };
 
         var outputFiles = new List<string>();
-        MorphTransferContext? morphTransferContext = null;
         var syntheticBodySlideOsdMorphCount = 0;
 
         var manifest = new
@@ -22589,17 +22588,7 @@ internal sealed class LocalExportService(
             outputFiles.Add(raceCompatibilityPath);
         }
 
-        if (request.GenerateBodySlideFiles)
-        {
-            morphTransferContext = CreateMorphTransferContext(armor.MeshFiles, writtenNifs, analysis, request.TargetBody);
-        }
-        var payloadReuse = request.GenerateBodySlideFiles
-            ? BuildPayloadReuseSummary(
-                bodySlideProject.Sliders,
-                morphs.ReusableSourceMorphPayloads,
-                EstimateMorphVertexCount(writtenNifs, request.TargetBody),
-                morphTransferContext)
-            : new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], [], 0, []);
+        var payloadReuse = new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], [], 0, []);
         var sourceNifSupport = NifGeometrySignatureReader.Inspect(armor.MeshFiles);
         var convertedNifSupport = NifGeometrySignatureReader.Inspect(writtenNifs);
         var nifSupport = sourceNifSupport
@@ -22687,7 +22676,6 @@ internal sealed class LocalExportService(
             // Data\CalienteTools\BodySlide\ShapeData\<project>\ so BodySlide can locate them when the
             // user opens the slider editor.  The source NIF is a copy of the primary converted mesh and
             // acts as the base reference shape displayed inside BodySlide.
-            var morphVertexCount = EstimateMorphVertexCount(writtenNifs, request.TargetBody);
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", bodySlideProject.ProjectName);
             Directory.CreateDirectory(shapeDataDirectory);
 
@@ -22706,14 +22694,6 @@ internal sealed class LocalExportService(
                 await CopyFileAsync(writtenNif, shapeDataNifPath, cancellationToken);
                 outputFiles.Add(shapeDataNifPath);
             }
-
-            // Write TRI morph files (.tri) in ShapeData for in-game slider interpolation.
-            var triLowPath  = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.tri");
-            var triHighPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}_1.tri");
-            await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext), cancellationToken);
-            await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext),  cancellationToken);
-            outputFiles.Add(triLowPath);
-            outputFiles.Add(triHighPath);
 
             var shapeDataBySourceFile = new Dictionary<string, IReadOnlyList<SkyrimSseNifShape>>(StringComparer.OrdinalIgnoreCase);
             foreach (var sourceFile in Directory.EnumerateFiles(shapeDataDirectory, "*.nif", SearchOption.TopDirectoryOnly))
@@ -27591,15 +27571,12 @@ internal sealed class LocalExportService(
                 "Generated morphs are not marked BodySlide-compatible."));
         }
 
-        if (request.GenerateBodySlideFiles &&
-            outputFiles.Any(path =>
-                path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase) &&
-                File.Exists(path)))
+        if (request.GenerateBodySlideFiles && bodySlideProject.Sliders.Count > 0)
         {
             issues.Add(new ConversionValidationIssue(
-                "bodyslide-tri-shape-mapping-unverified",
-                "medium",
-                "Generated TRI payloads use a project-wide estimated vertex count; their target shape identity and vertex order are not verified."));
+                "bodyslide-tri-payload-withheld",
+                "high",
+                "No generated TRI payload is included because the converter cannot prove target shape identity and vertex order. In-game TRI morphs are unavailable until a shape-matched TRI is supplied or regenerated by a validated BodySlide build."));
         }
 
         if (TryBuildTargetBodySupportIssue(armor, request.TargetBody, physicsCompatibility.RequestedProfile, out var targetBodySupportIssue))

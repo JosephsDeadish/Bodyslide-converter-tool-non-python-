@@ -10023,7 +10023,7 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithBsTriShapeStyleNif_WritesTriMorphPayloadUsingHalfFloatVertexCount()
+    public async Task ConvertAsync_WithBsTriShapeStyleNif_WithholdsTriWithoutVerifiedShapeMapping()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -10042,21 +10042,15 @@ public sealed class NifOutputAndSourceOverrideTests
             var shapeDataDirectory = Directory
                 .GetDirectories(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData"), "*", SearchOption.TopDirectoryOnly)
                 .Single();
-            var lowTriPath = Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.TopDirectoryOnly)
-                .First(path => !Path.GetFileName(path).EndsWith("_1.tri", StringComparison.OrdinalIgnoreCase));
-
-            Assert.Equal(320u, ReadTriVertexCount(lowTriPath));
+            Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.TopDirectoryOnly));
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
 
-        static uint ReadTriVertexCount(string path)
-        {
-            var bytes = File.ReadAllBytes(path);
-            return BitConverter.ToUInt32(bytes, 8);
-        }
     }
 
     [Fact]
@@ -10083,7 +10077,11 @@ public sealed class NifOutputAndSourceOverrideTests
 
             Assert.True(result.Success);
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
-            Assert.Contains("\"Code\": \"bodyslide-tri-shape-mapping-unverified\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
+            Assert.Empty(Directory.GetFiles(
+                Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData"),
+                "*.tri",
+                SearchOption.AllDirectories));
             Assert.DoesNotContain("\"Status\": \"ready\"", qualityJson, StringComparison.Ordinal);
             var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "small_sse_bstrishape_armor.nif");
             Assert.True(File.Exists(writtenPath), "Converted SSE NIF was not written.");
@@ -12694,7 +12692,7 @@ public sealed class BsdSliderDataTests
         }
 
         [Fact]
-        public async Task ConvertAsync_WithDefaultModules_WritesTriMorphFiles()
+        public async Task ConvertAsync_WithDefaultModules_WithholdsUnmappedTriMorphFiles()
         {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -12709,15 +12707,10 @@ public sealed class BsdSliderDataTests
 
             Assert.True(result.Success);
 
-            // Expect both the low-weight and high-weight TRI files.
             var triFiles = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.AllDirectories);
-            Assert.True(triFiles.Length >= 2, "Expected at least 2 TRI files (low and high weight).");
-
-            // The standard low-weight TRI should NOT end with _1.tri
-            Assert.True(triFiles.Any(f => !Path.GetFileName(f).EndsWith("_1.tri", StringComparison.OrdinalIgnoreCase)),
-                "Expected a low-weight .tri file.");
-            Assert.True(triFiles.Any(f => Path.GetFileName(f).EndsWith("_1.tri", StringComparison.OrdinalIgnoreCase)),
-                "Expected a high-weight _1.tri file.");
+            Assert.Empty(triFiles);
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -12726,7 +12719,7 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithDefaultModules_TriFilesHaveFrtri003Magic()
+    public async Task ConvertAsync_WithDefaultModules_DoesNotWriteUnmappedTriPayload()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -12741,15 +12734,9 @@ public sealed class BsdSliderDataTests
 
             Assert.True(result.Success);
             var triFiles = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.AllDirectories);
-            Assert.NotEmpty(triFiles);
-
-            foreach (var triFile in triFiles)
-            {
-                var bytes = await File.ReadAllBytesAsync(triFile);
-                Assert.True(bytes.Length >= 8);
-                var magic = System.Text.Encoding.ASCII.GetString(bytes, 0, 8);
-                Assert.Equal("FRTRI003", magic);
-            }
+            Assert.Empty(triFiles);
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -12758,7 +12745,7 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithDefaultModules_TriFilesContainMorphDeltaPayload()
+    public async Task ConvertAsync_WithDefaultModules_DoesNotClaimSyntheticTriMorphPayload()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -12772,30 +12759,9 @@ public sealed class BsdSliderDataTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
-            var triFile = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.AllDirectories).First();
-            var bytes = await File.ReadAllBytesAsync(triFile);
-
-            var offset = 8;
-            var vertexCount = BitConverter.ToUInt32(bytes, offset);
-            offset += sizeof(uint);
-            var morphCount = BitConverter.ToUInt32(bytes, offset);
-            offset += sizeof(uint);
-
-            Assert.True(vertexCount > 0, "TRI vertex count should be populated.");
-            Assert.True(morphCount > 0, "TRI should include morph entries.");
-
-            for (var index = 0; index < morphCount; index++)
-            {
-                var nameLength = BitConverter.ToUInt16(bytes, offset);
-                offset += sizeof(ushort) + nameLength;
-                var deltaCount = BitConverter.ToUInt32(bytes, offset);
-                offset += sizeof(uint);
-                Assert.Equal(vertexCount, deltaCount);
-            }
-
-            var expectedPayloadBytes = checked((int)morphCount * (int)vertexCount * 6);
-            Assert.Equal(offset + expectedPayloadBytes, bytes.Length);
-            Assert.Contains(bytes.AsSpan(offset, expectedPayloadBytes).ToArray(), b => b != 0);
+            Assert.Empty(Directory.GetFiles(outputDirectory, "*.tri", SearchOption.AllDirectories));
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -17065,10 +17031,11 @@ public sealed class RealisticModPackFixtureTests
             Assert.NotEmpty(Directory.GetFiles(sliderGroupsDirectory, "*.xml"));
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
             Assert.True(Directory.Exists(shapeDataDirectory));
-            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
+            Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
             Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.osd", SearchOption.AllDirectories));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
             Assert.Contains("\"Code\": \"bodyslide-nif-shape-layout-unsupported\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
@@ -17109,9 +17076,10 @@ public sealed class RealisticModPackFixtureTests
 
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
             Assert.True(Directory.Exists(shapeDataDirectory));
-            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
+            Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
             Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.osd", SearchOption.AllDirectories));
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
             Assert.Contains("\"Code\": \"bodyslide-osd-payload-unavailable\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
@@ -17171,13 +17139,16 @@ public sealed class RealisticModPackFixtureTests
             Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
             Assert.True(Directory.Exists(shapeDataDirectory));
-            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
+            Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
 
             using var inGameJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json")));
             Assert.True(inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
             Assert.Equal("SAM Light", inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString());
 
             using var qualityJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.Contains(
+                qualityJson.RootElement.GetProperty("Validation").GetProperty("Issues").EnumerateArray(),
+                issue => issue.GetProperty("Code").GetString() == "bodyslide-tri-payload-withheld");
             Assert.True(qualityJson.RootElement.GetProperty("SkeletonRemapCertainty").GetProperty("Confidence").GetDouble() > 0d);
             Assert.Contains(
                 qualityJson.RootElement.GetProperty("SkeletonRemapCertainty").GetProperty("Classification").GetString(),
@@ -18816,21 +18787,11 @@ public sealed class RealisticModPackFixtureTests
             var triPaths = Directory.GetFiles(shapeDataProjectDirectory, "*.tri", SearchOption.TopDirectoryOnly);
             var nifPaths = Directory.GetFiles(shapeDataProjectDirectory, "*.nif", SearchOption.TopDirectoryOnly);
             Assert.Empty(osdPaths);
-            Assert.NotEmpty(triPaths);
+            Assert.Empty(triPaths);
             Assert.NotEmpty(nifPaths);
 
-            var triPayloads = triPaths
-                .Select(path =>
-                {
-                    Assert.True(TriMorphReader.TryRead(path, out var payload));
-                    Assert.NotNull(payload);
-                    return payload!;
-                })
-                .ToArray();
-            Assert.Contains(triPayloads.SelectMany(static payload => payload.Morphs).Select(static morph => morph.Name), sliderName =>
-                sliderNames.Contains(sliderName, StringComparer.OrdinalIgnoreCase));
-
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
             Assert.Contains("\"Code\": \"bodyslide-nif-shape-layout-unsupported\"", qualityJson, StringComparison.Ordinal);
         }
         finally
@@ -22303,7 +22264,7 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
-    public async Task BatchConvert_RealisticMultiBlockLinkedFrameworkModPackDirectory_WritesTriMorphCountsFromConvertedHalfFloatMeshes()
+    public async Task BatchConvert_RealisticMultiBlockLinkedFrameworkModPackDirectory_WithholdsUnmappedTriMorphs()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMultiBlockLinkedFrameworkModPack");
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -22317,30 +22278,13 @@ public sealed class RealisticModPackFixtureTests
             var shapeDataDirectory = Directory
                 .GetDirectories(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData"), "*", SearchOption.TopDirectoryOnly)
                 .Single();
-            var expectedVertexCount = Directory
-                .GetFiles(shapeDataDirectory, "*.nif", SearchOption.TopDirectoryOnly)
-                .Select(NifGeometrySignatureReader.TryReadFullVertices)
-                .Where(static vertices => vertices is { Count: > 0 })
-                .Select(static vertices => (uint)vertices!.Count)
-                .DefaultIfEmpty()
-                .Max();
-
-            Assert.True(expectedVertexCount > 0, "Expected staged ShapeData NIFs with readable vertex data.");
-
-            var lowTriPath = Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.TopDirectoryOnly)
-                .First(path => !Path.GetFileName(path).EndsWith("_1.tri", StringComparison.OrdinalIgnoreCase));
-
-            Assert.Equal(expectedVertexCount, ReadTriVertexCount(lowTriPath));
+            Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.TopDirectoryOnly));
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
             Directory.Delete(workingDirectory, recursive: true);
-        }
-
-        static uint ReadTriVertexCount(string path)
-        {
-            var bytes = File.ReadAllBytes(path);
-            return BitConverter.ToUInt32(bytes, 8);
         }
     }
 
