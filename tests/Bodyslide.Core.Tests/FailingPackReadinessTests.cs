@@ -91,6 +91,11 @@ public sealed class FailingPackReadinessTests
         Assert.NotNull(validation);
         Assert.NotNull(matrix);
         Assert.Contains(validation.PackReadinessStatus, new[] { "needs-review", "high-risk" });
+        Assert.All(validation.Items, item =>
+        {
+            Assert.Equal("planned-only", item.ProofExecutionStatus);
+            Assert.Contains("external-proof-pending", item.IssueCodes);
+        });
         Assert.Equal(results.Count, matrix.SampleCount);
         Assert.True(matrix.SamplesRequiringReview > 0);
         Assert.Contains(matrix.Cells, cell => cell.IssueCode == expectedCode && cell.Count > 0);
