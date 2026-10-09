@@ -325,7 +325,7 @@ public sealed class ConversionPerformanceRegressionTests
                 Assert.Equal("unresolved", low.GetProperty("ShapeIdentityStatus").GetString());
                 Assert.Equal("unverified", low.GetProperty("VertexOrderStatus").GetString());
                 Assert.Equal("blocked-shape-or-order-unverified", low.GetProperty("ReuseEligibility").GetString());
-                Assert.Contains("must both be verified", summary.GetProperty("SourceMorphReusePolicy").GetString());
+                Assert.Contains("requires verified shape identity and vertex order", summary.GetProperty("SourceMorphReusePolicy").GetString());
             }
 
             Assert.Same(deltas, payload.Deltas);
