@@ -11977,7 +11977,7 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
-    public async Task BodySlideSourceSupport_WithFixtureBackedShapeDataPack_ResolvesLargerSampledPayloads()
+    public async Task BodySlideSourceSupport_WithFixtureBackedShapeDataPack_DoesNotInflateSparsePayloadFromNearbyNif()
     {
         var meshPath = GetFixtureFilePath("SampledBodySlideShapeDataPack", Path.Combine("meshes", "armor", "traveler", "traveler_armor_0.nif"));
 
@@ -11997,7 +11997,9 @@ public sealed class BsdSliderDataTests
         Assert.True(resolved.ReusableMorphPayloads!.TryGetValue("TravelerWaist", out var waistPayloads));
         Assert.NotNull(waistPayloads.LowWeight);
         Assert.NotNull(waistPayloads.HighWeight);
-        Assert.Equal(16, waistPayloads.LowWeight!.VertexCount);
+        Assert.Equal(8, waistPayloads.LowWeight!.VertexCount);
+        Assert.Equal("unresolved", waistPayloads.LowWeight.ShapeIdentityStatus);
+        Assert.Equal("unverified", waistPayloads.LowWeight.VertexOrderStatus);
         Assert.Equal(0.125f, waistPayloads.LowWeight.Deltas[0].X, 3);
         Assert.Equal(0.22f, waistPayloads.HighWeight!.Deltas[1].X, 3);
         Assert.True(resolved.ReusableMorphPayloads.TryGetValue("TravelerBust", out var bustPayloads));
