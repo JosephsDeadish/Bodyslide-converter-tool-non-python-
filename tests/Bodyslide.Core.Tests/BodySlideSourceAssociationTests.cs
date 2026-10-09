@@ -107,8 +107,10 @@ public sealed class BodySlideSourceAssociationTests
             await File.WriteAllTextAsync(mesh, "mesh");
             await File.WriteAllTextAsync(project, """
                 <SliderSetInfo>
-                  <SliderSet name="Jacket" baseShape="Custom Base" bsversion="19" seamNormals="true">
-                    <DataFolder>../shared-data</DataFolder>
+                  <SliderSet name="Jacket" baseShape="Custom Base" bsversion="19" seamNormals="true" customFlag="true">
+                    <DataFolder customRoot="true">../shared-data</DataFolder>
+                    <SourceFile variant="reference">base.nif</SourceFile>
+                    <OutputPath mode="custom">meshes\custom\</OutputPath>
                     <OutputFile gender="female" GenWeights="true" options="custom">jacket</OutputFile>
                     <Slider name="Fit" default="0.25" small="0.1" big="0.8" invert="true" uv="true">
                       <Data target="Torso">shared.osd#Fit</Data>
@@ -132,7 +134,10 @@ public sealed class BodySlideSourceAssociationTests
                     "inverted-sliders",
                     "nonzero-slider-defaults",
                     "output-options",
+                    "output-path-rebuilt",
                     "seam-or-lock-normal-settings",
+                    "slider-set-unknown-attributes",
+                    "source-path-options",
                     "source-osp-version",
                     "source-reference-links",
                     "source-shape-mappings",
@@ -173,7 +178,7 @@ public sealed class BodySlideSourceAssociationTests
                 new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
 
             Assert.Equal(
-                ["weight-variant-output-mode-rebuilt"],
+                ["output-path-rebuilt", "weight-variant-output-mode-rebuilt"],
                 result.SourceAssetSupport!.UnsupportedOspSemantics);
         }
         finally { Directory.Delete(root, true); }

@@ -1246,6 +1246,14 @@ internal static class BodySlideSourceProjectSupport
     private static IReadOnlyList<string> CollectUnsupportedOspSemantics(XElement sliderSet)
     {
         var semantics = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var knownSliderSetAttributes = new HashSet<string>(
+            ["name", "baseShape", "bsversion"],
+            StringComparer.OrdinalIgnoreCase);
+        if (sliderSet.Attributes().Any(attribute => !knownSliderSetAttributes.Contains(attribute.Name.LocalName)))
+        {
+            semantics.Add("slider-set-unknown-attributes");
+        }
+
         foreach (var slider in sliderSet.Descendants().Where(static element =>
                      element.Name.LocalName.Equals("Slider", StringComparison.OrdinalIgnoreCase)))
         {
@@ -1309,6 +1317,23 @@ internal static class BodySlideSourceProjectSupport
                 IsExternalDataFolder(element.Value)))
         {
             semantics.Add("external-data-folder");
+        }
+
+        var pathElements = sliderSet.Elements().Where(static element =>
+            element.Name.LocalName.Equals("OutputPath", StringComparison.OrdinalIgnoreCase) ||
+            element.Name.LocalName.Equals("DataFolder", StringComparison.OrdinalIgnoreCase) ||
+            element.Name.LocalName.Equals("SourceFile", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (pathElements.Any(static element =>
+                element.HasAttributes || element.Elements().Any()))
+        {
+            semantics.Add("source-path-options");
+        }
+
+        if (pathElements.Any(static element =>
+                element.Name.LocalName.Equals("OutputPath", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(element.Value)))
+        {
+            semantics.Add("output-path-rebuilt");
         }
 
         var baseShape = sliderSet.Attribute("baseShape")?.Value;
