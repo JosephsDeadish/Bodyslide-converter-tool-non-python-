@@ -164,6 +164,43 @@ public sealed class BodySlideBuildPathTests
     }
 
     [Fact]
+    public void ValidateShapeDataLinks_RejectsOsdVertexIndexOutsideTargetShape()
+    {
+        const string ospXml = """
+            <SliderSetInfo version="1">
+              <SliderSet name="Demo">
+                <DataFolder>Demo</DataFolder>
+                <SourceFile>mesh.nif</SourceFile>
+                <Shape target="Torso">Torso</Shape>
+                <Slider name="Belly" default="0">
+                  <Data name="morph" target="Torso" local="true">Demo.osd\morph</Data>
+                </Slider>
+              </SliderSet>
+            </SliderSetInfo>
+            """;
+        var shapeDataDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(shapeDataDirectory);
+        try
+        {
+            File.WriteAllBytes(
+                Path.Combine(shapeDataDirectory, "mesh.nif"),
+                SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso"));
+            File.WriteAllBytes(
+                Path.Combine(shapeDataDirectory, "Demo.osd"),
+                CreateOsdPayload("morph", vertexIndex: 3));
+
+            var problems = LocalExportService.ValidateShapeDataLinks(XDocument.Parse(ospXml), shapeDataDirectory);
+
+            Assert.Contains(problems, static problem =>
+                problem.Contains("vertex index outside target shape 'Torso' (3 vertices)", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(shapeDataDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ShapeLinkedOsdExport_ReportsSyntheticFallbackWithoutShapeProvenance()
     {
         const string ospXml = """
@@ -191,6 +228,24 @@ public sealed class BodySlideBuildPathTests
         Assert.Equal(1, export.SyntheticMorphRecordCount);
         Assert.True(OsdMorphReader.TryRead(Assert.Single(export.OsdFiles).Bytes, out var payload));
         Assert.NotEmpty(Assert.Single(payload!.Morphs).SparseDeltas);
+    }
+
+    private static byte[] CreateOsdPayload(string recordName, ushort vertexIndex)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(new byte[] { 0x4f, 0x53, 0x44, 0x00 });
+        writer.Write(3);
+        writer.Write(1);
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes(recordName);
+        writer.Write((byte)nameBytes.Length);
+        writer.Write(nameBytes);
+        writer.Write((ushort)1);
+        writer.Write(vertexIndex);
+        writer.Write(0.1f);
+        writer.Write(0f);
+        writer.Write(0f);
+        return stream.ToArray();
     }
 
     [Theory]

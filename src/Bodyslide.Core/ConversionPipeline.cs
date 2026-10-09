@@ -40203,8 +40203,8 @@ internal sealed class LocalExportService(
     {
         var problems = new List<string>();
         var rootDirectory = Path.GetFullPath(shapeDataDirectory);
-        var osdRecordsByPath = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        var sourceShapeTargetsByPath = new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase);
+        var osdRecordsByPath = new Dictionary<string, OsdMorphPayload?>(StringComparer.OrdinalIgnoreCase);
+        var sourceShapeVertexCountsByPath = new Dictionary<string, Dictionary<string, int>?>(StringComparer.OrdinalIgnoreCase);
         foreach (var sliderSet in document.Descendants()
                      .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase)))
         {
@@ -40252,12 +40252,13 @@ internal sealed class LocalExportService(
                 continue;
             }
 
-            var sourceShapeTargets = TryReadSourceShapeTargets(sourceFile);
-            if (sourceShapeTargets is null)
+            var sourceShapeVertexCounts = TryReadSourceShapeVertexCounts(sourceFile);
+            if (sourceShapeVertexCounts is null)
             {
                 problems.Add($"OSP SliderSet '{setName}' SourceFile is missing, unreadable, or uses an unsupported NIF layout; shape targets cannot be verified.");
                 continue;
             }
+            var sourceShapeTargets = sourceShapeVertexCounts.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             if (shapes.Length == 0)
             {
@@ -40315,15 +40316,32 @@ internal sealed class LocalExportService(
 
                     if (!osdRecordsByPath.TryGetValue(osdPath, out var records))
                     {
-                        records = OsdMorphReader.TryRead(osdPath, out var payload) && payload is not null
-                            ? payload.Morphs.Select(static morph => morph.Name).ToHashSet(StringComparer.Ordinal)
-                            : new HashSet<string>(StringComparer.Ordinal);
+                        records = OsdMorphReader.TryRead(osdPath, out var payload) ? payload : null;
                         osdRecordsByPath[osdPath] = records;
                     }
 
-                    if (!records.Contains(dataName))
+                    if (records is null)
                     {
                         problems.Add($"OSP slider '{sliderName}' in '{setName}' references a missing OSD record '{dataName}'.");
+                        continue;
+                    }
+
+                    var matchingRecords = records.Morphs
+                        .Where(morph => string.Equals(morph.Name, dataName, StringComparison.Ordinal))
+                        .Take(2)
+                        .ToArray();
+                    if (matchingRecords.Length == 0)
+                    {
+                        problems.Add($"OSP slider '{sliderName}' in '{setName}' references a missing OSD record '{dataName}'.");
+                    }
+                    else if (matchingRecords.Length > 1)
+                    {
+                        problems.Add($"OSP slider '{sliderName}' in '{setName}' references an ambiguous duplicate OSD record '{dataName}'.");
+                    }
+                    else if (sourceShapeVertexCounts.TryGetValue(target, out var targetVertexCount) &&
+                             matchingRecords[0].SparseDeltas.Any(delta => delta.Index < 0 || delta.Index >= targetVertexCount))
+                    {
+                        problems.Add($"OSP slider '{sliderName}' in '{setName}' OSD record '{dataName}' contains a vertex index outside target shape '{target}' ({targetVertexCount} vertices).");
                     }
                 }
 
@@ -40339,7 +40357,7 @@ internal sealed class LocalExportService(
 
         return problems;
 
-        HashSet<string>? TryReadSourceShapeTargets(string relativeSourceFile)
+        Dictionary<string, int>? TryReadSourceShapeVertexCounts(string relativeSourceFile)
         {
             if (!IsSafeBodySlideRelativePath(relativeSourceFile) ||
                 !relativeSourceFile.EndsWith(".nif", StringComparison.OrdinalIgnoreCase))
@@ -40355,12 +40373,12 @@ internal sealed class LocalExportService(
                 return null;
             }
 
-            if (sourceShapeTargetsByPath.TryGetValue(sourcePath, out var cachedTargets))
+            if (sourceShapeVertexCountsByPath.TryGetValue(sourcePath, out var cachedVertexCounts))
             {
-                return cachedTargets;
+                return cachedVertexCounts;
             }
 
-            HashSet<string>? targets = null;
+            Dictionary<string, int>? vertexCounts = null;
             try
             {
                 var fileInfo = new FileInfo(sourcePath);
@@ -40369,9 +40387,16 @@ internal sealed class LocalExportService(
                     var readResult = SkyrimSseNifShapeReader.Read(File.ReadAllBytes(sourcePath));
                     if (readResult.Supported)
                     {
-                        targets = readResult.Shapes
-                            .Select(static shape => shape.Name)
-                            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        var duplicateShapeNames = readResult.Shapes
+                            .GroupBy(static shape => shape.Name, StringComparer.OrdinalIgnoreCase)
+                            .Any(static group => group.Count() > 1);
+                        if (!duplicateShapeNames)
+                        {
+                            vertexCounts = readResult.Shapes.ToDictionary(
+                                static shape => shape.Name,
+                                static shape => shape.Vertices.Count,
+                                StringComparer.OrdinalIgnoreCase);
+                        }
                     }
                 }
             }
@@ -40382,8 +40407,8 @@ internal sealed class LocalExportService(
             {
             }
 
-            sourceShapeTargetsByPath[sourcePath] = targets;
-            return targets;
+            sourceShapeVertexCountsByPath[sourcePath] = vertexCounts;
+            return vertexCounts;
         }
 
         static bool IsSafeBodySlideRelativePath(string value) =>
