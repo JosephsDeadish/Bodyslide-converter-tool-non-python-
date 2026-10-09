@@ -19,6 +19,28 @@ public sealed class MorphPayloadSafetyTests
         Assert.False(TriMorphReader.TryRead(stream.ToArray(), out _));
     }
 
+    [Fact]
+    public void FaceGenTriRejectsDuplicateExplicitVertexIndexes()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write("FRTRI003"u8);
+        writer.Write(3u);
+        writer.Write(1u);
+        writer.Write((ushort)1);
+        writer.Write((byte)'A');
+        writer.Write(2u);
+        for (var i = 0; i < 2; i++)
+        {
+            writer.Write((ushort)0);
+            writer.Write((short)(i + 1));
+            writer.Write((short)0);
+            writer.Write((short)0);
+        }
+
+        Assert.False(TriMorphReader.TryRead(stream.ToArray(), out _));
+    }
+
     [Theory]
     [InlineData(250_000)]
     [InlineData(int.MaxValue)]

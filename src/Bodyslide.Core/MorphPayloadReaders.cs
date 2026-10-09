@@ -303,11 +303,16 @@ internal static class TriMorphReader
             }
 
             var deltas = new (float X, float Y, float Z)[vertexCount];
+            var vertexIndexes = usesExplicitIndexes.Value ? new HashSet<int>() : null;
             for (var j = 0; j < deltaCount; j++)
             {
                 var vertexIndex = usesExplicitIndexes.Value
                     ? BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)])
                     : j;
+                if (vertexIndexes is not null && !vertexIndexes.Add(vertexIndex))
+                {
+                    return false;
+                }
                 if (usesExplicitIndexes.Value)
                 {
                     offset += 2;
