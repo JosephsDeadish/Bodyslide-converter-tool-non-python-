@@ -1348,6 +1348,8 @@ internal static class ConversionValidationGuidance
                 "Review each generated shape's OSD morphs in Outfit Studio and replace synthetic fallback deltas with shape-matched source morphs before treating the multi-shape project as production-ready.",
             "bodyslide-shape-data-links-missing" =>
                 "Open the generated OSP and verify every supported Shape/Slider/Data reference resolves to its OSD record; unsupported NIF layouts and zap semantics require manual review.",
+            "bodyslide-tri-shape-mapping-unverified" =>
+                "Do not rely on the generated TRI for in-game morphs yet: its project-wide vertex count does not prove the target shape or vertex order. Supply a shape-matched TRI or wait for shape-aware TRI generation and validate it in game.",
             "bodyslide-semantic-mismatch" =>
                 "Open the generated BodySlide OSP and ShapeData, then verify the OSP slider list, referenced source NIFs, and TRI/OSD payload slider coverage all agree before shipping the project to BodySlide or Outfit Studio users.",
             "missing-xedit-script" =>
@@ -1479,7 +1481,8 @@ internal static class ConversionValidationGuidance
                 ["CalienteTools/BodySlide/SliderSets/", "conversion-quality.json"],
             "missing-bodyslide-slider-groups" =>
                 ["CalienteTools/BodySlide/SliderGroups/", "conversion-quality.json"],
-            "missing-bodyslide-shape-data" or "missing-bodyslide-reference-nif" or "missing-bodyslide-slider-payload" or "bodyslide-semantic-mismatch" =>
+            "missing-bodyslide-shape-data" or "missing-bodyslide-reference-nif" or "missing-bodyslide-slider-payload" or
+            "bodyslide-tri-shape-mapping-unverified" or "bodyslide-semantic-mismatch" =>
                 ["CalienteTools/BodySlide/ShapeData/", "conversion-quality.json"],
             "missing-xedit-script" or "missing-plugin-patch-report" or "plugin-patch-semantic-mismatch" =>
                 ["plugin-patches.json", "conversion-quality.json"],
@@ -27586,6 +27589,17 @@ internal sealed class LocalExportService(
                 "bodyslide-incompatible",
                 "high",
                 "Generated morphs are not marked BodySlide-compatible."));
+        }
+
+        if (request.GenerateBodySlideFiles &&
+            outputFiles.Any(path =>
+                path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase) &&
+                File.Exists(path)))
+        {
+            issues.Add(new ConversionValidationIssue(
+                "bodyslide-tri-shape-mapping-unverified",
+                "medium",
+                "Generated TRI payloads use a project-wide estimated vertex count; their target shape identity and vertex order are not verified."));
         }
 
         if (TryBuildTargetBodySupportIssue(armor, request.TargetBody, physicsCompatibility.RequestedProfile, out var targetBodySupportIssue))

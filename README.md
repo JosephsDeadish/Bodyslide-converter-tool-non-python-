@@ -126,7 +126,9 @@ deltas. Current TRI generation still estimates one project-wide vertex count
 from the largest parsed NIF vertex list and does not preserve per-shape identity
 or prove vertex-order correspondence. Treat generated TRI behavior as
 unverified until that mapping is made shape-aware and the Windows build/game
-checks below pass.
+checks below pass. Generated TRI output now adds the
+`bodyslide-tri-shape-mapping-unverified` review issue, preventing the conversion
+validation summary from reporting `ready` while that limitation remains.
 
 On a Windows test host:
 

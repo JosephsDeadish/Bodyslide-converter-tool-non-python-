@@ -10082,6 +10082,9 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-tri-shape-mapping-unverified\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"Status\": \"ready\"", qualityJson, StringComparison.Ordinal);
             var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "small_sse_bstrishape_armor.nif");
             Assert.True(File.Exists(writtenPath), "Converted SSE NIF was not written.");
 
