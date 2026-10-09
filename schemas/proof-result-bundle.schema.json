@@ -4,91 +4,91 @@
   "description": "Imported external observations and evidence references. A structurally valid bundle does not establish that the recorded behavior is correct.",
   "type": "object",
   "required": [
-    "contractVersion",
-    "harnessKind",
-    "overallStatus",
-    "host",
-    "componentResults",
-    "scenarioResults",
-    "probeResults",
-    "missingExpectedArtifacts",
-    "missingExpectedScenarios",
-    "missingExpectedProbes",
-    "missingExpectedFlows",
-    "notes"
+    "ContractVersion",
+    "HarnessKind",
+    "OverallStatus",
+    "Host",
+    "ComponentResults",
+    "ScenarioResults",
+    "ProbeResults",
+    "MissingExpectedArtifacts",
+    "MissingExpectedScenarios",
+    "MissingExpectedProbes",
+    "MissingExpectedFlows",
+    "Notes"
   ],
   "properties": {
-    "contractVersion": { "type": "string", "minLength": 1 },
-    "harnessKind": { "type": "string", "minLength": 1 },
-    "overallStatus": { "type": "string", "minLength": 1 },
-    "host": {
+    "ContractVersion": { "const": "1.0" },
+    "HarnessKind": { "type": "string", "minLength": 1 },
+    "OverallStatus": { "type": "string", "minLength": 1 },
+    "Host": {
       "type": "object",
-      "required": [ "operatingSystem", "harnessRunner", "capabilities" ],
+      "required": [ "OperatingSystem", "HarnessRunner", "Capabilities" ],
       "properties": {
-        "operatingSystem": { "type": "string", "minLength": 1 },
-        "harnessRunner": { "type": "string", "minLength": 1 },
-        "launcher": { "type": [ "string", "null" ] },
-        "modManager": { "type": [ "string", "null" ] },
-        "saveProfile": { "type": [ "string", "null" ] },
-        "observationMode": { "type": [ "string", "null" ] },
-        "capabilities": { "$ref": "#/$defs/stringList" }
+        "OperatingSystem": { "type": "string", "minLength": 1 },
+        "HarnessRunner": { "type": "string", "minLength": 1 },
+        "Launcher": { "type": [ "string", "null" ] },
+        "ModManager": { "type": [ "string", "null" ] },
+        "SaveProfile": { "type": [ "string", "null" ] },
+        "ObservationMode": { "type": [ "string", "null" ] },
+        "Capabilities": { "$ref": "#/$defs/stringList" }
       },
       "additionalProperties": true
     },
-    "componentResults": {
+    "ComponentResults": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": [ "component", "status", "executedItems", "missingItems", "evidenceArtifacts", "notes" ],
+        "required": [ "Component", "Status", "ExecutedItems", "MissingItems", "EvidenceArtifacts", "Notes" ],
         "properties": {
-          "component": { "type": "string", "minLength": 1 },
-          "status": { "type": "string", "minLength": 1 },
-          "executedItems": { "$ref": "#/$defs/stringList" },
-          "missingItems": { "$ref": "#/$defs/stringList" },
-          "evidenceArtifacts": { "$ref": "#/$defs/stringList" },
-          "notes": { "$ref": "#/$defs/stringList" }
+          "Component": { "type": "string", "minLength": 1 },
+          "Status": { "type": "string", "minLength": 1 },
+          "ExecutedItems": { "$ref": "#/$defs/stringList" },
+          "MissingItems": { "$ref": "#/$defs/stringList" },
+          "EvidenceArtifacts": { "$ref": "#/$defs/stringList" },
+          "Notes": { "$ref": "#/$defs/stringList" }
         },
         "additionalProperties": true
       }
     },
-    "scenarioResults": {
+    "ScenarioResults": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": [ "scenario", "status", "validationSaveProfile", "observedSignals", "missingSignals", "evidenceArtifacts", "notes" ],
+        "required": [ "Scenario", "Status", "ValidationSaveProfile", "ObservedSignals", "MissingSignals", "EvidenceArtifacts", "Notes" ],
         "properties": {
-          "scenario": { "type": "string", "minLength": 1 },
-          "status": { "type": "string", "minLength": 1 },
-          "validationSaveProfile": { "type": "string", "minLength": 1 },
-          "observedSignals": { "$ref": "#/$defs/stringList" },
-          "missingSignals": { "$ref": "#/$defs/stringList" },
-          "evidenceArtifacts": { "$ref": "#/$defs/stringList" },
-          "notes": { "$ref": "#/$defs/stringList" }
+          "Scenario": { "type": "string", "minLength": 1 },
+          "Status": { "type": "string", "minLength": 1 },
+          "ValidationSaveProfile": { "type": "string", "minLength": 1 },
+          "ObservedSignals": { "$ref": "#/$defs/stringList" },
+          "MissingSignals": { "$ref": "#/$defs/stringList" },
+          "EvidenceArtifacts": { "$ref": "#/$defs/stringList" },
+          "Notes": { "$ref": "#/$defs/stringList" }
         },
         "additionalProperties": true
       }
     },
-    "probeResults": {
+    "ProbeResults": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": [ "probeId", "status", "observedSignals", "missingSignals", "evidenceArtifacts", "notes" ],
+        "required": [ "ProbeId", "Status", "ObservedSignals", "MissingSignals", "EvidenceArtifacts", "Notes" ],
         "properties": {
-          "probeId": { "type": "string", "minLength": 1 },
-          "status": { "type": "string", "minLength": 1 },
-          "observedSignals": { "$ref": "#/$defs/stringList" },
-          "missingSignals": { "$ref": "#/$defs/stringList" },
-          "evidenceArtifacts": { "$ref": "#/$defs/stringList" },
-          "notes": { "$ref": "#/$defs/stringList" }
+          "ProbeId": { "type": "string", "minLength": 1 },
+          "Status": { "type": "string", "minLength": 1 },
+          "ObservedSignals": { "$ref": "#/$defs/stringList" },
+          "MissingSignals": { "$ref": "#/$defs/stringList" },
+          "EvidenceArtifacts": { "$ref": "#/$defs/stringList" },
+          "Notes": { "$ref": "#/$defs/stringList" }
         },
         "additionalProperties": true
       }
     },
-    "missingExpectedArtifacts": { "$ref": "#/$defs/stringList" },
-    "missingExpectedScenarios": { "$ref": "#/$defs/stringList" },
-    "missingExpectedProbes": { "$ref": "#/$defs/stringList" },
-    "missingExpectedFlows": { "$ref": "#/$defs/stringList" },
-    "notes": { "$ref": "#/$defs/stringList" }
+    "MissingExpectedArtifacts": { "$ref": "#/$defs/stringList" },
+    "MissingExpectedScenarios": { "$ref": "#/$defs/stringList" },
+    "MissingExpectedProbes": { "$ref": "#/$defs/stringList" },
+    "MissingExpectedFlows": { "$ref": "#/$defs/stringList" },
+    "Notes": { "$ref": "#/$defs/stringList" }
   },
   "additionalProperties": true,
   "$defs": {
