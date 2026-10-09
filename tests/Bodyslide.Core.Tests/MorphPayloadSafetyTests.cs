@@ -88,9 +88,16 @@ public sealed class MorphPayloadSafetyTests
         var bytes = BodyTriWithUv(hasPositionMorph, hasUvMorph);
         Assert.True(TriMorphReader.TryRead(bytes, out var payload));
         Assert.Equal(hasPositionMorph ? 1 : 0, payload!.Morphs.Count);
+        Assert.Equal("S", payload.ShapeName);
         if (hasPositionMorph) Assert.Equal((1f, 0f, 0f), Assert.Single(payload.Morphs).Deltas[0]);
         Assert.False(TriMorphReader.TryRead(bytes[..^1], out _));
         Assert.False(TriMorphReader.TryRead(bytes.Concat(new byte[] { 1 }).ToArray(), out _));
+    }
+
+    [Fact]
+    public void BodyTriRejectsMultipleShapesRatherThanDroppingShapeMorphs()
+    {
+        Assert.False(TriMorphReader.TryRead(BodyTriWithShapes("ShapeA", "ShapeB"), out _));
     }
 
     [Fact]
@@ -190,6 +197,22 @@ public sealed class MorphPayloadSafetyTests
             writer.Write((short)1);
             writer.Write((short)0);
             if (!uv) writer.Write((short)0);
+        }
+        return stream.ToArray();
+    }
+
+    private static byte[] BodyTriWithShapes(params string[] shapeNames)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8);
+        writer.Write("PIRT"u8);
+        writer.Write((ushort)shapeNames.Length);
+        foreach (var shapeName in shapeNames)
+        {
+            var name = Encoding.UTF8.GetBytes(shapeName);
+            writer.Write((byte)name.Length);
+            writer.Write(name);
+            writer.Write((ushort)0);
         }
         return stream.ToArray();
     }

@@ -7,7 +7,7 @@ internal sealed record BsdMorphPayload(string SliderName, bool IsHighWeight, int
 internal sealed record OsdMorphEntry(string Name, IReadOnlyList<(int Index, float X, float Y, float Z)> SparseDeltas);
 internal sealed record OsdMorphPayload(int InferredVertexCount, IReadOnlyList<OsdMorphEntry> Morphs);
 internal sealed record TriMorphEntry(string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas);
-internal sealed record TriMorphPayload(int VertexCount, IReadOnlyList<TriMorphEntry> Morphs);
+internal sealed record TriMorphPayload(int VertexCount, IReadOnlyList<TriMorphEntry> Morphs, string? ShapeName = null);
 internal readonly record struct MorphDeltaStats(int TotalCount, int MeaningfulCount, float TotalMagnitude, float MaxMagnitude)
 {
     public float MeaningfulRatio => TotalCount <= 0 ? 0f : MeaningfulCount / (float)TotalCount;
@@ -370,9 +370,15 @@ internal static class TriMorphReader
             return true;
         }
 
+        if (shapeCount > 1)
+        {
+            return false;
+        }
+
         var offset = 6;
         List<TriMorphEntry>? firstShapeMorphs = null;
         var firstShapeVertexCount = 0;
+        string? firstShapeName = null;
 
         for (var shapeIndex = 0; shapeIndex < shapeCount; shapeIndex++)
         {
@@ -387,6 +393,11 @@ internal static class TriMorphReader
                 return false;
             }
 
+            firstShapeName = Encoding.UTF8.GetString(bytes.Slice(offset, shapeNameLength));
+            if (string.IsNullOrWhiteSpace(firstShapeName))
+            {
+                return false;
+            }
             offset += shapeNameLength;
             var morphCount = (int)BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]);
             offset += 2;
@@ -492,7 +503,7 @@ internal static class TriMorphReader
             return false;
         }
 
-        payload = new TriMorphPayload(firstShapeVertexCount, firstShapeMorphs);
+        payload = new TriMorphPayload(firstShapeVertexCount, firstShapeMorphs, firstShapeName);
         return true;
     }
 

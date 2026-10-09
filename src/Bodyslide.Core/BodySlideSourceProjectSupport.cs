@@ -329,7 +329,8 @@ internal static class BodySlideSourceProjectSupport
                         IsHighWeightVariant(morph.Name),
                         "tri",
                         out var candidate,
-                        Path.GetFileName(filePath)))
+                        Path.GetFileName(filePath),
+                        sourceShapeName: triPayload.ShapeName))
                     {
                         continue;
                     }
@@ -1779,7 +1780,8 @@ internal static class BodySlideSourceProjectSupport
         bool isHighWeight,
         string payloadKind,
         out SourceSliderCandidate candidate,
-        string? sourceAssetName = null)
+        string? sourceAssetName = null,
+        string? sourceShapeName = null)
     {
         var isZap = IsLikelyZapSliderName(sliderName);
         if (string.IsNullOrWhiteSpace(sliderName))
@@ -1808,7 +1810,8 @@ internal static class BodySlideSourceProjectSupport
                 deltas,
                 sourceAssetName,
                 ShapeIdentityStatus: "unresolved",
-                VertexOrderStatus: "unverified"));
+                VertexOrderStatus: "unverified",
+                SourceShapeName: sourceShapeName));
         return true;
     }
 
