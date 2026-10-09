@@ -10045,6 +10045,8 @@ public sealed class NifOutputAndSourceOverrideTests
             Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.TopDirectoryOnly));
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"Code\": \"bodyslide-osd-synthetic-morphs\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"SyntheticBodySlideOsdMorphCount\":", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
