@@ -44666,18 +44666,20 @@ internal sealed class LocalExportService(
 
     private static string BuildValidationPreviewPanelHtml(
         ConversionValidationSummary? validationSummary,
-        string targetBody)
+        string targetBody,
+        int maxIssues = 8,
+        int maxActions = 8)
     {
         if (validationSummary is null)
         {
             return string.Empty;
         }
 
-        var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 8);
+        var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues);
         var followUpActions = ConversionValidationGuidance.BuildFollowUpActions(
             validationSummary,
             targetBody,
-            maxActions: 8);
+            maxActions);
         var gateLabel = ConversionValidationPresentation.GetGateLabel(validationSummary.Status);
         var dispositionMessage = ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status);
         var statusColor = validationSummary.Status switch
@@ -45504,7 +45506,7 @@ internal sealed class LocalExportService(
             <p>Compact diagnostics: interactive mesh payloads and duplicated report tables are omitted.
             This static regional preview is not geometry or runtime proof. Inspect the exported meshes in Outfit Studio or NifSkope and validate in-game before release.</p>
             <img src="preview.svg" alt="Static regional conversion preview">
-            {{BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody)}}
+            {{BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody, maxIssues: 4, maxActions: 4)}}
             <h2>Review and install</h2>
             <ul>
             <li><a href="conversion-quality.json">Full quality gate, issues and readiness</a></li>

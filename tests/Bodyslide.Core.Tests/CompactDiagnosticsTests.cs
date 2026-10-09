@@ -83,7 +83,8 @@ public sealed class CompactDiagnosticsTests
                 Assert.Contains("conversion-quality.json", compactHtml);
                 Assert.Contains("preview.svg", compactHtml);
                 Assert.DoesNotContain("<script", compactHtml);
-                Assert.True(compactHtml.Length < fullHtml.Length / 2, name);
+                Assert.True(compactHtml.Length < fullHtml.Length / 2,
+                    $"{name}: compact {compactHtml.Length} chars, full {fullHtml.Length} chars");
             }
 
             var config = XDocument.Load(Path.Combine(compact.Request.OutputDirectory!, "fomod", "ModuleConfig.xml"));
