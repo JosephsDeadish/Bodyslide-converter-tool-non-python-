@@ -18,10 +18,12 @@ public sealed class ConversionPerformanceRegressionTests
             new SourceMorphPayloadVariants(
                 new SourceMorphPayload(
                     slider, false, "bsd", 2, [(1f, 0f, 0f), (2f, 0f, 0f)],
-                    ShapeIdentityStatus: "verified", VertexOrderStatus: "verified", RetargetMapVerified: true),
+                    ShapeIdentityStatus: "verified", VertexOrderStatus: "verified", RetargetMapVerified: true,
+                    RetargetMapMethod: "test-verified-map", RetargetMapConfidence: 0.99d, RetargetMapEvidence: ["test fixture correspondence"]),
                 new SourceMorphPayload(
                     slider, true, "bsd", 2, [(2f, 0f, 0f), (3f, 0f, 0f)],
-                    ShapeIdentityStatus: "verified", VertexOrderStatus: "verified", RetargetMapVerified: true)));
+                    ShapeIdentityStatus: "verified", VertexOrderStatus: "verified", RetargetMapVerified: true,
+                    RetargetMapMethod: "test-verified-map", RetargetMapConfidence: 0.99d, RetargetMapEvidence: ["test fixture correspondence"])));
         var method = GetMethod("BuildPayloadReuseSummary");
         method.Invoke(null, [sliders, payloads, 100_000, null]);
         var before = GC.GetAllocatedBytesForCurrentThread();
@@ -63,6 +65,25 @@ public sealed class ConversionPerformanceRegressionTests
     }
 
     [Fact]
+    public void PayloadReuseSummary_RejectsPayloadWhenDeclaredVertexCountDoesNotMatchDeltas()
+    {
+        var payloads = new Dictionary<string, SourceMorphPayloadVariants>
+        {
+            ["Belly"] = new(
+                new SourceMorphPayload(
+                    "Belly", false, "bsd", 3, [(0.1f, 0f, 0f), (0.2f, 0f, 0f)],
+                    ShapeIdentityStatus: "verified", VertexOrderStatus: "verified"),
+                null)
+        };
+
+        var summary = (MorphPayloadReuseSummary)GetMethod("BuildPayloadReuseSummary")
+            .Invoke(null, [new[] { "Belly" }, payloads, 3, null])!;
+
+        Assert.Equal(0, summary.ReusedVariantCount);
+        Assert.Equal(2, summary.FallbackVariantCount);
+    }
+
+    [Fact]
     public void PayloadReuseSummary_RejectsTopologyRetargetWithoutVerifiedRetargetMap()
     {
         var payloads = new Dictionary<string, SourceMorphPayloadVariants>
@@ -70,7 +91,7 @@ public sealed class ConversionPerformanceRegressionTests
             ["Belly"] = new(
                 new SourceMorphPayload(
                     "Belly", false, "bsd", 2, [(0.1f, 0f, 0f), (0.2f, 0f, 0f)],
-                    ShapeIdentityStatus: "verified", VertexOrderStatus: "verified"),
+                    ShapeIdentityStatus: "verified", VertexOrderStatus: "verified", RetargetMapVerified: true),
                 null)
         };
 
@@ -80,6 +101,64 @@ public sealed class ConversionPerformanceRegressionTests
         Assert.Equal(0, summary.ReusedVariantCount);
         Assert.Equal(0, summary.RetargetedVariantCount);
         Assert.Equal(2, summary.FallbackVariantCount);
+    }
+
+    [Theory]
+    [InlineData("unverified", 1d, true)]
+    [InlineData("semantic-map", 0.94d, true)]
+    [InlineData("semantic-map", 0.99d, false)]
+    public void PayloadReuseSummary_RejectsRetargetWithoutHighConfidenceEvidence(
+        string methodName,
+        double confidence,
+        bool includeEvidence)
+    {
+        var payloads = new Dictionary<string, SourceMorphPayloadVariants>
+        {
+            ["Belly"] = new(
+                new SourceMorphPayload(
+                    "Belly", false, "bsd", 2, [(0.1f, 0f, 0f), (0.2f, 0f, 0f)],
+                    ShapeIdentityStatus: "verified",
+                    VertexOrderStatus: "verified",
+                    RetargetMapVerified: true,
+                    RetargetMapMethod: methodName,
+                    RetargetMapConfidence: confidence,
+                    RetargetMapEvidence: includeEvidence ? ["source/target correspondence"] : []),
+                null)
+        };
+
+        var summary = (MorphPayloadReuseSummary)GetMethod("BuildPayloadReuseSummary")
+            .Invoke(null, [new[] { "Belly" }, payloads, 5, null])!;
+
+        Assert.Equal(0, summary.RetargetedVariantCount);
+        Assert.Equal(2, summary.FallbackVariantCount);
+        Assert.Empty(summary.RetargetEvidence ?? []);
+    }
+
+    [Fact]
+    public void PayloadReuseSummary_ReportsVerifiedRetargetMethodAndConfidence()
+    {
+        var payloads = new Dictionary<string, SourceMorphPayloadVariants>
+        {
+            ["Belly"] = new(
+                new SourceMorphPayload(
+                    "Belly", false, "bsd", 2, [(0.1f, 0f, 0f), (0.2f, 0f, 0f)],
+                    ShapeIdentityStatus: "verified",
+                    VertexOrderStatus: "verified",
+                    RetargetMapVerified: true,
+                    RetargetMapMethod: "semantic-map",
+                    RetargetMapConfidence: 0.97d,
+                    RetargetMapEvidence: ["named-shape ownership", "vertex correspondence"]),
+                null)
+        };
+
+        var summary = (MorphPayloadReuseSummary)GetMethod("BuildPayloadReuseSummary")
+            .Invoke(null, [new[] { "Belly" }, payloads, 5, null])!;
+
+        var evidence = Assert.Single(summary.RetargetEvidence!);
+        Assert.Equal("Belly", evidence.SliderVariant);
+        Assert.Equal("semantic-map", evidence.Method);
+        Assert.Equal(0.97d, evidence.Confidence);
+        Assert.Equal(new[] { "named-shape ownership", "vertex correspondence" }, evidence.Evidence);
     }
 
     [Theory]

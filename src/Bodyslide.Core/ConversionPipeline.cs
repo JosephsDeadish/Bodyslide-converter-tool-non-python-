@@ -243,7 +243,10 @@ public sealed record SourceMorphPayload(
     string? SourceAssetName = null,
     string ShapeIdentityStatus = "unresolved",
     string VertexOrderStatus = "unverified",
-    bool RetargetMapVerified = false);
+    bool RetargetMapVerified = false,
+    string RetargetMapMethod = "unverified",
+    double RetargetMapConfidence = 0,
+    IReadOnlyList<string>? RetargetMapEvidence = null);
 public sealed record SourceMorphPayloadVariants(
     SourceMorphPayload? LowWeight = null,
     SourceMorphPayload? HighWeight = null);
@@ -278,7 +281,13 @@ public sealed record MorphPayloadReuseSummary(
     IReadOnlyList<string>? FallbackVariants = null,
     IReadOnlyList<string>? RetargetedVariants = null,
     int ExtremelyAdaptedVariantCount = 0,
-    IReadOnlyList<string>? ExtremelyAdaptedVariants = null);
+    IReadOnlyList<string>? ExtremelyAdaptedVariants = null,
+    IReadOnlyList<MorphRetargetEvidence>? RetargetEvidence = null);
+public sealed record MorphRetargetEvidence(
+    string SliderVariant,
+    string Method,
+    double Confidence,
+    IReadOnlyList<string> Evidence);
 public sealed record MorphSet(
     string LowMorph,
     string HighMorph,
@@ -24114,9 +24123,12 @@ internal sealed class LocalExportService(
             payload.ShapeIdentityStatus,
             payload.VertexOrderStatus,
             payload.RetargetMapVerified,
+            payload.RetargetMapMethod,
+            payload.RetargetMapConfidence,
+            payload.RetargetMapEvidence,
             ReuseEligibility = string.Equals(payload.ShapeIdentityStatus, "verified", StringComparison.OrdinalIgnoreCase) &&
                                string.Equals(payload.VertexOrderStatus, "verified", StringComparison.OrdinalIgnoreCase)
-                ? payload.RetargetMapVerified
+                ? payload.RetargetMapVerified && IsVerifiedRetargetMap(payload)
                     ? "shape-order-and-retarget-map-verified"
                     : "shape-and-order-verified"
                 : "blocked-shape-or-order-unverified"
@@ -24139,7 +24151,7 @@ internal sealed class LocalExportService(
                     LowWeight = DescribePayload(pair.Value.LowWeight),
                     HighWeight = DescribePayload(pair.Value.HighWeight)
                 }),
-            SourceMorphReusePolicy = "Parsed TRI/BSD/OSD payloads are candidates only; source shape identity and vertex order must both be verified before reuse.",
+            SourceMorphReusePolicy = "Parsed TRI/BSD/OSD payloads are candidates only; exact reuse requires verified shape identity and vertex order, while topology retarget also requires an explicit verified map method, confidence >= 0.95, and evidence.",
             morphs.SourceAssetSupport
         };
     }
@@ -40558,6 +40570,7 @@ internal sealed class LocalExportService(
             var fallbackVariants = new List<string>();
             var retargetedVariants = new List<string>();
             var extremelyAdaptedVariants = new List<string>();
+            var retargetEvidence = new List<MorphRetargetEvidence>();
             foreach (var slider in sliders)
             {
                 if (!reusableSourceMorphPayloads.TryGetValue(slider, out var variants))
@@ -40578,7 +40591,8 @@ internal sealed class LocalExportService(
                 fallbackVariants,
                 retargetedVariants,
                 extremelyAdaptedVariants.Count,
-                extremelyAdaptedVariants);
+                extremelyAdaptedVariants,
+                retargetEvidence);
 
             void TrackPayloadReuseVariant(string sliderKey, string variantName, bool isHighWeight)
             {
@@ -40588,13 +40602,18 @@ internal sealed class LocalExportService(
                         isHighWeight,
                         vertexCount,
                         morphTransferContext,
-                        out _,
+                        out var selectedPayload,
                         out var wasRetargeted,
                         out var usedExtremeAdaptation))
                 {
                     if (wasRetargeted)
                     {
                         retargetedVariants.Add(variantName);
+                        retargetEvidence.Add(new MorphRetargetEvidence(
+                            variantName,
+                            selectedPayload.RetargetMapMethod,
+                            selectedPayload.RetargetMapConfidence,
+                            selectedPayload.RetargetMapEvidence ?? []));
                         if (usedExtremeAdaptation)
                         {
                             extremelyAdaptedVariants.Add(variantName);
@@ -41017,7 +41036,9 @@ internal sealed class LocalExportService(
             }
 
             if (!string.Equals(candidate.ShapeIdentityStatus, "verified", StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(candidate.VertexOrderStatus, "verified", StringComparison.OrdinalIgnoreCase))
+                !string.Equals(candidate.VertexOrderStatus, "verified", StringComparison.OrdinalIgnoreCase) ||
+                candidate.VertexCount <= 0 ||
+                candidate.Deltas.Count != candidate.VertexCount)
             {
                 return false;
             }
@@ -41038,6 +41059,11 @@ internal sealed class LocalExportService(
                 return false;
             }
 
+            if (!IsVerifiedRetargetMap(candidate))
+            {
+                return false;
+            }
+
             usedExtremeAdaptation = IsExtremeTopologyAdaptation(candidate.VertexCount, vertexCount, morphTransferContext);
             if (usedExtremeAdaptation &&
                 ShouldPreferSyntheticMorphFallbackForHardDivergence(candidate.VertexCount, vertexCount, morphTransferContext))
@@ -41049,6 +41075,15 @@ internal sealed class LocalExportService(
             wasRetargeted = true;
             return true;
         }
+
+        private static bool IsVerifiedRetargetMap(SourceMorphPayload payload) =>
+            payload.RetargetMapVerified &&
+            !string.IsNullOrWhiteSpace(payload.RetargetMapMethod) &&
+            !payload.RetargetMapMethod.Equals("unverified", StringComparison.OrdinalIgnoreCase) &&
+            double.IsFinite(payload.RetargetMapConfidence) &&
+            payload.RetargetMapConfidence >= 0.95d &&
+            payload.RetargetMapEvidence is { Count: > 0 } evidence &&
+            evidence.All(static item => !string.IsNullOrWhiteSpace(item));
 
         private static IReadOnlyList<(float X, float Y, float Z)> BlendRetargetedMorphPayloadForHardDivergence(
             string sliderName,

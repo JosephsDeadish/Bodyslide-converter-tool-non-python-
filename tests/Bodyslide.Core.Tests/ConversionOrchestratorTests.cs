@@ -30891,7 +30891,10 @@ public sealed class OutputCompletenessTests
                             .ToArray(),
                         ShapeIdentityStatus: "verified",
                         VertexOrderStatus: "verified",
-                        RetargetMapVerified: true),
+                        RetargetMapVerified: true,
+                        RetargetMapMethod: "test-verified-map",
+                        RetargetMapConfidence: 0.99d,
+                        RetargetMapEvidence: ["fixture correspondence"]),
                     null)
             };
 
