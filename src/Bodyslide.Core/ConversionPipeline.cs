@@ -25759,13 +25759,13 @@ internal sealed class LocalExportService(
             if (!NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(
                     sourceBytes,
                     out var vertexDataOffset,
-                    out var vertexCount,
+                    out var detectedVertexCount,
                     out var vertexStride))
             {
                 return sourceBytes;
             }
 
-            vertexStreams = [(vertexDataOffset, vertexCount, vertexStride)];
+            vertexStreams = [(vertexDataOffset, detectedVertexCount, vertexStride)];
         }
 
         if (vertexStreams.Count == 0 || vertexStreams.Any(static stream => stream.Count <= 0 || stream.Stride < 12))
