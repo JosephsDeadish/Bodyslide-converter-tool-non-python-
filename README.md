@@ -183,6 +183,10 @@ Batch armor-pack reports now keep otherwise-ready items at `needs-review` until
 the imported proof report marks runtime automation, Desktop E2E, and live-game
 execution complete. A partial `executed-pass` is not sufficient; the report
 lists pending proof status per item and includes it in pack-level blockers.
+Built-in compatibility catalog entries are likewise guidance, not tested
+combinations. Until the exact body/skeleton/physics/armor/game/runtime stack has
+external evidence, conversion quality emits
+`catalog-target-support-unverified` and downgrades readiness to `needs-review`.
 
 `TargetBodySupport` in conversion reports now labels metadata as `embedded-built-in-catalog`,
 `custom-profile`, or `unavailable` and separately reports whether it was externally

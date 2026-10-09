@@ -6084,6 +6084,9 @@ public sealed class ConversionOrchestratorTests
         var unsupportedOspIssue = Assert.Single(summary.Issues, issue => issue.Code == "source-osp-semantics-not-preserved");
         Assert.Equal("medium", unsupportedOspIssue.Severity);
         Assert.Contains("inverted-sliders", unsupportedOspIssue.Message, StringComparison.Ordinal);
+        var catalogCompatibilityIssue = Assert.Single(summary.Issues, issue => issue.Code == "catalog-target-support-unverified");
+        Assert.Equal("medium", catalogCompatibilityIssue.Severity);
+        Assert.Contains("not externally tested compatibility", catalogCompatibilityIssue.Message, StringComparison.Ordinal);
     }
 
     [Theory]

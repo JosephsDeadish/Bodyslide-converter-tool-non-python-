@@ -30669,7 +30669,11 @@ internal sealed class LocalExportService(
         var assessment = AssessTargetBodySupport(armor, targetBody, requestedPhysicsProfile);
         if (assessment.HasBuiltInCoverage)
         {
-            return false;
+            issue = new ConversionValidationIssue(
+                "catalog-target-support-unverified",
+                "medium",
+                $"Target body '{targetBody}' uses embedded catalog metadata. This is configured compatibility guidance, not externally tested compatibility for the selected body, skeleton, physics, armor, game, and runtime combination.");
+            return true;
         }
 
         if (assessment.CustomProfile is null)
