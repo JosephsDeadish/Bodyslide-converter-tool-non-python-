@@ -1743,9 +1743,7 @@ internal static class BodySlideSourceProjectSupport
             return false;
         }
 
-        resolvedVertexCount = IsPirtTriPayload(bytes)
-            ? ResolveTriPayloadVertexCount(filePath, payload.VertexCount)
-            : payload.VertexCount;
+        resolvedVertexCount = payload.VertexCount;
         if (resolvedVertexCount > MorphPayloadLimits.MaximumVertices ||
             (long)resolvedVertexCount * payload.Morphs.Count > MorphPayloadLimits.MaximumExpandedDeltas)
         {
@@ -1754,13 +1752,6 @@ internal static class BodySlideSourceProjectSupport
         }
         return true;
     }
-
-    private static bool IsPirtTriPayload(byte[] bytes) =>
-        bytes.Length >= 4 &&
-        bytes[0] == (byte)'P' &&
-        bytes[1] == (byte)'I' &&
-        bytes[2] == (byte)'R' &&
-        bytes[3] == (byte)'T';
 
     private static IReadOnlyList<(float X, float Y, float Z)> ResizePayloadDeltas(
         IReadOnlyList<(float X, float Y, float Z)> deltas,
@@ -1779,27 +1770,6 @@ internal static class BodySlideSourceProjectSupport
         }
 
         return resized;
-    }
-
-    private static int ResolveTriPayloadVertexCount(string filePath, int inferredVertexCount)
-    {
-        var resolved = Math.Max(0, inferredVertexCount);
-        var directory = Path.GetDirectoryName(filePath);
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-        {
-            return resolved;
-        }
-
-        foreach (var nifPath in Directory.EnumerateFiles(directory, "*.nif", SearchOption.TopDirectoryOnly))
-        {
-            var vertices = NifGeometrySignatureReader.TryReadFullVertices(nifPath);
-            if (vertices is { Count: > 0 })
-            {
-                resolved = Math.Max(resolved, vertices.Count);
-            }
-        }
-
-        return resolved;
     }
 
     private static bool TryCreatePayloadCandidate(

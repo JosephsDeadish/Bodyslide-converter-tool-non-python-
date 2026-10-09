@@ -34510,7 +34510,7 @@ public sealed class VanillaBodyOspSliderTests
     }
 
     [Fact]
-    public async Task ResolveAsync_ReconcilesSparsePirtPayloadVertexCountWithNearbySourceMesh()
+    public async Task ResolveAsync_DoesNotInflateSparsePirtPayloadFromNearbySourceMesh()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmpDir);
@@ -34538,8 +34538,10 @@ public sealed class VanillaBodyOspSliderTests
             Assert.NotNull(resolved.ReusableMorphPayloads);
             Assert.True(resolved.ReusableMorphPayloads!.TryGetValue("TravelerLift", out var variants));
             Assert.NotNull(variants.LowWeight);
-            Assert.Equal(5, variants.LowWeight!.VertexCount);
-            Assert.Equal(5, variants.LowWeight.Deltas.Count);
+            Assert.Equal(1, variants.LowWeight!.VertexCount);
+            Assert.Equal(1, variants.LowWeight.Deltas.Count);
+            Assert.Equal("unresolved", variants.LowWeight.ShapeIdentityStatus);
+            Assert.Equal("unverified", variants.LowWeight.VertexOrderStatus);
         }
         finally
         {
