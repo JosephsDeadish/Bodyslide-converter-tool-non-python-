@@ -329,10 +329,14 @@ Morph diagnostics in `morphs.json` and the conversion manifest describe parsed
 source payloads as candidates, recording the source asset filename and explicit
 shape-identity/vertex-order verification states without duplicating per-vertex
 arrays. The current source readers mark shape identity unresolved and vertex order
-unverified, so exact vertex-count matches are not enough to reuse a payload.
+unverified, so exact vertex-count matches are not enough to reuse a payload. Sparse
+TRI/OSD payloads retain only their represented index span; nearby NIFs are not used
+to inflate that span, and it must not be mistaken for a complete shape vertex count.
 Topology retargeting is also withheld unless an explicit retarget map is verified.
-Generated OSD fallback deltas remain synthetic, while generated TRI files remain
-withheld until shape identity and vertex order are proven.
+Generated BodySlide OSD morph records are currently withheld because authored
+deformation provenance, shape identity, and vertex order are not verified. Any
+synthesized morph deltas used elsewhere remain unverified and are not authored
+BodySlide OSD data; generated TRI files are withheld for the same provenance gap.
 Readable BodySlide projects no longer automatically force every pack texture into
 each armor export: their resolved input NIFs participate in shader dependency
 checks, including `ShapeData`/`DataFolder` references. Morph-only OSD files do not

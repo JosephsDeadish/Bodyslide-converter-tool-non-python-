@@ -34539,7 +34539,7 @@ public sealed class VanillaBodyOspSliderTests
             Assert.True(resolved.ReusableMorphPayloads!.TryGetValue("TravelerLift", out var variants));
             Assert.NotNull(variants.LowWeight);
             Assert.Equal(1, variants.LowWeight!.VertexCount);
-            Assert.Equal(1, variants.LowWeight.Deltas.Count);
+            Assert.Single(variants.LowWeight.Deltas);
             Assert.Equal("unresolved", variants.LowWeight.ShapeIdentityStatus);
             Assert.Equal("unverified", variants.LowWeight.VertexOrderStatus);
         }
