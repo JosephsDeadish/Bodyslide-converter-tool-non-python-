@@ -12,7 +12,7 @@ public sealed class ExternalProofReadinessTests
     [InlineData("executed-incomplete")]
     public void ArmorPackStatus_DowngradesReadyUntilAllExternalProofPasses(string? proofStatus)
     {
-        var status = LocalExportService.DeriveArmorPackValidationStatus(
+        var status = BatchConversionRunner.DeriveArmorPackValidationStatus(
             validationStatus: "ready",
             supportTier: "mainstream-automatic",
             manualCleanupLikely: false,
@@ -26,7 +26,7 @@ public sealed class ExternalProofReadinessTests
     [Fact]
     public void ArmorPackStatus_PreservesReadyOnlyForCompletedExternalProof()
     {
-        var status = LocalExportService.DeriveArmorPackValidationStatus(
+        var status = BatchConversionRunner.DeriveArmorPackValidationStatus(
             validationStatus: "ready",
             supportTier: "mainstream-automatic",
             manualCleanupLikely: false,
@@ -45,7 +45,7 @@ public sealed class ExternalProofReadinessTests
         string proofStatus,
         string expectedStatus)
     {
-        var status = LocalExportService.DeriveArmorPackValidationStatus(
+        var status = BatchConversionRunner.DeriveArmorPackValidationStatus(
             validationStatus,
             supportTier: "mainstream-automatic",
             manualCleanupLikely: false,

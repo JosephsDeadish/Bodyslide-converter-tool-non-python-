@@ -10232,11 +10232,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             validationStatus.Equals("missing-quality-report", StringComparison.OrdinalIgnoreCase) ||
             validationStatus.Equals("unclassified", StringComparison.OrdinalIgnoreCase))
         {
-            return IsExecutedPackProofStatus(proofExecutionStatus)
-                ? validationStatus
-                : string.Equals(validationStatus, "ready", StringComparison.OrdinalIgnoreCase)
-                    ? "needs-review"
-                    : validationStatus;
+            return validationStatus;
         }
 
         if (manualCleanupLikely ||
@@ -10253,7 +10249,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             return "needs-review";
         }
 
-        return validationStatus;
+        return !IsExecutedPackProofStatus(proofExecutionStatus) &&
+               string.Equals(validationStatus, "ready", StringComparison.OrdinalIgnoreCase)
+            ? "needs-review"
+            : validationStatus;
     }
 
     private static bool TryReadRuntimeValidationPlanRequirement(
