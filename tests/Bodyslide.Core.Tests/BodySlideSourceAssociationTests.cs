@@ -214,27 +214,31 @@ public sealed class BodySlideSourceAssociationTests
                     <OutputPath>meshes\armor\traveler\</OutputPath>
                     <OutputFile>traveler_0.nif</OutputFile>
                     <Slider name="Waist" />
-                    <Slider name="Chest" />
                   </SliderSet>
                 </SliderSetInfo>
                 """);
             await File.WriteAllBytesAsync(
                 Path.Combine(shapeDataDirectory, "traveler.tri"),
                 BodyTri(
-                    ("Waist", "Waist", (ushort)0, (short)2),
-                    ("Chest", "Chest", (ushort)2, (short)3)));
+                    ("Torso", "Waist", (ushort)0, (short)2),
+                    ("ArmorOverlay", "Waist", (ushort)2, (short)3)));
 
             var result = await BodySlideSourceProjectSupport.ResolveAsync(
                 new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
 
             Assert.NotNull(result.ReusableMorphPayloads);
-            var waist = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
-            Assert.Equal("Waist", waist.SourceShapeName);
-            Assert.Equal("unresolved", waist.ShapeIdentityStatus);
-            Assert.Equal("unverified", waist.VertexOrderStatus);
-            var chest = Assert.Single(result.ReusableMorphPayloads["Chest"].Payloads!);
-            Assert.Equal("Chest", chest.SourceShapeName);
-            Assert.Equal(3, chest.VertexCount);
+            var waistCandidates = result.ReusableMorphPayloads!["Waist"].Payloads!;
+            Assert.Equal(2, waistCandidates.Count);
+            Assert.Contains(waistCandidates, candidate =>
+                candidate.SourceShapeName == "Torso" &&
+                candidate.VertexCount == 1 &&
+                candidate.ShapeIdentityStatus == "unresolved" &&
+                candidate.VertexOrderStatus == "unverified");
+            Assert.Contains(waistCandidates, candidate =>
+                candidate.SourceShapeName == "ArmorOverlay" &&
+                candidate.VertexCount == 3 &&
+                candidate.ShapeIdentityStatus == "unresolved" &&
+                candidate.VertexOrderStatus == "unverified");
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
