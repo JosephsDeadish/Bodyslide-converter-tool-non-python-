@@ -6078,9 +6078,9 @@ public sealed class ConversionOrchestratorTests
 
         var missingNormalsIssue = Assert.Single(summary.Issues, issue => issue.Code == "missing-normal-maps");
         Assert.Equal("low", missingNormalsIssue.Severity);
-        var syntheticOsdIssue = Assert.Single(summary.Issues, issue => issue.Code == "bodyslide-osd-synthetic-morphs");
-        Assert.Equal("medium", syntheticOsdIssue.Severity);
-        Assert.Contains("not recovered or authored source morphs", syntheticOsdIssue.Message, StringComparison.Ordinal);
+        var withheldOsdIssue = Assert.Single(summary.Issues, issue => issue.Code == "bodyslide-osd-morphs-withheld");
+        Assert.Equal("high", withheldOsdIssue.Severity);
+        Assert.Contains("authored deformation provenance", withheldOsdIssue.Message, StringComparison.Ordinal);
         var unsupportedOspIssue = Assert.Single(summary.Issues, issue => issue.Code == "source-osp-semantics-not-preserved");
         Assert.Equal("medium", unsupportedOspIssue.Severity);
         Assert.Contains("inverted-sliders", unsupportedOspIssue.Message, StringComparison.Ordinal);
@@ -10060,9 +10060,10 @@ public sealed class NifOutputAndSourceOverrideTests
                 .GetDirectories(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData"), "*", SearchOption.TopDirectoryOnly)
                 .Single();
             Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.TopDirectoryOnly));
+            Assert.Empty(Directory.GetFiles(shapeDataDirectory, "*.osd", SearchOption.TopDirectoryOnly));
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.Contains("\"Code\": \"bodyslide-tri-payload-withheld\"", qualityJson, StringComparison.Ordinal);
-            Assert.Contains("\"SyntheticBodySlideOsdMorphCount\":", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"WithheldBodySlideOsdMorphCount\":", qualityJson, StringComparison.Ordinal);
         }
         finally
         {

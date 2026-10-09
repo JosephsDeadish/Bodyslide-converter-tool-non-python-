@@ -29,13 +29,12 @@ public sealed class BodySlideBuildPathTests
 
         var result = LocalExportService.BuildShapeLinkedOsdExport(
             ospXml,
-            "Demo",
             new Dictionary<string, IReadOnlyList<SkyrimSseNifShape>>(StringComparer.OrdinalIgnoreCase)
             {
                 ["mesh.nif"] = shapes
-            },
-            new Dictionary<string, double>());
-        Assert.Equal(2, result.SyntheticMorphRecordCount);
+            });
+        Assert.Equal(2, result.WithheldMorphRecordCount);
+        Assert.Empty(result.OsdFiles);
         var document = XDocument.Parse(result.OspXml);
         var sliderSet = Assert.Single(document.Descendants("SliderSet"));
         var ospShapes = sliderSet.Elements("Shape").ToArray();
@@ -45,27 +44,15 @@ public sealed class BodySlideBuildPathTests
         var bellySlider = sliderSet.Elements("Slider")
             .Single(static slider => (string?)slider.Attribute("name") == "Belly");
         var dataLinks = bellySlider.Elements("Data").ToArray();
-        Assert.Equal(2, dataLinks.Length);
-        Assert.Equal(new[] { "Torso", "Sleeves" }, dataLinks.Select(static data => (string?)data.Attribute("target")).ToArray());
-        Assert.All(dataLinks, data =>
-        {
-            Assert.Equal("true", (string?)data.Attribute("local"));
-            Assert.EndsWith(".osd\\" + data.Attribute("name")!.Value, data.Value, StringComparison.Ordinal);
-        });
+        Assert.Empty(dataLinks);
 
         var zapSlider = sliderSet.Elements("Slider")
             .Single(static slider => (string?)slider.Attribute("name") == "HideSleeves");
         Assert.Empty(zapSlider.Elements("Data"));
-        var osdFile = Assert.Single(result.OsdFiles);
-        Assert.Equal("Demo.osd", osdFile.FileName);
-        Assert.True(OsdMorphReader.TryRead(osdFile.Bytes, out var payload));
-        Assert.Equal(dataLinks.Select(static data => (string)data.Attribute("name")!).OrderBy(static name => name),
-            payload!.Morphs.Select(static morph => morph.Name).OrderBy(static name => name));
-        Assert.All(payload.Morphs, static morph => Assert.NotEmpty(morph.SparseDeltas));
     }
 
     [Fact]
-    public void ValidateShapeDataLinks_RejectsMissingShapeLinkAndOsdRecord()
+    public void ValidateShapeDataLinks_ReportsWithheldMorphsAndValidatesAuthoredLinks()
     {
         const string ospXml = """
             <SliderSetInfo version="1">
@@ -83,12 +70,12 @@ public sealed class BodySlideBuildPathTests
         };
         var export = LocalExportService.BuildShapeLinkedOsdExport(
             ospXml,
-            "Demo",
             new Dictionary<string, IReadOnlyList<SkyrimSseNifShape>>(StringComparer.OrdinalIgnoreCase)
             {
                 ["mesh.nif"] = shapes
-            },
-            new Dictionary<string, double>());
+            });
+        Assert.Equal(2, export.WithheldMorphRecordCount);
+        Assert.Empty(export.OsdFiles);
         var shapeDataDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(shapeDataDirectory);
         try
@@ -102,6 +89,16 @@ public sealed class BodySlideBuildPathTests
             }
 
             var document = XDocument.Parse(export.OspXml);
+            Assert.Contains(LocalExportService.ValidateShapeDataLinks(document, shapeDataDirectory),
+                static problem => problem.Contains("exactly one OSD data link for shape 'Torso'", StringComparison.Ordinal));
+
+            var slider = Assert.Single(document.Descendants("Slider"));
+            slider.Add(
+                new XElement("Data", new XAttribute("name", "torso-fit"), new XAttribute("target", "Torso"), new XAttribute("local", "true"), "Demo.osd\\torso-fit"),
+                new XElement("Data", new XAttribute("name", "sleeves-fit"), new XAttribute("target", "Sleeves"), new XAttribute("local", "true"), "Demo.osd\\sleeves-fit"));
+            File.WriteAllBytes(
+                Path.Combine(shapeDataDirectory, "Demo.osd"),
+                CreateEmptyOsdPayload("torso-fit", "sleeves-fit"));
             Assert.Empty(LocalExportService.ValidateShapeDataLinks(document, shapeDataDirectory));
 
             var sleevesShape = document.Descendants("Shape")
@@ -111,7 +108,6 @@ public sealed class BodySlideBuildPathTests
                 static problem => problem.Contains("Shape targets do not match", StringComparison.Ordinal));
             sleevesShape.SetAttributeValue("target", "Sleeves");
 
-            var slider = Assert.Single(document.Descendants("Slider"));
             slider.Elements("Data").First().Remove();
             Assert.Contains(LocalExportService.ValidateShapeDataLinks(document, shapeDataDirectory),
                 static problem => problem.Contains("exactly one OSD data link", StringComparison.Ordinal));
@@ -218,16 +214,14 @@ public sealed class BodySlideBuildPathTests
             12);
         var export = LocalExportService.BuildShapeLinkedOsdExport(
             ospXml,
-            "Demo",
             new Dictionary<string, IReadOnlyList<SkyrimSseNifShape>>(StringComparer.OrdinalIgnoreCase)
             {
                 ["mesh.nif"] = [shape]
-            },
-            new Dictionary<string, double>());
+            });
 
-        Assert.Equal(1, export.SyntheticMorphRecordCount);
-        Assert.True(OsdMorphReader.TryRead(Assert.Single(export.OsdFiles).Bytes, out var payload));
-        Assert.NotEmpty(Assert.Single(payload!.Morphs).SparseDeltas);
+        Assert.Equal(1, export.WithheldMorphRecordCount);
+        Assert.Empty(export.OsdFiles);
+        Assert.Empty(XDocument.Parse(export.OspXml).Descendants("Data"));
     }
 
     private static byte[] CreateOsdPayload(string recordName, ushort vertexIndex)
@@ -245,6 +239,24 @@ public sealed class BodySlideBuildPathTests
         writer.Write(0.1f);
         writer.Write(0f);
         writer.Write(0f);
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateEmptyOsdPayload(params string[] recordNames)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(new byte[] { 0x4f, 0x53, 0x44, 0x00 });
+        writer.Write(3);
+        writer.Write(recordNames.Length);
+        foreach (var recordName in recordNames)
+        {
+            var nameBytes = System.Text.Encoding.UTF8.GetBytes(recordName);
+            writer.Write((byte)nameBytes.Length);
+            writer.Write(nameBytes);
+            writer.Write((ushort)0);
+        }
+
         return stream.ToArray();
     }
 

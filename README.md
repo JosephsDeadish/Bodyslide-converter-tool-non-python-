@@ -112,15 +112,15 @@ claim:
 ### External BodySlide and Skyrim build gate
 
 Do not treat generated OSP/ShapeData as build-ready based on the automated tests
-alone. For supported Skyrim SE unskinned `BSTriShape` inputs, generation now
-emits per-shape `<Shape>` mappings and one local OSD `<Data>` link per non-zap
-slider and target. The output preflight verifies the link targets, file paths,
-record names, and each sparse vertex index against the mapped shape's vertex
-count, and requires the referenced source NIF to exist and use a shape-reader
-layout the tool can verify. Missing, unreadable, or unsupported source NIFs and
-OSD ranges that cannot be encoded must be treated as review-required, not guessed
-or counted as a successful build. Synthetic or retargeted OSD morph records are
-reported as fallback data, not recovered source morphs.
+alone. For supported Skyrim SE unskinned `BSTriShape` inputs, generation can
+inspect shape names and vertex order and emit per-shape `<Shape>` declarations.
+It currently withholds OSD files and non-zap `<Data>` links because parsed source
+morph payloads do not yet prove association with the intended shape and vertex
+order, and synthetic fallback deltas do not establish authored deformation
+semantics. Conversion quality reports the high-severity
+`bodyslide-osd-morphs-withheld` issue and the withheld-record count. The project is
+not build-ready; missing, unreadable, unsupported, or unverified source data must
+not be guessed into a successful OSD build.
 Matched source OSP settings that the exporter reconstructs differently—including
 custom slider-set/path options, source output-path relocation, defaults, zaps,
 weight-output mode and nested `<Low>`/`<High>` slider ranges, references, and
@@ -923,7 +923,7 @@ Implemented from issue scope:
 
 - **skeleton NIF parsing** — `BasicSkeletonMappingService` now reads any `skeleton*.nif` files from the armor's body reference list and parses their string table to extract actual bone names; the source skeleton label (`xpmsse-vanilla`, `xpmsse-physics`, or `fo4-biped`) is inferred from physics-marker bones (`NPC *Breast*`, `*Butt*`, `*Belly*`, `*Pec*`, `*Lat*`) and Bip01 prefixes, giving accurate bone-mapping reports in `skeleton-compatibility.json` without relying solely on hardcoded lists
 
-- **BodySlide project preflight** — generated `.tri` files are withheld because target shape identity and vertex order cannot currently be proven. For supported unskinned Skyrim SSE `BSTriShape` NIFs, each OSP maps named shapes to OSD records and the validator resolves the OSD file, record name, target, and vertex-index bounds. Generated OSD fallback records are synthetic, not recovered or authored source morphs, and are reported as unverified deformation data. Source morph reuse, zap target semantics, and other NIF layouts remain unsupported or unverified. A real BodySlide/Outfit Studio build check is still required before generated projects can be treated as verified.
+- **BodySlide project preflight** — generated `.tri` and OSD payloads are withheld until shape identity, vertex order, and source-morph provenance are verified. Supported unskinned Skyrim SSE `BSTriShape` NIFs may provide named shape declarations, but non-zap OSP data links are absent and readiness is blocked. Source morph reuse, zap target semantics, and other NIF layouts remain unsupported or unverified. A real BodySlide/Outfit Studio build check is still required before generated projects can be treated as verified.
 
 - **ARMO ground-model synthesis** — when an ARMO record has rewritten `MOD2`/`MOD3` world model paths but no `MODL` ground mesh subrecord, plugin rewrite now auto-appends `MODL` using the rewritten world model path so dropped-item world meshes stay aligned with converted armor outputs
 
