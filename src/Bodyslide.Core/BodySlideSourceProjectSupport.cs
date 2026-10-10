@@ -1859,6 +1859,14 @@ internal static class BodySlideSourceProjectSupport
         {
             return false;
         }
+        var duplicateMorphKeys = payload.Morphs
+            .GroupBy(
+                static morph => $"{NormalizeSliderFileName(morph.Name).ToUpperInvariant()}\u001f{IsHighWeightVariant(morph.Name)}",
+                StringComparer.Ordinal)
+            .Where(static group => group.Count() > 1)
+            .Select(static group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
         var extracted = new List<SourceSliderCandidate>(payload.Morphs.Count);
         foreach (var morph in payload.Morphs)
         {
@@ -1891,7 +1899,10 @@ internal static class BodySlideSourceProjectSupport
                 out var candidate,
                 Path.GetFileName(filePath)))
             {
-                extracted.Add(candidate);
+                var morphKey = $"{candidate.Name.ToUpperInvariant()}\u001f{candidate.ReusablePayload!.IsHighWeight}";
+                extracted.Add(duplicateMorphKeys.Contains(morphKey)
+                    ? candidate with { ReusablePayload = null }
+                    : candidate);
             }
         }
 

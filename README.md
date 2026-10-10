@@ -144,8 +144,10 @@ and non-empty map/correspondence evidence. `PayloadReuse.RetargetEvidence` recor
 the source/target shape names, method, confidence, and evidence used for an
 accepted retarget. The current source
 discovery path does not produce that verified mapping, so parsed payloads remain
-ineligible by default. Synthetic OSD fallback remains separately labeled and
-does not count as recovered source morph data.
+ineligible by default. Duplicate normalized morph records in a single OSD file
+are withheld as ambiguous rather than selecting one record during candidate
+collapse. Synthetic OSD fallback remains separately labeled and does not count
+as recovered source morph data.
 
 On a Windows test host:
 
