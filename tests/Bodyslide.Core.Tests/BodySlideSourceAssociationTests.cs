@@ -234,6 +234,7 @@ public sealed class BodySlideSourceAssociationTests
                 new[]
                 {
                     "custom-base-shape",
+                    "data-folder-rebuilt",
                     "external-data-folder",
                     "output-options",
                     "output-path-rebuilt",
@@ -256,6 +257,34 @@ public sealed class BodySlideSourceAssociationTests
             Assert.Equal(
                 new OspSliderControlSettings(0.25, 0.1, 0.8, true, true),
                 result.SliderControlSettings!["Fit"]);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task MatchedOspReportsOrdinaryDataFolderAsRebuilt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var mesh = Path.Combine(root, "jacket_0.nif");
+            var project = Path.Combine(root, "source.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <SliderSet name="Jacket">
+                    <DataFolder>JacketShapeData</DataFolder>
+                    <Slider name="Fit" />
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            Assert.Contains("data-folder-rebuilt", result.SourceAssetSupport!.UnsupportedOspSemantics);
+            Assert.DoesNotContain("external-data-folder", result.SourceAssetSupport.UnsupportedOspSemantics);
         }
         finally { Directory.Delete(root, true); }
     }

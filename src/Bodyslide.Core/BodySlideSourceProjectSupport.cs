@@ -1685,6 +1685,10 @@ internal static class BodySlideSourceProjectSupport
 
         var dataFolders = sliderSet.Elements().Where(static element =>
             element.Name.LocalName.Equals("DataFolder", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (dataFolders.Length > 0)
+        {
+            semantics.Add("data-folder-rebuilt");
+        }
         if (dataFolders.Length > 1 || dataFolders.Any(static element =>
                 IsExternalDataFolder(element.Value)))
         {

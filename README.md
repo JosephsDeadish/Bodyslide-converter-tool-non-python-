@@ -359,10 +359,12 @@ unsupported, heuristic geometry fallback is disabled rather than guessing at
 vertex streams. This is not general NIF support and synthetic fixtures do not
 prove compatibility with real game assets.
 
-Body TRI `PIRT` payloads with one shape retain its declared name; multi-shape
-payloads are rejected rather than flattened because shape-specific morph ownership
-is not represented by the current candidate model. Duplicate morph names within a shape, duplicate sparse vertex indexes,
-malformed UTF-8 shape/morph names, and malformed trailing data are rejected. FaceGen
+Body TRI `PIRT` payloads retain each shape name and its morphs independently;
+duplicate shape names, duplicate morph names within a shape, duplicate sparse
+vertex indexes, malformed UTF-8 shape/morph names, and malformed trailing data
+are rejected. The shape-local records improve provenance, but do not prove source
+to target shape identity or vertex order, so TRI candidates remain ineligible for
+reuse and generated TRI files remain withheld. FaceGen
 `FRTRI002`/`FRTRI003` payloads
 have no corresponding named BodySlide shape association. OSD sparse records reject
 duplicate vertex indexes. TRI/OSD payloads retain only their represented index span; nearby NIFs are not used
