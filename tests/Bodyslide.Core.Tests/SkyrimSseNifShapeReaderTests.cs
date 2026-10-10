@@ -35,6 +35,22 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void GeometryInspectionUsesParsedShapesForSupportedSseLayout()
+    {
+        var nif = CreateNif(
+        [
+            new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 0f, 1f)]),
+            new TestShape("Detail", [(2f, 0f, 0f), (3f, 0f, 0f), (2f, 0f, 1f)])
+        ]);
+
+        var report = NifGeometrySignatureReader.Inspect(nif);
+
+        Assert.Equal("supported", report.Status);
+        Assert.Equal("parsed-sse-bstrishape", report.ParseMode);
+        Assert.Equal(6, report.VertexCount);
+    }
+
+    [Fact]
     public void ExactShapeCorrespondenceRequiresMatchingOrderedGeometryAndTopology()
     {
         var source = Assert.Single(SkyrimSseNifShapeReader.Read(CreateNif(

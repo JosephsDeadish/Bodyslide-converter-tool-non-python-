@@ -6224,6 +6224,15 @@ internal static class NifGeometrySignatureReader
 
     private static (MeshGeometrySignature? Signature, string Mode) TryReadWithMode(byte[] bytes)
     {
+        var parsedShapes = SkyrimSseNifShapeReader.Read(bytes);
+        if (parsedShapes.Supported)
+        {
+            var parsedShapeSignature = BuildSignature(parsedShapes.Shapes);
+            return parsedShapeSignature is null
+                ? (null, "unsupported-parsed-shape-geometry")
+                : (parsedShapeSignature, "parsed-sse-bstrishape");
+        }
+
         var embeddedMarkerOffset = bytes.AsSpan().IndexOf(EmbeddedVertexMarker);
         if (embeddedMarkerOffset >= 0)
         {
@@ -6304,6 +6313,59 @@ internal static class NifGeometrySignatureReader
         }
 
         return (null, "unreadable-geometry");
+    }
+
+    private static MeshGeometrySignature? BuildSignature(IReadOnlyList<SkyrimSseNifShape> shapes)
+    {
+        var vertexCount = shapes.Sum(static shape => (long)shape.Vertices.Count);
+        if (vertexCount <= 0 || vertexCount > MaxPlausibleVertexCount)
+        {
+            return null;
+        }
+
+        var sampleStride = Math.Max(1, (int)(vertexCount / 256));
+        var sampleVertices = new List<MeshVertex>(Math.Min((int)vertexCount, 256));
+        var minX = float.MaxValue;
+        var minY = float.MaxValue;
+        var minZ = float.MaxValue;
+        var maxX = float.MinValue;
+        var maxY = float.MinValue;
+        var maxZ = float.MinValue;
+        var vertexIndex = 0;
+
+        foreach (var shape in shapes)
+        {
+            foreach (var vertex in shape.Vertices)
+            {
+                if (!IsPlausibleCoordinate(vertex.X) ||
+                    !IsPlausibleCoordinate(vertex.Y) ||
+                    !IsPlausibleCoordinate(vertex.Z))
+                {
+                    return null;
+                }
+
+                minX = Math.Min(minX, vertex.X);
+                minY = Math.Min(minY, vertex.Y);
+                minZ = Math.Min(minZ, vertex.Z);
+                maxX = Math.Max(maxX, vertex.X);
+                maxY = Math.Max(maxY, vertex.Y);
+                maxZ = Math.Max(maxZ, vertex.Z);
+
+                if (vertexIndex % sampleStride == 0 || sampleVertices.Count < 24)
+                {
+                    sampleVertices.Add(vertex);
+                }
+
+                vertexIndex++;
+            }
+        }
+
+        if ((maxX - minX) < 0.001f || (maxZ - minZ) < 0.001f)
+        {
+            return null;
+        }
+
+        return new MeshGeometrySignature((int)vertexCount, sampleVertices, minX, maxX, minY, maxY, minZ, maxZ);
     }
 
     private static MeshGeometrySignature? TryBuildPartialFloatSignature(
