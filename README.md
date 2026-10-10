@@ -342,18 +342,22 @@ links are not associated. This source-side association does not establish a matc
 to the exported target, and source readers still mark identity unresolved and
 vertex order unverified, so exact vertex-count matches are not enough to reuse a payload. Sparse
 The shape-aware NIF reader currently accepts only little-endian Skyrim SE
-`20.2.0.7` / user-version `12` / stream-version `100` files with named, unskinned
-inline `BSTriShape` blocks and position-bearing vertex descriptors. It returns
-each shape's own ordered positions and triangle indexes, while preserving the
-original vertex stride for the writer. Unsupported profiles, skinned shapes,
-other geometry blocks, invalid indices, and malformed fields fail closed with
-specific parser diagnostics. When the Skyrim SE profile is recognized but its
-layout is unsupported, heuristic geometry fallback is disabled rather than
-guessing at vertex streams. This is not general NIF support and synthetic fixtures
-do not prove compatibility with real game assets.
+`20.2.0.7` / user-version `12` / stream-version `100` files with named inline
+`BSTriShape` blocks and position-bearing vertex descriptors. It returns each
+shape's own ordered positions and triangle indexes, retaining the original vertex
+stride. For supported skinned shapes, the writer patches only position bytes and
+preserves topology, skin/partition blocks, other vertex attributes, and all other
+file bytes unchanged. Skin weights and partition semantics are not decoded or
+rewritten; these outputs remain manual-review cases. Unsupported profiles, other
+geometry blocks, invalid indices, and malformed fields fail closed with specific
+parser diagnostics. When the Skyrim SE profile is recognized but its layout is
+unsupported, heuristic geometry fallback is disabled rather than guessing at
+vertex streams. This is not general NIF support and synthetic fixtures do not
+prove compatibility with real game assets.
 
-Body TRI `PIRT` payloads retain separate named shapes and per-shape morphs; duplicate
-shape names, duplicate morph names within a shape, duplicate sparse vertex indexes,
+Body TRI `PIRT` payloads with one shape retain its declared name; multi-shape
+payloads are rejected rather than flattened because shape-specific morph ownership
+is not represented by the current candidate model. Duplicate morph names within a shape, duplicate sparse vertex indexes,
 malformed UTF-8 shape/morph names, and malformed trailing data are rejected. FaceGen
 `FRTRI002`/`FRTRI003` payloads
 have no corresponding named BodySlide shape association. OSD sparse records reject
@@ -951,7 +955,7 @@ Implemented from issue scope:
 - **pose simulation** (`pose-simulation-report.json`) — `BasicPoseSimulationService` tests the converted mesh against 8 animation poses (T-pose, Walk, Run, Idle, Crouch, Combat-Idle, Jump, Sneak) using per-pose per-region stress amplifiers; regions where `morph_factor × pose_amplifier ≥ 1.10` are flagged as at-risk; report written as JSON and visualised in the preview HTML; emits `pose-simulation:tested=8,...` pipeline step
 - **deeper mesh/physics solver tuning** — strategy conversion now runs a region-adjacency smoothing solver with mesh-type-specific clamp/blend iterations, and physics XML generation now applies adaptive stiffness/offset/damping/restitution tuning (including reduced offsets when physics weights are missing) for more stable outputs
 - **NIF block graph parsing for geometry nodes** — conversion now parses `Ni*` block/type spans first (e.g. `NiTriShapeData`) to locate real vertex streams before fallback heuristics, improving transform reliability on non-synthetic NIF layouts
-- **NIF backend strategy** — the shape reader is gated to Skyrim SE 20.2.0.7 / user version 12 / stream version 100 and reads named `BSTriShape` position/index data. It recognizes `NiSkinInstance` and `BSDismemberSkinInstance` references for inspection, but does not decode skin weights, bones, or partitions; the vertex writer therefore leaves skinned shapes unchanged. Unskinned parsed shape streams feed the writer directly as combined geometry, with connected components and boundary edges derived per shape rather than across shapes. Legacy `NiTriShape`, dynamic shapes, and other block layouts remain outside this exact writer path; broader shape-local deformation behavior is not externally validated. Parser/writer fixtures are synthetic and do not establish external format compatibility. No permitted real-format fixture with clear redistribution provenance has been established for this path. The project is MIT-licensed; that does not change third-party licenses. NiflySharp is GPL-3.0, and incorporating it may impose GPL-3.0 obligations on a combined distribution. Confirm that those obligations fit the project's distribution plans before adopting it; no NiflySharp dependency or upstream NIF code is currently included.
+- **NIF backend strategy** — the shape reader is gated to Skyrim SE 20.2.0.7 / user version 12 / stream version 100 and reads named `BSTriShape` position/index data. For supported skinned shapes, the writer patches positions only and preserves all other bytes—including skin/partition blocks and other vertex attributes—unchanged. Skin weights, bones, and partition semantics are not decoded or rewritten; these outputs remain manual-review cases. Unskinned parsed shape streams feed the writer directly as combined geometry, with connected components and boundary edges derived per shape rather than across shapes. Legacy `NiTriShape`, dynamic shapes, and other block layouts remain outside this exact writer path; broader shape-local deformation behavior is not externally validated. Parser/writer fixtures are synthetic and do not establish external format compatibility. No permitted real-format fixture with clear redistribution provenance has been established for this path. The project is MIT-licensed; that does not change third-party licenses. NiflySharp is GPL-3.0, and incorporating it may impose GPL-3.0 obligations on a combined distribution. Confirm that those obligations fit the project's distribution plans before adopting it; no NiflySharp dependency or upstream NIF code is currently included.
 - **Geometry inspection** — the same version-gated parsed shape data is now the first signature-discovery path for supported unskinned SSE `BSTriShape` layouts, avoiding vertex-count/float-pattern heuristics for those files. Legacy and unsupported layouts still use existing recovery paths and must be treated as heuristic/degraded where reported.
 - NIFs with a successfully parsed header but an unsupported version profile are now left byte-for-byte unchanged rather than passed to heuristic vertex discovery. Other legacy geometry layouts still use the existing heuristic path until shape-local readers and writers replace it; this remains unverified for external compatibility.
 - **support asset carry-forward** — export now copies scanned textures, material files (`.bgsm`/`.bgem`), physics files, plugin files, and body-reference files (`.tri`/`.osp` plus skeleton `.nif`) into the output tree using source-relative paths so converted packs include required sidecar assets
