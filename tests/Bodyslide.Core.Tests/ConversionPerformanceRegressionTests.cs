@@ -183,9 +183,9 @@ public sealed class ConversionPerformanceRegressionTests
                     VertexOrderStatus: "verified",
                     SourceShapeName: "Body",
                     TargetShapeName: "Body",
-                    SourceVertexOrderFingerprint: "source-order",
-                    TargetVertexOrderFingerprint: "target-order",
-                    ShapeCorrespondenceEvidence: ["matched named shape"]),
+                    SourceVertexOrderFingerprint: new string('a', 64),
+                    TargetVertexOrderFingerprint: new string('b', 64),
+                    ShapeCorrespondenceEvidence: [$"exact-ordered-shape-geometry-and-topology-sha256:{new string('c', 64)}"]),
                 null)
         };
 
@@ -208,9 +208,9 @@ public sealed class ConversionPerformanceRegressionTests
                     VertexOrderStatus: "verified",
                     SourceShapeName: "Body",
                     TargetShapeName: "Body",
-                    SourceVertexOrderFingerprint: "identical-order",
-                    TargetVertexOrderFingerprint: "identical-order",
-                    ShapeCorrespondenceEvidence: ["matched named shape"]),
+                    SourceVertexOrderFingerprint: new string('a', 64),
+                    TargetVertexOrderFingerprint: new string('a', 64),
+                    ShapeCorrespondenceEvidence: [$"exact-ordered-shape-geometry-and-topology-sha256:{new string('b', 64)}"]),
                 null)
         };
 
