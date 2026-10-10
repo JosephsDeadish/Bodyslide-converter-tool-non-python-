@@ -283,12 +283,38 @@ public sealed class SkyrimSseNifShapeReaderTests
     [Fact]
     public void RejectsUnsupportedDynamicShapeBlocks()
     {
-        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+        var nif = CreateNif(
             [new TestShape("DynamicBody", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])],
-            blockType: "BSDynamicTriShape"));
+            blockType: "BSDynamicTriShape");
+        var result = SkyrimSseNifShapeReader.Read(nif);
 
         Assert.False(result.Supported);
         Assert.Equal("unsupported-geometry-block:BSDynamicTriShape", result.Diagnostic);
+        Assert.True(SkyrimSseNifShapeReader.HasSupportedProfile(nif));
+        Assert.Null(NifGeometrySignatureReader.TryReadFullVertices(nif));
+    }
+
+    [Fact]
+    public void WriterLeavesUnsupportedGeometryBlocksUnchangedInsteadOfGuessingVertexOffsets()
+    {
+        var source = CreateNif(
+            [new TestShape("DynamicBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)])],
+            blockType: "BSDynamicTriShape");
+
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        Assert.Same(source, transformed);
     }
 
     [Fact]

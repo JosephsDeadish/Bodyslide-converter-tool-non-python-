@@ -345,7 +345,9 @@ inline `BSTriShape` blocks and position-bearing vertex descriptors. It returns
 each shape's own ordered positions and triangle indexes, while preserving the
 original vertex stride for the writer. Unsupported profiles, skinned shapes,
 other geometry blocks, invalid indices, and malformed fields fail closed with
-specific parser diagnostics. This is not general NIF support and synthetic fixtures
+specific parser diagnostics. When the Skyrim SE profile is recognized but its
+layout is unsupported, heuristic geometry fallback is disabled rather than
+guessing at vertex streams. This is not general NIF support and synthetic fixtures
 do not prove compatibility with real game assets.
 
 Body TRI `PIRT` payloads retain separate named shapes and per-shape morphs; duplicate

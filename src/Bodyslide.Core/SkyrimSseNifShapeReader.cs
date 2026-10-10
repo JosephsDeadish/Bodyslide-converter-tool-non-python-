@@ -29,6 +29,34 @@ internal static class SkyrimSseNifShapeReader
     private const int MaximumExtraDataReferences = 4096;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
+    public static bool HasSupportedProfile(ReadOnlySpan<byte> bytes)
+    {
+        var lineEnd = bytes.IndexOf((byte)'\n');
+        if (lineEnd < 0 ||
+            !string.Equals(Encoding.ASCII.GetString(bytes[..lineEnd]).TrimEnd('\r'), HeaderText, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            var offset = lineEnd + 1;
+            var version = ReadUInt32(bytes, ref offset);
+            var endian = ReadByte(bytes, ref offset);
+            var userVersion = ReadUInt32(bytes, ref offset);
+            _ = ReadUInt32(bytes, ref offset);
+            var streamVersion = ReadUInt32(bytes, ref offset);
+            return version == FileVersion &&
+                   endian == 1 &&
+                   userVersion == SkyrimSeUserVersion &&
+                   streamVersion == SkyrimSeStreamVersion;
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+    }
+
     public static SkyrimSseNifShapeReadResult Read(ReadOnlySpan<byte> bytes)
     {
         try

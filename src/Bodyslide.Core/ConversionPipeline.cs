@@ -4033,6 +4033,11 @@ internal static class NifGeometrySignatureReader
                 : null;
         }
 
+        if (SkyrimSseNifShapeReader.HasSupportedProfile(bytes))
+        {
+            return null;
+        }
+
         if (bytes.Length < 32 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
         {
             return null;
@@ -6240,6 +6245,11 @@ internal static class NifGeometrySignatureReader
             return parsedShapeSignature is null
                 ? (null, "unsupported-parsed-shape-geometry")
                 : (parsedShapeSignature, "parsed-sse-bstrishape");
+        }
+
+        if (SkyrimSseNifShapeReader.HasSupportedProfile(bytes))
+        {
+            return (null, "unsupported-parsed-shape-geometry");
         }
 
         var embeddedMarkerOffset = bytes.AsSpan().IndexOf(EmbeddedVertexMarker);
@@ -25675,6 +25685,11 @@ internal sealed class LocalExportService(
                     parsedVertexStreams,
                     parsedTopology);
             }
+        }
+
+        if (!parsedGeometry.Supported && SkyrimSseNifShapeReader.HasSupportedProfile(sourceBytes))
+        {
+            return sourceBytes;
         }
 
         if (string.Equals(parsedGeometry.Diagnostic, "unsupported-nif-profile", StringComparison.Ordinal))
