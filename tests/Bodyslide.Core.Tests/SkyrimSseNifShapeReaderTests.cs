@@ -357,6 +357,22 @@ public sealed class SkyrimSseNifShapeReaderTests
         var source = CreateNif(
             [new TestShape("SkinnedBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)], SkinInstance: 1)]);
 
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".nif");
+        try
+        {
+            File.WriteAllBytes(path, source);
+            var support = NifGeometrySignatureReader.Inspect(path);
+
+            Assert.Equal("degraded", support.Status);
+            Assert.Equal("parsed-sse-bstrishape-skinned-position-index-only", support.ParseMode);
+            Assert.Contains("skinned-geometry-not-transformed", support.Messages);
+            Assert.Contains("manual-review-recommended", support.Messages);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+
         var transformed = LocalExportService.TryApplyNifVertexTransform(
             source,
             null,

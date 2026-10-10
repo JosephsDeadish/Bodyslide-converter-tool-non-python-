@@ -5875,13 +5875,16 @@ internal static class NifGeometrySignatureReader
         {
             var degradedMode =
                 string.Equals(result.Mode, "heuristic-float", StringComparison.Ordinal) ||
-                result.Mode.Contains("partial-float", StringComparison.Ordinal);
+                result.Mode.Contains("partial-float", StringComparison.Ordinal) ||
+                result.Mode.Contains("skinned-position-index-only", StringComparison.Ordinal);
             var status = degradedMode ? "degraded" : "supported";
             var messages = BuildMetadataMessages(
                 status == "degraded"
                     ? string.Equals(result.Mode, "heuristic-float", StringComparison.Ordinal)
                         ? ["heuristic-geometry-read", "manual-review-recommended"]
-                        : ["partial-geometry-recovered", "manual-review-recommended"]
+                        : result.Mode.Contains("skinned-position-index-only", StringComparison.Ordinal)
+                            ? ["skinned-geometry-not-transformed", "manual-review-recommended"]
+                            : ["partial-geometry-recovered", "manual-review-recommended"]
                     : [],
                 metadata,
                 heelAnalysis,
@@ -6253,9 +6256,12 @@ internal static class NifGeometrySignatureReader
         if (parsedShapes.Supported)
         {
             var parsedShapeSignature = BuildSignature(parsedShapes.Shapes);
+            var mode = parsedShapes.Shapes.Any(static shape => shape.IsSkinned)
+                ? "parsed-sse-bstrishape-skinned-position-index-only"
+                : "parsed-sse-bstrishape";
             return parsedShapeSignature is null
                 ? (null, "unsupported-parsed-shape-geometry")
-                : (parsedShapeSignature, "parsed-sse-bstrishape");
+                : (parsedShapeSignature, mode);
         }
 
         if (SkyrimSseNifShapeReader.HasRecognizedNifHeader(bytes))
