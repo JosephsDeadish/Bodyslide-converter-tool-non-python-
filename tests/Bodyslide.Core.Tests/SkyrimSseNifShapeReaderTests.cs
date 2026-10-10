@@ -263,11 +263,21 @@ public sealed class SkyrimSseNifShapeReaderTests
     [Fact]
     public void RejectsNonSseStreamProfile()
     {
-        var result = SkyrimSseNifShapeReader.Read(CreateNif([new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])], streamVersion: 83));
+        var nif = CreateNif([new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])], streamVersion: 83);
+        var result = SkyrimSseNifShapeReader.Read(nif);
 
         Assert.False(result.Supported);
         Assert.Equal("unsupported-nif-profile", result.Diagnostic);
         Assert.Empty(result.Shapes);
+        Assert.True(SkyrimSseNifShapeReader.HasRecognizedNifHeader(nif));
+        Assert.Null(NifGeometrySignatureReader.TryReadFullVertices(nif));
+
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            nif,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.2d },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+        Assert.Same(nif, transformed);
     }
 
     [Fact]

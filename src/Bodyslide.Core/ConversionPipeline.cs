@@ -4033,6 +4033,11 @@ internal static class NifGeometrySignatureReader
                 : null;
         }
 
+        if (SkyrimSseNifShapeReader.HasRecognizedNifHeader(bytes))
+        {
+            return null;
+        }
+
         if (SkyrimSseNifShapeReader.HasSupportedProfile(bytes))
         {
             return null;
@@ -4108,6 +4113,12 @@ internal static class NifGeometrySignatureReader
     public static MeshTopologySummary? TryReadTopologySummary(byte[] bytes)
     {
         if (bytes.Length < 32 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return null;
+        }
+
+        if (SkyrimSseNifShapeReader.HasRecognizedNifHeader(bytes) &&
+            !SkyrimSseNifShapeReader.Read(bytes).Supported)
         {
             return null;
         }
@@ -6245,6 +6256,11 @@ internal static class NifGeometrySignatureReader
             return parsedShapeSignature is null
                 ? (null, "unsupported-parsed-shape-geometry")
                 : (parsedShapeSignature, "parsed-sse-bstrishape");
+        }
+
+        if (SkyrimSseNifShapeReader.HasRecognizedNifHeader(bytes))
+        {
+            return (null, "unsupported-parsed-shape-geometry");
         }
 
         if (SkyrimSseNifShapeReader.HasSupportedProfile(bytes))
@@ -25685,6 +25701,11 @@ internal sealed class LocalExportService(
                     parsedVertexStreams,
                     parsedTopology);
             }
+        }
+
+        if (SkyrimSseNifShapeReader.HasRecognizedNifHeader(sourceBytes))
+        {
+            return sourceBytes;
         }
 
         if (!parsedGeometry.Supported && SkyrimSseNifShapeReader.HasSupportedProfile(sourceBytes))

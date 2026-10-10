@@ -57,6 +57,37 @@ internal static class SkyrimSseNifShapeReader
         }
     }
 
+    public static bool HasRecognizedNifHeader(ReadOnlySpan<byte> bytes)
+    {
+        var lineEnd = bytes.IndexOf((byte)'\n');
+        if (lineEnd < 0)
+        {
+            return false;
+        }
+
+        var header = Encoding.ASCII.GetString(bytes[..lineEnd]).TrimEnd('\r');
+        if (!header.StartsWith("Gamebryo File Format, Version ", StringComparison.Ordinal) &&
+            !header.StartsWith("NetImmerse File Format, Version ", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            var offset = lineEnd + 1;
+            var version = ReadUInt32(bytes, ref offset);
+            var endian = ReadByte(bytes, ref offset);
+            _ = ReadUInt32(bytes, ref offset);
+            var blockCount = ReadUInt32(bytes, ref offset);
+            _ = ReadUInt32(bytes, ref offset);
+            return version != 0 && endian <= 1 && blockCount <= MaximumBlockCount;
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+    }
+
     public static SkyrimSseNifShapeReadResult Read(ReadOnlySpan<byte> bytes)
     {
         try
