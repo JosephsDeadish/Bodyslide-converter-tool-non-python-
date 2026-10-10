@@ -42,12 +42,27 @@ public sealed class SkyrimSseNifShapeReaderTests
             new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 0f, 1f)]),
             new TestShape("Detail", [(2f, 0f, 0f), (3f, 0f, 0f), (2f, 0f, 1f)])
         ]);
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".nif");
+        try
+        {
+            File.WriteAllBytes(path, nif);
+            var report = NifGeometrySignatureReader.Inspect(path);
 
-        var report = NifGeometrySignatureReader.Inspect(nif);
-
-        Assert.Equal("supported", report.Status);
-        Assert.Equal("parsed-sse-bstrishape", report.ParseMode);
-        Assert.Equal(6, report.VertexCount);
+            Assert.Equal("supported", report.Status);
+            Assert.Equal("parsed-sse-bstrishape", report.ParseMode);
+            Assert.Equal(6, report.VertexCount);
+            Assert.Equal(
+                new[]
+                {
+                    new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(0f, 0f, 1f),
+                    new MeshVertex(2f, 0f, 0f), new MeshVertex(3f, 0f, 0f), new MeshVertex(2f, 0f, 1f)
+                },
+                NifGeometrySignatureReader.TryReadFullVertices(nif));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]

@@ -4024,6 +4024,15 @@ internal static class NifGeometrySignatureReader
 
     public static IReadOnlyList<MeshVertex>? TryReadFullVertices(byte[] bytes)
     {
+        var parsedShapes = SkyrimSseNifShapeReader.Read(bytes);
+        if (parsedShapes.Supported)
+        {
+            var vertexCount = parsedShapes.Shapes.Sum(static shape => (long)shape.Vertices.Count);
+            return vertexCount is > 0 and <= MaxPlausibleVertexCount
+                ? parsedShapes.Shapes.SelectMany(static shape => shape.Vertices).ToArray()
+                : null;
+        }
+
         if (bytes.Length < 32 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
         {
             return null;
