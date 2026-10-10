@@ -226,6 +226,35 @@ public sealed class BodySlideSourceAssociationTests
     }
 
     [Fact]
+    public async Task InvalidOspZapAndUvBooleansAreReported()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var mesh = Path.Combine(root, "jacket_0.nif");
+            var project = Path.Combine(root, "source.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <SliderSet name="Jacket">
+                    <OutputFile>jacket</OutputFile>
+                    <Slider name="Fit" zap="sometimes" uv="maybe" />
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            Assert.Contains("Fit", result.Sliders);
+            Assert.DoesNotContain("Fit", result.ZapSliders);
+            Assert.Contains("invalid-slider-boolean-values", result.SourceAssetSupport!.UnsupportedOspSemantics);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task OsdPayloadRecordsRetainOnlyExplicitOspShapeLinksVerifiedBySourceNif()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

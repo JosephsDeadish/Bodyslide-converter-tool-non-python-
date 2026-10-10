@@ -1552,6 +1552,13 @@ internal static class BodySlideSourceProjectSupport
             {
                 semantics.Add("uv-slider-data");
             }
+
+            if (new[] { "zap", "uv" }.Any(attributeName =>
+                    slider.Attribute(attributeName) is { } attribute &&
+                    !IsValidBooleanValue(attribute.Value)))
+            {
+                semantics.Add("invalid-slider-boolean-values");
+            }
         }
 
         if (sliderSet.Descendants().Any(static element =>
@@ -2151,6 +2158,10 @@ internal static class BodySlideSourceProjectSupport
         (value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
          value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
          value.Equals("yes", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsValidBooleanValue(string value) =>
+        new[] { "true", "false", "1", "0", "yes", "no" }
+            .Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
 
     private static bool IsLikelySliderName(string? value)
     {
