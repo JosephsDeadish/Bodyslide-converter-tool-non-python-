@@ -2273,7 +2273,7 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains("BreastsPhysics", ospXml, StringComparison.Ordinal);
             Assert.Contains("<DataFolder>cuirass_3BA</DataFolder>", ospXml, StringComparison.Ordinal);
             Assert.Contains("<SourceFile>cuirass.nif</SourceFile>", ospXml, StringComparison.Ordinal);
-            Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<OutputPath>meshes\\slidesmith\\3ba\\</OutputPath>", ospXml, StringComparison.Ordinal);
         }
         finally
         {
@@ -2302,7 +2302,7 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains("Pecs", ospXml, StringComparison.Ordinal);
             Assert.Contains("<DataFolder>armor_HIMBO</DataFolder>", ospXml, StringComparison.Ordinal);
             Assert.Contains("<SourceFile>armor.nif</SourceFile>", ospXml, StringComparison.Ordinal);
-            Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<OutputPath>meshes\\slidesmith\\himbo\\</OutputPath>", ospXml, StringComparison.Ordinal);
         }
         finally
         {
@@ -2335,7 +2335,7 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains("<DataFolder>GweldaWitch_3BA</DataFolder>", ospXml, StringComparison.Ordinal);
             Assert.Contains("<SourceFile>cuirass_0.nif</SourceFile>", ospXml, StringComparison.Ordinal);
             Assert.Contains("<SourceFile>boots_0.nif</SourceFile>", ospXml, StringComparison.Ordinal);
-            Assert.Contains(@"<OutputPath>meshes\DX\MiniArmorsCollection\Armors\GweldaWitch\</OutputPath>", ospXml, StringComparison.Ordinal);
+            Assert.Contains(@"<OutputPath>meshes\slidesmith\3ba\</OutputPath>", ospXml, StringComparison.Ordinal);
             Assert.Contains("GenWeights=\"true\">cuirass</OutputFile>", ospXml, StringComparison.Ordinal);
             Assert.Contains("GenWeights=\"true\">boots</OutputFile>", ospXml, StringComparison.Ordinal);
 

@@ -8251,18 +8251,23 @@ public sealed class ConversionOrchestrator(
             var physics = await ProfileStageAsync("physics-build", () => physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken));
             steps.Add($"physics:{physics.Profile}");
 
-            var bodySlideArmor = normalized.Request.BatchPluginExportContext is null ? armor : armor with
+            var bodySlideOutputRoot = $@"meshes\slidesmith\{LocalExportService.BuildSafeBodyToken(normalized.Request.TargetBody)}\";
+            var bodySlideArmor = armor with
             {
-                BodySlideProjectNamespace = normalized.Request.BatchOutputNamespace,
-                BatchBodySlideProjectName = normalized.Request.BatchBodySlideProjectName,
-                BodySlideOutputPath = pluginAnalysis.ScannedPlugins.Count == 0
-                    ? $@"meshes\slidesmith\{LocalExportService.BuildSafeBodyToken(normalized.Request.TargetBody)}\"
-                        + (normalized.Request.BatchOutputNamespace is null ? "" : normalized.Request.BatchOutputNamespace + @"\")
-                    : null,
-                BodySlideMeshOutputPaths = pluginAnalysis.ScannedPlugins.Count > 0
-                    ? LocalExportService.BuildBodySlideMeshOutputPaths(pluginAnalysis, armor.MeshFiles, normalized.Request.TargetBody, armor.BatchMeshFiles)
-                    : null,
-                BodySlideDefaultOutputPath = $@"meshes\slidesmith\{LocalExportService.BuildSafeBodyToken(normalized.Request.TargetBody)}\"
+                BodySlideProjectNamespace = normalized.Request.BatchPluginExportContext is null
+                    ? armor.BodySlideProjectNamespace
+                    : normalized.Request.BatchOutputNamespace,
+                BatchBodySlideProjectName = normalized.Request.BatchPluginExportContext is null
+                    ? armor.BatchBodySlideProjectName
+                    : normalized.Request.BatchBodySlideProjectName,
+                BodySlideOutputPath = pluginAnalysis.ScannedPlugins.Count == 0 ? bodySlideOutputRoot : null,
+                BodySlideMeshOutputPaths = LocalExportService.BuildCollisionSafeBodySlideMeshOutputPaths(
+                    armor.MeshFiles,
+                    normalized.Request.TargetBody,
+                    pluginAnalysis.ScannedPlugins.Count > 0
+                        ? LocalExportService.BuildBodySlideMeshOutputPaths(pluginAnalysis, armor.MeshFiles, normalized.Request.TargetBody, armor.BatchMeshFiles)
+                        : null),
+                BodySlideDefaultOutputPath = bodySlideOutputRoot
             };
             var bodySlideProject = await ProfileStageAsync("bodyslide-project", () => bodySlideProjectService.GenerateAsync(bodySlideArmor, converted, normalized.Request.TargetBody, cancellationToken));
             steps.Add($"bodyslide:{bodySlideProject.ProjectName},{bodySlideProject.Sliders.Count}-sliders");
@@ -8281,7 +8286,7 @@ public sealed class ConversionOrchestrator(
                 cancellationToken);
             steps.Add("timings:conversion-timings.json");
             var exportStopwatch = Stopwatch.StartNew();
-            Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync() => exporter.ExportAsync(normalized.Request with { DeferZipCreation = normalized.Request.OutputZip }, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, raceCompatibility, voxelResult, cancellationToken);
+            Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync() => exporter.ExportAsync(normalized.Request with { DeferZipCreation = normalized.Request.OutputZip }, bodySlideArmor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, raceCompatibility, voxelResult, cancellationToken);
             var export = normalized.Request.BatchPluginExportContext is { PluginFiles.Count: > 0 } batchExport
                 ? await batchExport.ExecuteAsync(ExportAsync, cancellationToken)
                 : await ExportAsync();
@@ -23792,8 +23797,10 @@ internal sealed class LocalExportService(
                     pairedFiles.Add(pair.LowWeightMesh);
                     pairedFiles.Add(pair.HighWeightMesh);
 
-                    var lowDest = GetConvertedNifDestinationPath(nifDirectory, pair.LowWeightMesh, usedOutputPaths);
-                    var highDest = GetConvertedNifDestinationPath(nifDirectory, pair.HighWeightMesh, usedOutputPaths);
+                    var lowDest = GetConvertedNifDestinationPath(
+                        nifDirectory, pair.LowWeightMesh, usedOutputPaths, ResolveBodySlideOutputPath(armor, pair.LowWeightMesh));
+                    var highDest = GetConvertedNifDestinationPath(
+                        nifDirectory, pair.HighWeightMesh, usedOutputPaths, ResolveBodySlideOutputPath(armor, pair.HighWeightMesh));
 
                     Directory.CreateDirectory(Path.GetDirectoryName(lowDest)!);
                     Directory.CreateDirectory(Path.GetDirectoryName(highDest)!);
@@ -23812,9 +23819,10 @@ internal sealed class LocalExportService(
                     var isSourceLow = pair.LowWeightMesh is not null; // true → have _0, missing _1
                     var ext         = Path.GetExtension(sourceMesh);
                     var synthName  = pair.BaseName + (isSourceLow ? "_1" : "_0") + ext;
-                    var destSource = GetConvertedNifDestinationPath(nifDirectory, sourceMesh, usedOutputPaths);
+                    var bodySlideOutputPath = ResolveBodySlideOutputPath(armor, sourceMesh);
+                    var destSource = GetConvertedNifDestinationPath(nifDirectory, sourceMesh, usedOutputPaths, bodySlideOutputPath);
                     var synthSourcePath = Path.Combine(Path.GetDirectoryName(sourceMesh) ?? string.Empty, synthName);
-                    var destSynth = GetConvertedNifDestinationPath(nifDirectory, synthSourcePath, usedOutputPaths);
+                    var destSynth = GetConvertedNifDestinationPath(nifDirectory, synthSourcePath, usedOutputPaths, bodySlideOutputPath);
 
                     // Write the existing half with regular morphs.
                     Directory.CreateDirectory(Path.GetDirectoryName(destSource)!);
@@ -23843,7 +23851,8 @@ internal sealed class LocalExportService(
         {
             if (pairedFiles.Contains(meshFile)) continue;
 
-            var dest = GetConvertedNifDestinationPath(nifDirectory, meshFile, usedOutputPaths);
+            var dest = GetConvertedNifDestinationPath(
+                nifDirectory, meshFile, usedOutputPaths, ResolveBodySlideOutputPath(armor, meshFile));
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             await CopyNifAsync(meshFile, dest, mesh, cancellationToken);
             written.Add(dest);
@@ -23856,28 +23865,32 @@ internal sealed class LocalExportService(
     internal static string GetConvertedNifDestinationPath(
         string nifDirectory,
         string sourceMesh,
-        ISet<string> usedOutputPaths)
+        ISet<string> usedOutputPaths,
+        string? bodySlideOutputPath = null)
     {
-        var sourceSegments = Path.GetFullPath(sourceMesh)
-            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
-        var meshesIndex = Array.FindLastIndex(sourceSegments, static segment =>
-            segment.Equals("meshes", StringComparison.OrdinalIgnoreCase));
-        var relativeSegments = meshesIndex >= 0
-            ? sourceSegments.Skip(meshesIndex + 1).ToArray()
-            : [Path.GetFileName(sourceMesh)];
-        var outputSegments = Path.GetFullPath(nifDirectory)
-            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
-        var outputMeshesIndex = Array.FindLastIndex(outputSegments, static segment =>
-            segment.Equals("meshes", StringComparison.OrdinalIgnoreCase));
-        if (outputMeshesIndex >= 0)
+        var relativeSegments = new[] { Path.GetFileName(sourceMesh) };
+        if (!string.IsNullOrWhiteSpace(bodySlideOutputPath))
         {
-            var outputContext = outputSegments.Skip(outputMeshesIndex + 1).ToArray();
-            if (outputContext.Length > 0 &&
-                relativeSegments.Length > outputContext.Length &&
-                relativeSegments.Take(outputContext.Length)
-                    .SequenceEqual(outputContext, StringComparer.OrdinalIgnoreCase))
+            var outputContext = Path.GetFullPath(nifDirectory)
+                .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+            var outputMeshesIndex = Array.FindLastIndex(outputContext, static segment =>
+                segment.Equals("meshes", StringComparison.OrdinalIgnoreCase));
+            var mappedSegments = bodySlideOutputPath
+                .Replace('\\', '/')
+                .Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var mappedMeshesIndex = Array.FindIndex(mappedSegments, static segment =>
+                segment.Equals("meshes", StringComparison.OrdinalIgnoreCase));
+            if (outputMeshesIndex >= 0 && mappedMeshesIndex >= 0)
             {
-                relativeSegments = relativeSegments.Skip(outputContext.Length).ToArray();
+                var outputRootContext = outputContext.Skip(outputMeshesIndex + 1).ToArray();
+                var mappedContext = mappedSegments.Skip(mappedMeshesIndex + 1).ToArray();
+                if (mappedContext.Length >= outputRootContext.Length &&
+                    mappedContext.Take(outputRootContext.Length).SequenceEqual(outputRootContext, StringComparer.OrdinalIgnoreCase))
+                {
+                    relativeSegments = mappedContext.Skip(outputRootContext.Length)
+                        .Concat([Path.GetFileName(sourceMesh)])
+                        .ToArray();
+                }
             }
         }
         if (relativeSegments.Length == 0 ||
@@ -23911,6 +23924,11 @@ internal sealed class LocalExportService(
             }
         }
     }
+
+    private static string? ResolveBodySlideOutputPath(ImportedArmor armor, string sourceMesh) =>
+        armor.BodySlideMeshOutputPaths?.TryGetValue(sourceMesh, out var outputPath) == true
+            ? outputPath
+            : null;
 
     /// <summary>
     /// Scales per-region morph factors to derive the missing weight variant from the available one.
@@ -32433,6 +32451,82 @@ internal sealed class LocalExportService(
                 var rewritten = ResolveOutputMeshPath(plan.RewriteMap[group.First().Key]).Replace('/', '\\');
                 return rewritten[..(rewritten.LastIndexOf('\\') + 1)];
             }, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    }
+
+    internal static IReadOnlyDictionary<string, string> BuildCollisionSafeBodySlideMeshOutputPaths(
+        IReadOnlyList<string> meshFiles,
+        string targetBody,
+        IReadOnlyDictionary<string, string>? existingOutputPaths = null)
+    {
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var outputPaths = new Dictionary<string, string>(comparer);
+        if (existingOutputPaths is not null)
+        {
+            foreach (var (meshPath, outputPath) in existingOutputPaths)
+            {
+                outputPaths[meshPath] = outputPath;
+            }
+        }
+        var safeBodyToken = BuildSafeBodyToken(targetBody);
+        foreach (var group in meshFiles
+                     .GroupBy(static meshPath => Path.GetFileName(meshPath), StringComparer.OrdinalIgnoreCase)
+                     .Where(static group => group.Count() > 1))
+        {
+            var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var meshPath in group.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase))
+            {
+                var outputPath = outputPaths.TryGetValue(meshPath, out var mappedPath)
+                    ? mappedPath
+                    : string.Empty;
+                if (string.IsNullOrWhiteSpace(outputPath) || !usedPaths.Add(outputPath.TrimEnd('\\', '/')))
+                {
+                    var relativeDirectory = GetMeshSubdirectoryAfterMeshes(meshPath, safeBodyToken);
+                    if (string.IsNullOrWhiteSpace(relativeDirectory))
+                    {
+                        relativeDirectory = $"mesh-{usedPaths.Count + 1}";
+                    }
+
+                    outputPath = $@"meshes\slidesmith\{safeBodyToken}\{relativeDirectory}\";
+                    var collisionSuffix = 2;
+                    while (!usedPaths.Add(outputPath.TrimEnd('\\', '/')))
+                    {
+                        outputPath = $@"meshes\slidesmith\{safeBodyToken}\{relativeDirectory}__{collisionSuffix++}\";
+                    }
+                }
+
+                outputPaths[meshPath] = outputPath;
+            }
+        }
+
+        return outputPaths;
+    }
+
+    private static string GetMeshSubdirectoryAfterMeshes(string meshPath, string safeBodyToken)
+    {
+        var segments = Path.GetFullPath(meshPath)
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        var meshesIndex = Array.FindLastIndex(segments, static segment =>
+            segment.Equals("meshes", StringComparison.OrdinalIgnoreCase));
+        if (meshesIndex < 0)
+        {
+            return Path.GetFileName(Path.GetDirectoryName(meshPath)) ?? string.Empty;
+        }
+
+        var relativeSegments = segments.Skip(meshesIndex + 1).ToArray();
+        if (relativeSegments.Length >= 2 &&
+            relativeSegments[0].Equals("slidesmith", StringComparison.OrdinalIgnoreCase) &&
+            relativeSegments[1].Equals(safeBodyToken, StringComparison.OrdinalIgnoreCase))
+        {
+            relativeSegments = relativeSegments.Skip(2).ToArray();
+        }
+
+        var directorySegments = relativeSegments.Take(Math.Max(0, relativeSegments.Length - 1)).ToArray();
+        if (directorySegments.Any(static segment => segment is "." or ".." || string.IsNullOrWhiteSpace(segment)))
+        {
+            return string.Empty;
+        }
+
+        return string.Join('\\', directorySegments);
     }
 
     private static PluginRewritePlan BuildOwnedPluginRewritePlan(

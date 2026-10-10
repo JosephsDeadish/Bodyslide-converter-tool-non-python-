@@ -392,6 +392,11 @@ declared `OutputPath` must match its game-relative directory, distinguishing
 same-named armor in different folders. This does not yet prove shape-specific
 OSD/TRI payload ownership; loose files without a known `meshes` root retain
 filename-only compatibility.
+Generated OSP output paths are aligned with the converted NIFs staged in the
+SlideSmith output tree. When one armor contains multiple meshes with the same
+filename, their BodySlide targets are assigned distinct path contexts so builds
+cannot overwrite one another. These structural checks still do not substitute
+for building the generated project in BodySlide.
 Morph import rejects non-finite displacements, out-of-range vertex indexes,
 overflowing counts and malformed trailing TRI bytes. Reads are capped at 64 MiB
 per BSD/TRI/OSD file; dense expansion is capped at 8,388,608 deltas per payload

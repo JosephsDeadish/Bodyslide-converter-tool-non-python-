@@ -14,14 +14,29 @@ public sealed class BodySlideBuildPathTests
         var firstSource = Path.Combine(sourceRoot, "meshes", "armor-a", "shared.nif");
         var secondSource = Path.Combine(sourceRoot, "meshes", "armor-b", "shared.nif");
 
-        var first = LocalExportService.GetConvertedNifDestinationPath(outputRoot, firstSource, usedPaths);
-        var second = LocalExportService.GetConvertedNifDestinationPath(outputRoot, secondSource, usedPaths);
-        var duplicate = LocalExportService.GetConvertedNifDestinationPath(outputRoot, firstSource, usedPaths);
+        var first = LocalExportService.GetConvertedNifDestinationPath(outputRoot, firstSource, usedPaths, @"meshes\slidesmith\CBBE\armor-a\");
+        var second = LocalExportService.GetConvertedNifDestinationPath(outputRoot, secondSource, usedPaths, @"meshes\slidesmith\CBBE\armor-b\");
+        var duplicate = LocalExportService.GetConvertedNifDestinationPath(outputRoot, firstSource, usedPaths, @"meshes\slidesmith\CBBE\armor-a\");
 
         Assert.EndsWith(Path.Combine("armor-a", "shared.nif"), first, StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith(Path.Combine("armor-b", "shared.nif"), second, StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith(Path.Combine("armor-a", "shared__2.nif"), duplicate, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(3, usedPaths.Count);
+    }
+
+    [Fact]
+    public void DuplicateBodySlideMeshNamesReceiveDistinctBuildOutputPaths()
+    {
+        var sourceRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var firstSource = Path.Combine(sourceRoot, "meshes", "armor-a", "shared_0.nif");
+        var secondSource = Path.Combine(sourceRoot, "meshes", "armor-b", "shared_0.nif");
+
+        var outputPaths = LocalExportService.BuildCollisionSafeBodySlideMeshOutputPaths(
+            [firstSource, secondSource],
+            "CBBE");
+
+        Assert.Equal(@"meshes\slidesmith\cbbe\armor-a\", outputPaths[firstSource]);
+        Assert.Equal(@"meshes\slidesmith\cbbe\armor-b\", outputPaths[secondSource]);
     }
 
     [Fact]
