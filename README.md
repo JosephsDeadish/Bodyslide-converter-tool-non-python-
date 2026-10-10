@@ -352,7 +352,8 @@ do not prove compatibility with real game assets.
 
 Body TRI `PIRT` payloads retain separate named shapes and per-shape morphs; duplicate
 shape names, duplicate morph names within a shape, duplicate sparse vertex indexes,
-and malformed trailing data are rejected. FaceGen `FRTRI002`/`FRTRI003` payloads
+malformed UTF-8 shape/morph names, and malformed trailing data are rejected. FaceGen
+`FRTRI002`/`FRTRI003` payloads
 have no corresponding named BodySlide shape association. OSD sparse records reject
 duplicate vertex indexes. TRI/OSD payloads retain only their represented index span; nearby NIFs are not used
 to inflate that span, and it must not be mistaken for a complete shape vertex count.

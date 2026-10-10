@@ -179,6 +179,18 @@ public sealed class MorphPayloadSafetyTests
     }
 
     [Fact]
+    public void BodyTriRejectsMalformedUtf8ShapeAndMorphNames()
+    {
+        var malformedShapeName = BodyTriWithShapes(("Shape", "Morph", (ushort)0, (short)1));
+        malformedShapeName[7] = 0xff;
+        Assert.False(TriMorphReader.TryRead(malformedShapeName, out _));
+
+        var malformedMorphName = BodyTriWithShapes(("Shape", "Morph", (ushort)0, (short)1));
+        malformedMorphName[15] = 0xff;
+        Assert.False(TriMorphReader.TryRead(malformedMorphName, out _));
+    }
+
+    [Fact]
     public void ValidFiniteOsdRemainsReadable()
     {
         Assert.True(OsdMorphReader.TryRead(Osd(5, 0.25f), out var payload));

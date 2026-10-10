@@ -167,6 +167,7 @@ internal static class TriMorphReader
     private static ReadOnlySpan<byte> LegacyFaceGenMagic => "FRTRI002"u8;
     private static ReadOnlySpan<byte> FaceGenMagic => "FRTRI003"u8;
     private static ReadOnlySpan<byte> BodyTriMagic => "PIRT"u8;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const float DequantizeScale = 1f / 2048f;
 
     public static bool TryRead(string filePath, out TriMorphPayload? payload)
@@ -210,7 +211,14 @@ internal static class TriMorphReader
 
         if (bytes.Length >= BodyTriMagic.Length && bytes[..BodyTriMagic.Length].SequenceEqual(BodyTriMagic))
         {
-            return TryReadBodyTri(bytes, out payload);
+            try
+            {
+                return TryReadBodyTri(bytes, out payload);
+            }
+            catch (DecoderFallbackException)
+            {
+                return false;
+            }
         }
 
         return false;
@@ -394,7 +402,7 @@ internal static class TriMorphReader
                 return false;
             }
 
-            var shapeName = Encoding.UTF8.GetString(bytes.Slice(offset, shapeNameLength));
+            var shapeName = StrictUtf8.GetString(bytes.Slice(offset, shapeNameLength));
             if (string.IsNullOrWhiteSpace(shapeName) || !shapeNames.Add(shapeName))
             {
                 return false;
@@ -423,7 +431,7 @@ internal static class TriMorphReader
                     return false;
                 }
 
-                var morphName = Encoding.UTF8.GetString(bytes[offset..(offset + morphNameLength)]);
+                var morphName = StrictUtf8.GetString(bytes[offset..(offset + morphNameLength)]);
                 if (!morphNames.Add(morphName))
                 {
                     return false;
