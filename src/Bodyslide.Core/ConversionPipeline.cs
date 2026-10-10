@@ -41161,8 +41161,23 @@ internal sealed class LocalExportService(
         private static bool HasExactShapeAndVertexOrder(SourceMorphPayload payload) =>
             HasVerifiedShapeAndVertexOrder(payload) &&
             string.Equals(payload.SourceShapeName, payload.TargetShapeName, StringComparison.Ordinal) &&
-            !string.IsNullOrWhiteSpace(payload.SourceVertexOrderFingerprint) &&
-            string.Equals(payload.SourceVertexOrderFingerprint, payload.TargetVertexOrderFingerprint, StringComparison.Ordinal);
+            IsSha256Fingerprint(payload.SourceVertexOrderFingerprint) &&
+            string.Equals(payload.SourceVertexOrderFingerprint, payload.TargetVertexOrderFingerprint, StringComparison.OrdinalIgnoreCase) &&
+            payload.ShapeCorrespondenceEvidence!.Any(IsExactShapeCorrespondenceEvidence);
+
+        private static bool IsExactShapeCorrespondenceEvidence(string evidence)
+        {
+            const string prefix = "exact-ordered-shape-geometry-and-topology-sha256:";
+            return evidence.StartsWith(prefix, StringComparison.Ordinal) &&
+                   IsSha256Fingerprint(evidence[prefix.Length..]);
+        }
+
+        private static bool IsSha256Fingerprint(string? value) =>
+            value is { Length: 64 } &&
+            value.All(static character =>
+                character is >= '0' and <= '9' or
+                    >= 'a' and <= 'f' or
+                    >= 'A' and <= 'F');
 
         private static IReadOnlyList<(float X, float Y, float Z)> BlendRetargetedMorphPayloadForHardDivergence(
             string sliderName,

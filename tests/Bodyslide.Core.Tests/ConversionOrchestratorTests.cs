@@ -31012,9 +31012,9 @@ public sealed class OutputCompletenessTests
             VertexOrderStatus: "verified",
             SourceShapeName: "Body",
             TargetShapeName: "Body",
-            SourceVertexOrderFingerprint: "vertex-order",
-            TargetVertexOrderFingerprint: "vertex-order",
-            ShapeCorrespondenceEvidence: ["exact shape correspondence"]);
+            SourceVertexOrderFingerprint: new string('a', 64),
+            TargetVertexOrderFingerprint: new string('A', 64),
+            ShapeCorrespondenceEvidence: [$"exact-ordered-shape-geometry-and-topology-sha256:{new string('b', 64)}"]);
         var payloads = new SourceMorphPayloadVariants(candidate, Payloads: [candidate, candidate with { SourceAssetName = "second.tri" }]);
         var candidates = new Dictionary<string, SourceMorphPayloadVariants>(StringComparer.OrdinalIgnoreCase)
         {
@@ -31029,6 +31029,21 @@ public sealed class OutputCompletenessTests
         candidates["Waist"] = new SourceMorphPayloadVariants(
             mismatchedShapeCase,
             Payloads: [mismatchedShapeCase]);
+        arguments = [candidates, "Waist", false, 2, null, null, null, null];
+        Assert.False(Assert.IsType<bool>(select.Invoke(null, arguments)));
+        Assert.Null(arguments[5]);
+
+        var unverifiedEvidence = candidate with
+        {
+            ShapeCorrespondenceEvidence = ["exact shape correspondence"]
+        };
+        candidates["Waist"] = new SourceMorphPayloadVariants(unverifiedEvidence, Payloads: [unverifiedEvidence]);
+        arguments = [candidates, "Waist", false, 2, null, null, null, null];
+        Assert.False(Assert.IsType<bool>(select.Invoke(null, arguments)));
+        Assert.Null(arguments[5]);
+
+        var malformedFingerprint = candidate with { SourceVertexOrderFingerprint = "not-a-sha256" };
+        candidates["Waist"] = new SourceMorphPayloadVariants(malformedFingerprint, Payloads: [malformedFingerprint]);
         arguments = [candidates, "Waist", false, 2, null, null, null, null];
         Assert.False(Assert.IsType<bool>(select.Invoke(null, arguments)));
         Assert.Null(arguments[5]);
