@@ -6,6 +6,25 @@ namespace Bodyslide.Core.Tests;
 public sealed class BodySlideBuildPathTests
 {
     [Fact]
+    public void ConvertedNifDestinationsPreserveMeshesSubdirectoriesAndResolveResidualCollisions()
+    {
+        var sourceRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "meshes", "slidesmith", "CBBE");
+        var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var firstSource = Path.Combine(sourceRoot, "meshes", "armor-a", "shared.nif");
+        var secondSource = Path.Combine(sourceRoot, "meshes", "armor-b", "shared.nif");
+
+        var first = LocalExportService.GetConvertedNifDestinationPath(outputRoot, firstSource, usedPaths);
+        var second = LocalExportService.GetConvertedNifDestinationPath(outputRoot, secondSource, usedPaths);
+        var duplicate = LocalExportService.GetConvertedNifDestinationPath(outputRoot, firstSource, usedPaths);
+
+        Assert.EndsWith(Path.Combine("armor-a", "shared.nif"), first, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(Path.Combine("armor-b", "shared.nif"), second, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(Path.Combine("armor-a", "shared__2.nif"), duplicate, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(3, usedPaths.Count);
+    }
+
+    [Fact]
     public void ShapeLinkedOsdExport_MapsSliderDataToEachNamedShape()
     {
         const string ospXml = """
@@ -106,6 +125,55 @@ public sealed class BodySlideBuildPathTests
                 .Select(set => (string?)set.Element("Shape"))
                 .ToArray();
             Assert.Equal(new[] { "ArmorAShape", "ArmorBShape" }, shapeNames);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BodySlideSourceReferencesUseOutputPathContextForDuplicateMeshNames()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var firstMesh = Path.Combine(outputDirectory, "meshes", "slidesmith", "CBBE", "armor-a", "shared_0.nif");
+        var secondMesh = Path.Combine(outputDirectory, "meshes", "slidesmith", "CBBE", "armor-b", "shared_0.nif");
+        Directory.CreateDirectory(Path.GetDirectoryName(firstMesh)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(secondMesh)!);
+        File.WriteAllBytes(firstMesh, "armor A"u8.ToArray());
+        File.WriteAllBytes(secondMesh, "armor B"u8.ToArray());
+        const string ospXml = """
+            <SliderSetInfo version="1">
+              <SliderSet name="Armor A">
+                <SourceFile>shared_0.nif</SourceFile>
+                <OutputPath>meshes\armor-a\</OutputPath>
+                <OutputFile gender="female" GenWeights="true">shared</OutputFile>
+              </SliderSet>
+              <SliderSet name="Armor B">
+                <SourceFile>shared_0.nif</SourceFile>
+                <OutputPath>meshes\armor-b\</OutputPath>
+                <OutputFile gender="female" GenWeights="true">shared</OutputFile>
+              </SliderSet>
+            </SliderSetInfo>
+            """;
+
+        try
+        {
+            var result = LocalExportService.BuildBodySlideSourceNifReferences(
+                ospXml,
+                outputDirectory,
+                [firstMesh, secondMesh]);
+
+            Assert.Empty(result.UnresolvedSliderSets);
+            Assert.Equal(
+                new[] { "armor A", "armor B" },
+                result.References.Select(reference => System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(reference.SourcePath))).ToArray());
+            Assert.Equal(
+                new[] { "shared_0.nif", "shared_0__2.nif" },
+                XDocument.Parse(result.OspXml)
+                    .Descendants("SliderSet")
+                    .Select(set => (string?)set.Element("SourceFile"))
+                    .ToArray());
         }
         finally
         {

@@ -23772,6 +23772,7 @@ internal sealed class LocalExportService(
         var written = new List<string>();
         var writtenBySourceMesh = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var synthesizedCount = 0;
+        var usedOutputPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // NIFs are placed under meshes/slidesmith/<body>/ so that Skyrim's loose-file
         // loader can find them and the installed structure matches the expected Data\ layout.
@@ -23791,8 +23792,8 @@ internal sealed class LocalExportService(
                     pairedFiles.Add(pair.LowWeightMesh);
                     pairedFiles.Add(pair.HighWeightMesh);
 
-                    var lowDest  = Path.Combine(nifDirectory, Path.GetFileName(pair.LowWeightMesh)!);
-                    var highDest = Path.Combine(nifDirectory, Path.GetFileName(pair.HighWeightMesh)!);
+                    var lowDest = GetConvertedNifDestinationPath(nifDirectory, pair.LowWeightMesh, usedOutputPaths);
+                    var highDest = GetConvertedNifDestinationPath(nifDirectory, pair.HighWeightMesh, usedOutputPaths);
 
                     Directory.CreateDirectory(Path.GetDirectoryName(lowDest)!);
                     Directory.CreateDirectory(Path.GetDirectoryName(highDest)!);
@@ -23810,9 +23811,10 @@ internal sealed class LocalExportService(
                     var sourceMesh  = pair.LowWeightMesh ?? pair.HighWeightMesh!;
                     var isSourceLow = pair.LowWeightMesh is not null; // true → have _0, missing _1
                     var ext         = Path.GetExtension(sourceMesh);
-                    var destSource = Path.Combine(nifDirectory, Path.GetFileName(sourceMesh)!);
                     var synthName  = pair.BaseName + (isSourceLow ? "_1" : "_0") + ext;
-                    var destSynth  = Path.Combine(nifDirectory, synthName);
+                    var destSource = GetConvertedNifDestinationPath(nifDirectory, sourceMesh, usedOutputPaths);
+                    var synthSourcePath = Path.Combine(Path.GetDirectoryName(sourceMesh) ?? string.Empty, synthName);
+                    var destSynth = GetConvertedNifDestinationPath(nifDirectory, synthSourcePath, usedOutputPaths);
 
                     // Write the existing half with regular morphs.
                     Directory.CreateDirectory(Path.GetDirectoryName(destSource)!);
@@ -23841,7 +23843,7 @@ internal sealed class LocalExportService(
         {
             if (pairedFiles.Contains(meshFile)) continue;
 
-            var dest = Path.Combine(nifDirectory, Path.GetFileName(meshFile)!);
+            var dest = GetConvertedNifDestinationPath(nifDirectory, meshFile, usedOutputPaths);
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             await CopyNifAsync(meshFile, dest, mesh, cancellationToken);
             written.Add(dest);
@@ -23849,6 +23851,50 @@ internal sealed class LocalExportService(
         }
 
         return new ConvertedNifWriteResult(written, writtenBySourceMesh, synthesizedCount);
+    }
+
+    internal static string GetConvertedNifDestinationPath(
+        string nifDirectory,
+        string sourceMesh,
+        ISet<string> usedOutputPaths)
+    {
+        var sourceSegments = Path.GetFullPath(sourceMesh)
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        var meshesIndex = Array.FindLastIndex(sourceSegments, static segment =>
+            segment.Equals("meshes", StringComparison.OrdinalIgnoreCase));
+        var relativeSegments = meshesIndex >= 0
+            ? sourceSegments.Skip(meshesIndex + 1).ToArray()
+            : [Path.GetFileName(sourceMesh)];
+        if (relativeSegments.Length == 0 ||
+            relativeSegments.Any(static segment => string.IsNullOrWhiteSpace(segment) || segment is "." or ".."))
+        {
+            relativeSegments = [Path.GetFileName(sourceMesh)];
+        }
+
+        var relativePath = Path.Combine(relativeSegments);
+        var outputRoot = Path.GetFullPath(nifDirectory);
+        var destination = Path.GetFullPath(Path.Combine(outputRoot, relativePath));
+        if (!IsPathInsideDirectory(destination, outputRoot))
+        {
+            destination = Path.Combine(outputRoot, Path.GetFileName(sourceMesh));
+        }
+
+        if (usedOutputPaths.Add(destination))
+        {
+            return destination;
+        }
+
+        var directory = Path.GetDirectoryName(destination) ?? outputRoot;
+        var fileName = Path.GetFileNameWithoutExtension(destination);
+        var extension = Path.GetExtension(destination);
+        for (var suffix = 2; ; suffix++)
+        {
+            var candidate = Path.Combine(directory, $"{fileName}__{suffix}{extension}");
+            if (usedOutputPaths.Add(candidate))
+            {
+                return candidate;
+            }
+        }
     }
 
     /// <summary>
@@ -40553,7 +40599,24 @@ internal sealed class LocalExportService(
             {
                 var expectedOutputName = generateWeights ? $"{outputStem}_0.nif" : $"{outputStem}.nif";
                 var expectedRelativePath = $"{outputPath}/{expectedOutputName}".TrimStart('/');
-                writtenByRelativePath.TryGetValue(expectedRelativePath, out sourcePath);
+                if (!writtenByRelativePath.TryGetValue(expectedRelativePath, out sourcePath))
+                {
+                    var expectedContextPath = expectedRelativePath.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase)
+                        ? expectedRelativePath["meshes/".Length..]
+                        : expectedRelativePath;
+                    var contextualMatches = writtenByRelativePath
+                        .Where(entry =>
+                            entry.Key.Equals(expectedRelativePath, StringComparison.OrdinalIgnoreCase) ||
+                            entry.Key.EndsWith($"/{expectedContextPath}", StringComparison.OrdinalIgnoreCase))
+                        .Select(static entry => entry.Value)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Take(2)
+                        .ToArray();
+                    if (contextualMatches.Length == 1)
+                    {
+                        sourcePath = contextualMatches[0];
+                    }
+                }
             }
 
             if (sourcePath is null)
