@@ -15,7 +15,8 @@ internal sealed record OspSliderControlSettings(
     double? DefaultValue,
     double? SmallValue,
     double? BigValue,
-    bool Invert);
+    bool Invert,
+    bool Uv = false);
 
 internal sealed record FallbackBodySlideInference(
     string? BodyName,
@@ -1779,7 +1780,8 @@ internal static class BodySlideSourceProjectSupport
             ReadValue("default"),
             smallValue,
             bigValue,
-            IsTruthy(slider.Attribute("invert")?.Value));
+            IsTruthy(slider.Attribute("invert")?.Value),
+            IsTruthy(slider.Attribute("uv")?.Value));
     }
 
     private static bool TryReadSimpleSliderRanges(

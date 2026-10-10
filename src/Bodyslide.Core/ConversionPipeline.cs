@@ -18916,7 +18916,7 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
                     settings = parsedSettings;
                 }
                 var controlValues = BuildSliderControlAttributes(generateWeights, settings);
-                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" {controlValues} zap=\"false\" uv=\"false\" />");
+                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" {controlValues} zap=\"false\" />");
             }
 
             foreach (var slider in zapSliders)
@@ -18927,7 +18927,7 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
                     settings = parsedSettings;
                 }
                 var controlValues = BuildSliderControlAttributes(generateWeights, settings);
-                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" {controlValues} zap=\"true\" uv=\"false\" />");
+                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" {controlValues} zap=\"true\" />");
             }
 
             sb.AppendLine("    </SliderSet>");
@@ -18944,7 +18944,7 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
         var endpoints = generateWeights
             ? $"small=\"{Format(settings?.SmallValue)}\" big=\"{Format(settings?.BigValue)}\""
             : $"default=\"{Format(settings?.DefaultValue)}\"";
-        return $"{endpoints} invert=\"{(settings?.Invert == true ? "true" : "false")}\"";
+        return $"{endpoints} invert=\"{(settings?.Invert == true ? "true" : "false")}\" uv=\"{(settings?.Uv == true ? "true" : "false")}\"";
     }
 
     internal static string BuildSliderGroupsXml(

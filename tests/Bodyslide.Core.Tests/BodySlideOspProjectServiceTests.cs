@@ -48,7 +48,7 @@ public sealed class BodySlideOspProjectServiceTests
             generateWeights ? "output_1.nif" : null);
         var settings = new Dictionary<string, OspSliderControlSettings>(StringComparer.OrdinalIgnoreCase)
         {
-            ["Fit"] = new(0.25, 0.1, 0.8, true)
+            ["Fit"] = new(0.25, 0.1, 0.8, true, true)
         };
 
         var document = XDocument.Parse(BodySlideOspProjectService.BuildOspXmlWithSliderSettings(
@@ -61,5 +61,6 @@ public sealed class BodySlideOspProjectServiceTests
             Assert.Equal("0.8", (string?)slider.Attribute("big"));
         }
         Assert.Equal("true", (string?)slider.Attribute("invert"));
+        Assert.Equal("true", (string?)slider.Attribute("uv"));
     }
 }

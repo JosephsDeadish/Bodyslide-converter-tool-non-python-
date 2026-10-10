@@ -254,7 +254,7 @@ public sealed class BodySlideSourceAssociationTests
                 },
                 result.SourceAssetSupport!.UnsupportedOspSemantics);
             Assert.Equal(
-                new OspSliderControlSettings(0.25, 0.1, 0.8, true),
+                new OspSliderControlSettings(0.25, 0.1, 0.8, true, true),
                 result.SliderControlSettings!["Fit"]);
         }
         finally { Directory.Delete(root, true); }
@@ -296,6 +296,7 @@ public sealed class BodySlideSourceAssociationTests
             Assert.Equal("0.1", (string?)outputSlider.Attribute("small"));
             Assert.Equal("0.9", (string?)outputSlider.Attribute("big"));
             Assert.Equal("true", (string?)outputSlider.Attribute("invert"));
+            Assert.Equal("false", (string?)outputSlider.Attribute("uv"));
         }
         finally { Directory.Delete(root, true); }
     }
