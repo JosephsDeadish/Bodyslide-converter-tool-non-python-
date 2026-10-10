@@ -25569,7 +25569,7 @@ internal sealed class LocalExportService(
             }
         }
 
-        if (sourceBytes.AsSpan().StartsWith("Gamebryo File Format,"u8))
+        if (string.Equals(parsedGeometry.Diagnostic, "unsupported-nif-profile", StringComparison.Ordinal))
         {
             return sourceBytes;
         }
