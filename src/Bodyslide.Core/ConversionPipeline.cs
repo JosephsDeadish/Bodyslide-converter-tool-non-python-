@@ -8251,7 +8251,10 @@ public sealed class ConversionOrchestrator(
             var physics = await ProfileStageAsync("physics-build", () => physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken));
             steps.Add($"physics:{physics.Profile}");
 
-            var bodySlideOutputRoot = $@"meshes\slidesmith\{LocalExportService.BuildSafeBodyToken(normalized.Request.TargetBody)}\";
+            var bodySlideOutputRoot = $@"meshes\slidesmith\{LocalExportService.BuildSafeBodyToken(normalized.Request.TargetBody)}\"
+                + (pluginAnalysis.ScannedPlugins.Count == 0 && normalized.Request.BatchOutputNamespace is not null
+                    ? normalized.Request.BatchOutputNamespace + @"\"
+                    : string.Empty);
             var bodySlideArmor = armor with
             {
                 BodySlideProjectNamespace = normalized.Request.BatchPluginExportContext is null
@@ -8266,7 +8269,8 @@ public sealed class ConversionOrchestrator(
                     normalized.Request.TargetBody,
                     pluginAnalysis.ScannedPlugins.Count > 0
                         ? LocalExportService.BuildBodySlideMeshOutputPaths(pluginAnalysis, armor.MeshFiles, normalized.Request.TargetBody, armor.BatchMeshFiles)
-                        : null),
+                        : null,
+                    bodySlideOutputRoot),
                 BodySlideDefaultOutputPath = bodySlideOutputRoot
             };
             var bodySlideProject = await ProfileStageAsync("bodyslide-project", () => bodySlideProjectService.GenerateAsync(bodySlideArmor, converted, normalized.Request.TargetBody, cancellationToken));
@@ -23928,7 +23932,7 @@ internal sealed class LocalExportService(
     private static string? ResolveBodySlideOutputPath(ImportedArmor armor, string sourceMesh) =>
         armor.BodySlideMeshOutputPaths?.TryGetValue(sourceMesh, out var outputPath) == true
             ? outputPath
-            : null;
+            : armor.BodySlideOutputPath ?? armor.BodySlideDefaultOutputPath;
 
     /// <summary>
     /// Scales per-region morph factors to derive the missing weight variant from the available one.
@@ -32456,7 +32460,8 @@ internal sealed class LocalExportService(
     internal static IReadOnlyDictionary<string, string> BuildCollisionSafeBodySlideMeshOutputPaths(
         IReadOnlyList<string> meshFiles,
         string targetBody,
-        IReadOnlyDictionary<string, string>? existingOutputPaths = null)
+        IReadOnlyDictionary<string, string>? existingOutputPaths = null,
+        string? bodySlideOutputRoot = null)
     {
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var outputPaths = new Dictionary<string, string>(comparer);
@@ -32468,6 +32473,7 @@ internal sealed class LocalExportService(
             }
         }
         var safeBodyToken = BuildSafeBodyToken(targetBody);
+        bodySlideOutputRoot ??= $@"meshes\slidesmith\{safeBodyToken}\";
         foreach (var group in meshFiles
                      .GroupBy(static meshPath => Path.GetFileName(meshPath), StringComparer.OrdinalIgnoreCase)
                      .Where(static group => group.Count() > 1))
@@ -32486,11 +32492,11 @@ internal sealed class LocalExportService(
                         relativeDirectory = $"mesh-{usedPaths.Count + 1}";
                     }
 
-                    outputPath = $@"meshes\slidesmith\{safeBodyToken}\{relativeDirectory}\";
+                    outputPath = $@"{bodySlideOutputRoot.TrimEnd('\\', '/')}\{relativeDirectory.Trim('\\', '/')}\";
                     var collisionSuffix = 2;
                     while (!usedPaths.Add(outputPath.TrimEnd('\\', '/')))
                     {
-                        outputPath = $@"meshes\slidesmith\{safeBodyToken}\{relativeDirectory}__{collisionSuffix++}\";
+                        outputPath = $@"{bodySlideOutputRoot.TrimEnd('\\', '/')}\{relativeDirectory.Trim('\\', '/')}__{collisionSuffix++}\";
                     }
                 }
 

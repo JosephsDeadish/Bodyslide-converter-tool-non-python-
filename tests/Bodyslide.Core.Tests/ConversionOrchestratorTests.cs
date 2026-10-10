@@ -35041,7 +35041,7 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Contains("zap=\"true\"", ospXml, StringComparison.Ordinal);
             Assert.Contains("<SourceFile>myfollower_armor_0.nif</SourceFile>", ospXml, StringComparison.Ordinal);
             Assert.Contains("<DataFolder>myfollower_armor</DataFolder>", ospXml, StringComparison.Ordinal);
-            Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<OutputPath>meshes\\slidesmith\\myfollower\\</OutputPath>", ospXml, StringComparison.Ordinal);
 
             Assert.True(File.Exists(Path.Combine(outputDir, "smp-config.xml")));
             Assert.False(File.Exists(Path.Combine(outputDir, "cbpc-config.xml")));
