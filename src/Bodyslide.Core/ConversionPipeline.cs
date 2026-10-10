@@ -5883,7 +5883,7 @@ internal static class NifGeometrySignatureReader
                     ? string.Equals(result.Mode, "heuristic-float", StringComparison.Ordinal)
                         ? ["heuristic-geometry-read", "manual-review-recommended"]
                         : result.Mode.Contains("skinned-position-index-only", StringComparison.Ordinal)
-                            ? ["skinned-geometry-not-transformed", "manual-review-recommended"]
+                        ? ["skin-weight-and-partition-semantics-unverified", "non-position-nif-data-preserved-unmodified", "manual-review-recommended"]
                             : ["partial-geometry-recovered", "manual-review-recommended"]
                     : [],
                 metadata,
@@ -25801,11 +25801,6 @@ internal sealed class LocalExportService(
         var parsedGeometry = SkyrimSseNifShapeReader.Read(sourceBytes);
         if (parsedGeometry.Supported && parsedGeometry.Shapes.Count > 0)
         {
-            if (parsedGeometry.Shapes.Any(static shape => shape.IsSkinned))
-            {
-                return sourceBytes;
-            }
-
             var parsedVertexStreams = parsedGeometry.Shapes
                 .Select(static shape => (Offset: shape.VertexDataOffset, Count: shape.Vertices.Count, Stride: shape.VertexStride))
                 .ToArray();

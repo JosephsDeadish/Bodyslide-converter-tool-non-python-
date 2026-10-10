@@ -352,7 +352,7 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
-    public void WriterLeavesSkinnedShapesUnchangedUntilSkinAwareWritesAreSupported()
+    public void WriterTransformsSkinnedShapePositionsAndPreservesAllOtherBytes()
     {
         var source = CreateNif(
             [new TestShape("SkinnedBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)], SkinInstance: 1)]);
@@ -365,7 +365,8 @@ public sealed class SkyrimSseNifShapeReaderTests
 
             Assert.Equal("degraded", support.Status);
             Assert.Equal("parsed-sse-bstrishape-skinned-position-index-only", support.ParseMode);
-            Assert.Contains("skinned-geometry-not-transformed", support.Messages);
+            Assert.Contains("skin-weight-and-partition-semantics-unverified", support.Messages);
+            Assert.Contains("non-position-nif-data-preserved-unmodified", support.Messages);
             Assert.Contains("manual-review-recommended", support.Messages);
         }
         finally
@@ -386,7 +387,29 @@ public sealed class SkyrimSseNifShapeReaderTests
             },
             BasicCageGenerationService.CreatePresetCage("mixed"));
 
-        Assert.Same(source, transformed);
+        Assert.NotSame(source, transformed);
+        var sourceShape = Assert.Single(SkyrimSseNifShapeReader.Read(source).Shapes);
+        var transformedShape = Assert.Single(SkyrimSseNifShapeReader.Read(transformed).Shapes);
+        Assert.NotEqual(sourceShape.Vertices, transformedShape.Vertices);
+        Assert.Equal(sourceShape.TriangleIndices, transformedShape.TriangleIndices);
+        Assert.Equal(sourceShape.Name, transformedShape.Name);
+
+        var expected = source.ToArray();
+        for (var index = 0; index < transformedShape.Vertices.Count; index++)
+        {
+            var positionOffset = sourceShape.VertexDataOffset + index * sourceShape.VertexStride;
+            var vertex = transformedShape.Vertices[index];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+                expected.AsSpan(positionOffset),
+                BitConverter.SingleToInt32Bits(vertex.X));
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+                expected.AsSpan(positionOffset + sizeof(float)),
+                BitConverter.SingleToInt32Bits(vertex.Y));
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+                expected.AsSpan(positionOffset + (2 * sizeof(float))),
+                BitConverter.SingleToInt32Bits(vertex.Z));
+        }
+        Assert.Equal(expected, transformed);
     }
 
     [Fact]
