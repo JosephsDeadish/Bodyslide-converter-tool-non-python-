@@ -1,5 +1,6 @@
 using Bodyslide.Core;
 using System.Text;
+using System.Xml.Linq;
 
 namespace Bodyslide.Core.Tests;
 
