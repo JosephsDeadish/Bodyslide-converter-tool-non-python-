@@ -192,6 +192,38 @@ public sealed class BodySlideSourceAssociationTests
     }
 
     [Fact]
+    public async Task OsdPayloadWithIndexesOutsideLinkedSourceShapeIsNotShapeAssociated()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(root, "meshes", "armor", "traveler");
+        var projectDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+        try
+        {
+            var mesh = Path.Combine(meshDirectory, "traveler_0.nif");
+            var project = Path.Combine(projectDirectory, "traveler.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "base.nif"),
+                SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso"));
+            await File.WriteAllBytesAsync(Path.Combine(shapeDataDirectory, "shared.osd"), OsdMorph("Waist", index: 3));
+            await File.WriteAllTextAsync(project, OspWithDataTarget("Torso"));
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            var payload = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
+            Assert.Null(payload.SourceShapeName);
+            Assert.Equal("unresolved", payload.ShapeIdentityStatus);
+            Assert.Equal("unverified", payload.VertexOrderStatus);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task OsdPayloadDoesNotAssociateWhenOspTargetIsNotInSourceNif()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -378,7 +410,7 @@ public sealed class BodySlideSourceAssociationTests
         </SliderSetInfo>
         """;
 
-    private static byte[] OsdMorph(string name)
+    private static byte[] OsdMorph(string name, int index = 0)
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8);
@@ -388,7 +420,7 @@ public sealed class BodySlideSourceAssociationTests
         writer.Write((byte)Encoding.UTF8.GetByteCount(name));
         writer.Write(Encoding.UTF8.GetBytes(name));
         writer.Write((ushort)1);
-        writer.Write(0);
+        writer.Write(index);
         writer.Write(0.25f);
         writer.Write(0f);
         writer.Write(0f);

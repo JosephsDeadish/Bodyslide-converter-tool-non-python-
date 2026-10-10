@@ -72,6 +72,8 @@ internal static class BodySlideSourceProjectSupport
         IReadOnlyList<string> ReferencedPaths,
         IReadOnlyList<string>? DataFolders = null);
 
+    private sealed record OspOsdShapeTarget(string Name, int VertexCount);
+
     public static Task<ResolvedBodySlideSliders> ResolveAsync(
         ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
@@ -313,17 +315,18 @@ internal static class BodySlideSourceProjectSupport
                             {
                                 if (candidate.ReusablePayload is null ||
                                     !targetsBySlider.TryGetValue(candidate.Name, out var shapeTargets) ||
-                                    shapeTargets.Count != 1)
+                                    shapeTargets.Count != 1 ||
+                                    candidate.ReusablePayload.VertexCount > shapeTargets.Single().VertexCount)
                                 {
-                                    return candidate;
+                                       return candidate;
                                 }
 
                                 return candidate with
                                 {
-                                    ReusablePayload = candidate.ReusablePayload with
-                                    {
-                                        SourceShapeName = shapeTargets.Single()
-                                    }
+                                       ReusablePayload = candidate.ReusablePayload with
+                                       {
+                                       SourceShapeName = shapeTargets.Single().Name
+                                       }
                                 };
                             })
                             .ToArray();
@@ -466,7 +469,7 @@ internal static class BodySlideSourceProjectSupport
         return new BodySlideDiscoveryResult(files, hasReferenceAssets);
     }
 
-    private static async Task<IReadOnlyDictionary<string, Dictionary<string, HashSet<string>>>> ReadOspOsdShapeTargetsAsync(
+    private static async Task<IReadOnlyDictionary<string, Dictionary<string, HashSet<OspOsdShapeTarget>>>> ReadOspOsdShapeTargetsAsync(
         IEnumerable<string> ospFiles,
         IReadOnlyList<string> discoveredFiles,
         IReadOnlyList<string> meshFiles,
@@ -476,7 +479,7 @@ internal static class BodySlideSourceProjectSupport
             .Where(static path => path.EndsWith(".osd", StringComparison.OrdinalIgnoreCase))
             .Select(Path.GetFullPath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var associations = new Dictionary<string, Dictionary<string, HashSet<string>>>(StringComparer.OrdinalIgnoreCase);
+        var associations = new Dictionary<string, Dictionary<string, HashSet<OspOsdShapeTarget>>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var ospPath in ospFiles)
         {
@@ -530,9 +533,8 @@ internal static class BodySlideSourceProjectSupport
                         continue;
                     }
 
-                    var shapeNames = sourceShapes.Shapes
-                        .Select(static shape => shape.Name)
-                        .ToHashSet(StringComparer.Ordinal);
+                    var shapesByName = sourceShapes.Shapes
+                        .ToDictionary(static shape => shape.Name, StringComparer.Ordinal);
                     foreach (var slider in sliderSet.Elements()
                                  .Where(static element => element.Name.LocalName.Equals("Slider", StringComparison.OrdinalIgnoreCase)))
                     {
@@ -543,7 +545,7 @@ internal static class BodySlideSourceProjectSupport
                             var dataReference = data.Value.Trim().Replace('\\', '/');
                             var separator = dataReference.LastIndexOf('#');
                             if (string.IsNullOrWhiteSpace(targetShape) ||
-                                !shapeNames.Contains(targetShape) ||
+                                !shapesByName.TryGetValue(targetShape, out var sourceShape) ||
                                 separator <= 0 ||
                                 separator == dataReference.Length - 1)
                             {
@@ -563,17 +565,17 @@ internal static class BodySlideSourceProjectSupport
                             var fullOsdPath = Path.GetFullPath(osdPath);
                             if (!associations.TryGetValue(fullOsdPath, out var targetsBySlider))
                             {
-                                targetsBySlider = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+                                targetsBySlider = new Dictionary<string, HashSet<OspOsdShapeTarget>>(StringComparer.OrdinalIgnoreCase);
                                 associations.Add(fullOsdPath, targetsBySlider);
                             }
 
                             if (!targetsBySlider.TryGetValue(morphName, out var shapeTargets))
                             {
-                                shapeTargets = new HashSet<string>(StringComparer.Ordinal);
+                                shapeTargets = new HashSet<OspOsdShapeTarget>();
                                 targetsBySlider.Add(morphName, shapeTargets);
                             }
 
-                            shapeTargets.Add(targetShape);
+                            shapeTargets.Add(new OspOsdShapeTarget(sourceShape.Name, sourceShape.Vertices.Count));
                         }
                     }
                 }
