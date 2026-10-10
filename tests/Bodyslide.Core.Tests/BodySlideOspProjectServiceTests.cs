@@ -51,7 +51,7 @@ public sealed class BodySlideOspProjectServiceTests
             ["Fit"] = new(0.25, 0.1, 0.8, true)
         };
 
-        var document = XDocument.Parse(BodySlideOspProjectService.BuildOspXml(
+        var document = XDocument.Parse(BodySlideOspProjectService.BuildOspXmlWithSliderSettings(
             ["Fit"], [], [target], "female", settings));
         var slider = Assert.Single(document.Descendants("Slider"));
 

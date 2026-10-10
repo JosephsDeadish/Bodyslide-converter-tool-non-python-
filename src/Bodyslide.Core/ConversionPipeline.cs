@@ -18655,7 +18655,7 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
             .ToDictionary(static group => group.Key, static group => group.First().Value, StringComparer.OrdinalIgnoreCase);
         var gender = resolved.Gender;
         var targets = BodySlideLayoutPlanner.BuildTargets(armor, projectName);
-        var ospXml = BuildOspXml(sliders, zapSliders, targets, gender, sliderControlSettings);
+        var ospXml = BuildOspXmlWithSliderSettings(sliders, zapSliders, targets, gender, sliderControlSettings);
         var sliderSetNames = targets
             .Select(static target => target.SliderSetName)
             .Where(static name => !string.IsNullOrWhiteSpace(name))
@@ -18763,12 +18763,19 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
         return string.Empty;
     }
 
-    internal static string BuildOspXml(
+    private static string BuildOspXml(
+        IReadOnlyList<string> sliders,
+        IReadOnlyList<string> zapSliders,
+        IReadOnlyList<BodySlideMeshTarget> targets,
+        string gender) =>
+        BuildOspXmlWithSliderSettings(sliders, zapSliders, targets, gender, null);
+
+    internal static string BuildOspXmlWithSliderSettings(
         IReadOnlyList<string> sliders,
         IReadOnlyList<string> zapSliders,
         IReadOnlyList<BodySlideMeshTarget> targets,
         string gender,
-        IReadOnlyDictionary<string, OspSliderControlSettings>? sliderControlSettings = null)
+        IReadOnlyDictionary<string, OspSliderControlSettings>? sliderControlSettings)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
