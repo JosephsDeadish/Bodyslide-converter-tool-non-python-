@@ -251,7 +251,8 @@ public sealed record SourceMorphPayload(
     string? TargetShapeName = null,
     string? SourceVertexOrderFingerprint = null,
     string? TargetVertexOrderFingerprint = null,
-    IReadOnlyList<string>? ShapeCorrespondenceEvidence = null);
+    IReadOnlyList<string>? ShapeCorrespondenceEvidence = null,
+    string? SourceMorphRecordName = null);
 public sealed record SourceMorphPayloadVariants(
     SourceMorphPayload? LowWeight = null,
     SourceMorphPayload? HighWeight = null,
@@ -18646,9 +18647,15 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
         var zapSliders = NormalizeSliderNames(resolved.ZapSliders)
             .Where(slider => !sliders.Contains(slider, StringComparer.OrdinalIgnoreCase))
             .ToArray();
+        var sliderControlSettings = (resolved.SliderControlSettings ?? new Dictionary<string, OspSliderControlSettings>())
+            .Select(pair => (Name: NormalizeSliderNames([pair.Key]).FirstOrDefault(), pair.Value))
+            .Where(static pair => !string.IsNullOrWhiteSpace(pair.Name))
+            .GroupBy(static pair => pair.Name!, StringComparer.OrdinalIgnoreCase)
+            .Where(static group => group.Select(static pair => pair.Value).Distinct().Count() == 1)
+            .ToDictionary(static group => group.Key, static group => group.First().Value, StringComparer.OrdinalIgnoreCase);
         var gender = resolved.Gender;
         var targets = BodySlideLayoutPlanner.BuildTargets(armor, projectName);
-        var ospXml = BuildOspXml(sliders, zapSliders, targets, gender);
+        var ospXml = BuildOspXml(sliders, zapSliders, targets, gender, sliderControlSettings);
         var sliderSetNames = targets
             .Select(static target => target.SliderSetName)
             .Where(static name => !string.IsNullOrWhiteSpace(name))
@@ -18756,11 +18763,12 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
         return string.Empty;
     }
 
-    private static string BuildOspXml(
+    internal static string BuildOspXml(
         IReadOnlyList<string> sliders,
         IReadOnlyList<string> zapSliders,
         IReadOnlyList<BodySlideMeshTarget> targets,
-        string gender)
+        string gender,
+        IReadOnlyDictionary<string, OspSliderControlSettings>? sliderControlSettings = null)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
@@ -18783,20 +18791,41 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
 
             foreach (var slider in sliders)
             {
-                var weightDefaults = generateWeights ? "small=\"0\" big=\"0\"" : "default=\"0\"";
-                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" {weightDefaults} invert=\"false\" zap=\"false\" uv=\"false\" />");
+                OspSliderControlSettings? settings = null;
+                if (sliderControlSettings is not null && sliderControlSettings.TryGetValue(slider, out var parsedSettings))
+                {
+                    settings = parsedSettings;
+                }
+                var controlValues = BuildSliderControlAttributes(generateWeights, settings);
+                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" {controlValues} zap=\"false\" uv=\"false\" />");
             }
 
             foreach (var slider in zapSliders)
             {
-                var weightDefaults = generateWeights ? "small=\"0\" big=\"0\"" : "default=\"0\"";
-                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" {weightDefaults} invert=\"false\" zap=\"true\" uv=\"false\" />");
+                OspSliderControlSettings? settings = null;
+                if (sliderControlSettings is not null && sliderControlSettings.TryGetValue(slider, out var parsedSettings))
+                {
+                    settings = parsedSettings;
+                }
+                var controlValues = BuildSliderControlAttributes(generateWeights, settings);
+                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" {controlValues} zap=\"true\" uv=\"false\" />");
             }
 
             sb.AppendLine("    </SliderSet>");
         }
         sb.AppendLine("</SliderSetInfo>");
         return sb.ToString();
+    }
+
+    private static string BuildSliderControlAttributes(bool generateWeights, OspSliderControlSettings? settings)
+    {
+        static string Format(double? value) =>
+            (value ?? 0d).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+
+        var endpoints = generateWeights
+            ? $"small=\"{Format(settings?.SmallValue)}\" big=\"{Format(settings?.BigValue)}\""
+            : $"default=\"{Format(settings?.DefaultValue)}\"";
+        return $"{endpoints} invert=\"{(settings?.Invert == true ? "true" : "false")}\"";
     }
 
     internal static string BuildSliderGroupsXml(
@@ -24126,6 +24155,7 @@ internal sealed class LocalExportService(
             payload.VertexCount,
             DeltaCount = payload.Deltas.Count,
             payload.SourceAssetName,
+            payload.SourceMorphRecordName,
             payload.ShapeIdentityStatus,
             payload.VertexOrderStatus,
             payload.RetargetMapVerified,

@@ -612,15 +612,25 @@ internal static class OsdMorphReader
         out OsdMorphPayload? payload)
     {
         payload = null;
-        if (!TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 2, allowPadding: false, out payload) &&
-            !TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 4, allowPadding: false, out payload) &&
-            !TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 2, allowPadding: true, out payload) &&
-            !TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 4, allowPadding: true, out payload))
+        foreach (var (indexByteWidth, allowPadding) in new[] { (2, false), (4, false), (2, true), (4, true) })
+        {
+            if (TryReadPayload(bytes, headerSize, morphCount, indexByteWidth, allowPadding, out payload, out var duplicateVertexIndex))
+            {
+                break;
+            }
+            if (duplicateVertexIndex)
+            {
+                payload = null;
+                return false;
+            }
+        }
+
+        if (payload is null)
         {
             return false;
         }
 
-        if (payload!.Morphs.Any(morph => morph.SparseDeltas.Any(delta =>
+        if (payload.Morphs.Any(morph => morph.SparseDeltas.Any(delta =>
                 delta.Index < 0 || delta.Index >= MorphPayloadLimits.MaximumVertices ||
                 !MorphPayloadLimits.IsFinite(delta.X, delta.Y, delta.Z))))
         {
@@ -636,9 +646,11 @@ internal static class OsdMorphReader
         int morphCount,
         int indexByteWidth,
         bool allowPadding,
-        out OsdMorphPayload? payload)
+        out OsdMorphPayload? payload,
+        out bool duplicateVertexIndex)
     {
         payload = null;
+        duplicateVertexIndex = false;
         if (bytes.Length < headerSize)
         {
             return false;
@@ -682,6 +694,7 @@ internal static class OsdMorphReader
             }
 
             var sparseDeltas = new List<(int Index, float X, float Y, float Z)>(deltaCount);
+            var vertexIndexes = new HashSet<int>();
             for (var deltaIndex = 0; deltaIndex < deltaCount; deltaIndex++)
             {
                 int vertexIndex;
@@ -694,6 +707,11 @@ internal static class OsdMorphReader
                 {
                     vertexIndex = BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]);
                     offset += 4;
+                }
+                if (!vertexIndexes.Add(vertexIndex))
+                {
+                    duplicateVertexIndex = true;
+                    return false;
                 }
 
                 var x = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]));

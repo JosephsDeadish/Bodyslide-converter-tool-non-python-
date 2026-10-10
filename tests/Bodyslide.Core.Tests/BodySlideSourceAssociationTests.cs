@@ -41,6 +41,38 @@ public sealed class BodySlideSourceAssociationTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task OsdAssociationRequiresExactLinkedMorphRecordName()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(root, "meshes", "armor", "traveler");
+        var projectDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+        try
+        {
+            var mesh = Path.Combine(meshDirectory, "traveler_0.nif");
+            var project = Path.Combine(projectDirectory, "traveler.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "base.nif"),
+                SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso"));
+            await File.WriteAllBytesAsync(Path.Combine(shapeDataDirectory, "shared.osd"), OsdMorph("Waist_1"));
+            await File.WriteAllTextAsync(project, OspWithDataTarget("Torso"));
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            var payload = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
+            Assert.Equal("Waist_1", payload.SourceMorphRecordName);
+            Assert.Null(payload.SourceShapeName);
+            Assert.Null(payload.SourceVertexOrderFingerprint);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -135,8 +167,6 @@ public sealed class BodySlideSourceAssociationTests
                 {
                     "custom-base-shape",
                     "external-data-folder",
-                    "inverted-sliders",
-                    "nonzero-slider-defaults",
                     "output-options",
                     "output-path-rebuilt",
                     "seam-or-lock-normal-settings",
@@ -155,6 +185,42 @@ public sealed class BodySlideSourceAssociationTests
                     "zap-target-semantics"
                 },
                 result.SourceAssetSupport!.UnsupportedOspSemantics);
+            Assert.Equal(
+                new OspSliderControlSettings(0.25, 0.1, 0.8, true),
+                result.SliderControlSettings!["Fit"]);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task ConflictingOrInvalidOspSliderControlsAreNotPreservedSilently()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var mesh = Path.Combine(root, "jacket_0.nif");
+            var project = Path.Combine(root, "source.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <SliderSet name="Jacket">
+                    <OutputFile>jacket</OutputFile>
+                    <Slider name="Fit" default="NaN" invert="sometimes" />
+                    <Slider name="Conflict" default="0.2" />
+                    <Slider name="Conflict" default="0.8" />
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            Assert.Equal("Fit", result.SliderControlSettings!.Keys.Single());
+            Assert.Null(result.SliderControlSettings["Fit"].DefaultValue);
+            Assert.False(result.SliderControlSettings["Fit"].Invert);
+            Assert.Contains("invalid-slider-control-values", result.SourceAssetSupport!.UnsupportedOspSemantics);
+            Assert.Contains("ambiguous-slider-control-settings", result.SourceAssetSupport.UnsupportedOspSemantics);
         }
         finally { Directory.Delete(root, true); }
     }
@@ -185,6 +251,7 @@ public sealed class BodySlideSourceAssociationTests
 
             var payload = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
             Assert.Equal("Torso", payload.SourceShapeName);
+            Assert.Equal("Waist", payload.SourceMorphRecordName);
             Assert.Equal("unresolved", payload.ShapeIdentityStatus);
             Assert.Equal("unverified", payload.VertexOrderStatus);
             var sourceShape = Assert.Single(SkyrimSseNifShapeReader.Read(

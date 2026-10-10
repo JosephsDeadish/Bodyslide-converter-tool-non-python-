@@ -8,7 +8,14 @@ internal sealed record ResolvedBodySlideSliders(
     string Gender,
     SourceMorphQualityMetrics? SourceMorphQuality = null,
     IReadOnlyDictionary<string, SourceMorphPayloadVariants>? ReusableMorphPayloads = null,
-    SourceAssetSupportMetrics? SourceAssetSupport = null);
+    SourceAssetSupportMetrics? SourceAssetSupport = null,
+    IReadOnlyDictionary<string, OspSliderControlSettings>? SliderControlSettings = null);
+
+internal sealed record OspSliderControlSettings(
+    double? DefaultValue,
+    double? SmallValue,
+    double? BigValue,
+    bool Invert);
 
 internal sealed record FallbackBodySlideInference(
     string? BodyName,
@@ -159,7 +166,8 @@ internal static class BodySlideSourceProjectSupport
             sourceSupport.BuildAssetSupport(
                 baseSliders.Count > 0 && sourceSupport.Sliders.Count == 0,
                 HasReferenceBodyAssets(armor.BodyReferenceFiles) || sourceSupport.HasReferenceAssets,
-                fallbackInference));
+                fallbackInference),
+            sourceSupport.SliderControlSettings);
     }
 
     public static FallbackBodySlideInference? InferFallbackSupport(
@@ -271,6 +279,8 @@ internal static class BodySlideSourceProjectSupport
         var hasBsdPayloads = false;
         var hasOsdPayloads = false;
         var unsupportedOspSemantics = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sliderControlSettings = new Dictionary<string, OspSliderControlSettings>(StringComparer.OrdinalIgnoreCase);
+        var ambiguousSliderControlSettings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var discoveryStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var discovery = EnumerateAssociatedBodySlideFiles(armor, cancellationToken);
         var ospOsdShapeTargets = await ReadOspOsdShapeTargetsAsync(
@@ -291,6 +301,22 @@ internal static class BodySlideSourceProjectSupport
                 sliders.AddRange(fromOsp.Sliders);
                 zapSliders.AddRange(fromOsp.ZapSliders);
                 unsupportedOspSemantics.UnionWith(fromOsp.UnsupportedOspSemantics ?? []);
+                foreach (var (name, settings) in fromOsp.SliderControlSettings ?? new Dictionary<string, OspSliderControlSettings>())
+                {
+                    if (ambiguousSliderControlSettings.Contains(name))
+                    {
+                        continue;
+                    }
+                    if (sliderControlSettings.TryGetValue(name, out var existing) && existing != settings)
+                    {
+                        sliderControlSettings.Remove(name);
+                        ambiguousSliderControlSettings.Add(name);
+                    }
+                    else
+                    {
+                        sliderControlSettings[name] = settings;
+                    }
+                }
             }
             else if (extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase))
             {
@@ -318,7 +344,8 @@ internal static class BodySlideSourceProjectSupport
                             .Select(candidate =>
                             {
                                 if (candidate.ReusablePayload is null ||
-                                    !targetsBySlider.TryGetValue(candidate.Name, out var shapeTargets) ||
+                                    string.IsNullOrWhiteSpace(candidate.ReusablePayload.SourceMorphRecordName) ||
+                                    !targetsBySlider.TryGetValue(candidate.ReusablePayload.SourceMorphRecordName, out var shapeTargets) ||
                                     shapeTargets.Count != 1 ||
                                     candidate.ReusablePayload.VertexCount > shapeTargets.Single().VertexCount)
                                 {
@@ -397,7 +424,12 @@ internal static class BodySlideSourceProjectSupport
             discovery.HasReferenceAssets,
             discoveryStopwatch.ElapsedMilliseconds,
             discovery.Files.Count,
-            unsupportedOspSemantics.Order(StringComparer.OrdinalIgnoreCase).ToArray());
+            unsupportedOspSemantics
+                .Concat(ambiguousSliderControlSettings.Count > 0 ? ["ambiguous-slider-control-settings"] : [])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            sliderControlSettings);
     }
 
     private static BodySlideDiscoveryResult EnumerateAssociatedBodySlideFiles(ImportedArmor armor, CancellationToken cancellationToken)
@@ -558,7 +590,7 @@ internal static class BodySlideSourceProjectSupport
                             }
 
                             var osdReference = dataReference[..separator];
-                            var morphName = NormalizeSliderFileName(dataReference[(separator + 1)..]);
+                            var morphName = dataReference[(separator + 1)..].Trim();
                             var osdPath = ResolveUniqueLinkedAssetPath(probe, osdReference, ".osd");
                             if (string.IsNullOrWhiteSpace(morphName) ||
                                 osdPath is null ||
@@ -1386,6 +1418,8 @@ internal static class BodySlideSourceProjectSupport
             var document = await XDocument.LoadAsync(stream, LoadOptions.None, cancellationToken);
             var sliders = new List<SourceSliderCandidate>();
             var zapSliders = new List<SourceSliderCandidate>();
+            var sliderControlSettings = new Dictionary<string, OspSliderControlSettings>(StringComparer.OrdinalIgnoreCase);
+            var ambiguousSliderControlSettings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             var sets = document.Descendants("SliderSet").Where(set => MatchesOutput(set, meshFiles)).ToArray();
             var unsupportedSemantics = sets
@@ -1402,6 +1436,20 @@ internal static class BodySlideSourceProjectSupport
                 if (!IsLikelySliderName(name))
                 {
                     continue;
+                }
+
+                var settings = ParseSliderControlSettings(sliderElement);
+                if (!ambiguousSliderControlSettings.Contains(name!))
+                {
+                    if (sliderControlSettings.TryGetValue(name!, out var existing) && existing != settings)
+                    {
+                        sliderControlSettings.Remove(name!);
+                        ambiguousSliderControlSettings.Add(name!);
+                    }
+                    else
+                    {
+                        sliderControlSettings[name!] = settings;
+                    }
                 }
 
                 var isZap = IsTruthy(sliderElement.Attribute("zap")?.Value);
@@ -1422,7 +1470,11 @@ internal static class BodySlideSourceProjectSupport
                 HasTriPayloads: false,
                 HasBsdPayloads: false,
                 HasOsdPayloads: false,
-                UnsupportedOspSemantics: unsupportedSemantics);
+                UnsupportedOspSemantics: unsupportedSemantics
+                    .Concat(ambiguousSliderControlSettings.Count > 0 ? ["ambiguous-slider-control-settings"] : [])
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
+                SliderControlSettings: sliderControlSettings);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
@@ -1482,18 +1534,18 @@ internal static class BodySlideSourceProjectSupport
             }
 
             if (new[] { "default", "small", "big" }.Any(attributeName =>
-                    double.TryParse(
-                        slider.Attribute(attributeName)?.Value,
-                        System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        out var value) && Math.Abs(value) > 0.000001d))
+                    slider.Attribute(attributeName) is { } attribute &&
+                    !TryParseFiniteSliderValue(attribute.Value, out _)))
             {
-                semantics.Add("nonzero-slider-defaults");
+                semantics.Add("invalid-slider-control-values");
             }
 
-            if (IsTruthy(slider.Attribute("invert")?.Value))
+            var invertValue = slider.Attribute("invert")?.Value;
+            if (!string.IsNullOrWhiteSpace(invertValue) &&
+                !new[] { "true", "false", "1", "0", "yes", "no" }
+                    .Contains(invertValue.Trim(), StringComparer.OrdinalIgnoreCase))
             {
-                semantics.Add("inverted-sliders");
+                semantics.Add("invalid-slider-control-values");
             }
 
             if (IsTruthy(slider.Attribute("uv")?.Value))
@@ -1593,6 +1645,34 @@ internal static class BodySlideSourceProjectSupport
         }
 
         return semantics.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static OspSliderControlSettings ParseSliderControlSettings(XElement slider)
+    {
+        double? ReadValue(string name)
+        {
+            var attribute = slider.Attribute(name);
+            return attribute is not null && TryParseFiniteSliderValue(attribute.Value, out var value)
+                ? value
+                : null;
+        }
+
+        return new OspSliderControlSettings(
+            ReadValue("default"),
+            ReadValue("small"),
+            ReadValue("big"),
+            IsTruthy(slider.Attribute("invert")?.Value));
+    }
+
+    private static bool TryParseFiniteSliderValue(string? rawValue, out double value)
+    {
+        value = 0;
+        return rawValue is null ||
+               (double.TryParse(
+                    rawValue,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out value) && double.IsFinite(value));
     }
 
     private static bool IsExternalDataFolder(string value)
@@ -1897,7 +1977,8 @@ internal static class BodySlideSourceProjectSupport
                 IsHighWeightVariant(morph.Name),
                 "osd",
                 out var candidate,
-                Path.GetFileName(filePath)))
+                Path.GetFileName(filePath),
+                sourceMorphRecordName: morph.Name))
             {
                 var morphKey = $"{candidate.Name.ToUpperInvariant()}\u001f{candidate.ReusablePayload!.IsHighWeight}";
                 extracted.Add(duplicateMorphKeys.Contains(morphKey)
@@ -1956,7 +2037,8 @@ internal static class BodySlideSourceProjectSupport
         string payloadKind,
         out SourceSliderCandidate candidate,
         string? sourceAssetName = null,
-        string? sourceShapeName = null)
+        string? sourceShapeName = null,
+        string? sourceMorphRecordName = null)
     {
         var isZap = IsLikelyZapSliderName(sliderName);
         if (string.IsNullOrWhiteSpace(sliderName))
@@ -1986,7 +2068,8 @@ internal static class BodySlideSourceProjectSupport
                 sourceAssetName,
                 ShapeIdentityStatus: "unresolved",
                 VertexOrderStatus: "unverified",
-                SourceShapeName: sourceShapeName));
+                SourceShapeName: sourceShapeName,
+                SourceMorphRecordName: sourceMorphRecordName));
         return true;
     }
 
@@ -2127,7 +2210,8 @@ internal static class BodySlideSourceProjectSupport
         bool HasReferenceAssets = false,
         long DiscoveryMilliseconds = 0,
         int DiscoveredFileCount = 0,
-        IReadOnlyList<string>? UnsupportedOspSemantics = null)
+        IReadOnlyList<string>? UnsupportedOspSemantics = null,
+        IReadOnlyDictionary<string, OspSliderControlSettings>? SliderControlSettings = null)
     {
         public SourceMorphQualityMetrics? SourceMorphQuality => BuildSourceMorphQuality(Sliders, ZapSliders);
 

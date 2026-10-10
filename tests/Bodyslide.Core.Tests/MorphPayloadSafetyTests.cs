@@ -49,6 +49,28 @@ public sealed class MorphPayloadSafetyTests
         Assert.False(OsdMorphReader.TryRead(Osd(index, 1f), out _));
     }
 
+    [Fact]
+    public void OsdRejectsDuplicateVertexIndexesWithinOneMorph()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8);
+        writer.Write("OSD\0"u8);
+        writer.Write(1);
+        writer.Write(1);
+        writer.Write((byte)1);
+        writer.Write((byte)'A');
+        writer.Write((ushort)2);
+        for (var i = 0; i < 2; i++)
+        {
+            writer.Write(3);
+            writer.Write(i + 1f);
+            writer.Write(0f);
+            writer.Write(0f);
+        }
+
+        Assert.False(OsdMorphReader.TryRead(stream.ToArray(), out _));
+    }
+
     [Theory]
     [InlineData(float.NaN)]
     [InlineData(float.PositiveInfinity)]

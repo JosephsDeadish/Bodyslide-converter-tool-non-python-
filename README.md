@@ -121,13 +121,16 @@ semantics. Conversion quality reports the high-severity
 `bodyslide-osd-morphs-withheld` issue and the withheld-record count. The project is
 not build-ready; missing, unreadable, unsupported, or unverified source data must
 not be guessed into a successful OSD build.
-Matched source OSP settings that the exporter reconstructs differently—including
-custom slider-set/path options, source output-path relocation, defaults, zaps,
-weight-output mode and nested `<Low>`/`<High>` slider ranges, references, and
-seam/normal flags—are listed in
-`SourceAssetSupport.UnsupportedOspSemantics` and produce the medium-severity
-`source-osp-semantics-not-preserved` validation issue. These diagnostics identify
-settings needing review; they do not claim those settings were preserved.
+For unambiguous matched sliders, the exporter carries across finite `default`,
+`small`, and `big` values plus the `invert` flag; the slider-level zap flag is
+retained as well. Conflicting controls for the same slider are withheld and
+reported. Other matched source OSP settings that the exporter rebuilds or does not
+understand—including custom set/path options, output-path relocation, nested
+`<Low>`/`<High>` ranges, UV data, weight-output mode, references, and seam/normal
+flags—are listed in `SourceAssetSupport.UnsupportedOspSemantics` and produce the
+medium-severity `source-osp-semantics-not-preserved` issue. Invalid control values
+are also reported. These diagnostics identify settings needing review; they do not
+claim the project is otherwise compatible.
 TRI files are a separate in-game morph format, not substitutes for OSD shape
 deltas. The converter intentionally withholds generated TRI files because its
 current morph path cannot prove target-shape identity and vertex-order
@@ -330,13 +333,26 @@ single-level header, and derivation checks cancellation during processing.
 Morph diagnostics in `morphs.json` and the conversion manifest describe parsed
 source payloads as candidates, recording the source asset filename and explicit
 shape-identity/vertex-order verification states without duplicating per-vertex
-arrays. Explicit OSP `Data` links to OSD records retain a declared source shape
+arrays. Explicit OSP `Data` links to the exact OSD record name retain a declared source shape
 only when that exact shape exists in the associated supported source NIF and the
 record's represented index span fits its vertex count; ambiguous or out-of-range
 links are not associated. This source-side association does not establish a match
 to the exported target, and source readers still mark identity unresolved and
 vertex order unverified, so exact vertex-count matches are not enough to reuse a payload. Sparse
-TRI/OSD payloads retain only their represented index span; nearby NIFs are not used
+The shape-aware NIF reader currently accepts only little-endian Skyrim SE
+`20.2.0.7` / user-version `12` / stream-version `100` files with named, unskinned
+inline `BSTriShape` blocks and position-bearing vertex descriptors. It returns
+each shape's own ordered positions and triangle indexes, while preserving the
+original vertex stride for the writer. Unsupported profiles, skinned shapes,
+other geometry blocks, invalid indices, and malformed fields fail closed with
+specific parser diagnostics. This is not general NIF support and synthetic fixtures
+do not prove compatibility with real game assets.
+
+Body TRI `PIRT` payloads retain separate named shapes and per-shape morphs; duplicate
+shape names, duplicate morph names within a shape, duplicate sparse vertex indexes,
+and malformed trailing data are rejected. FaceGen `FRTRI002`/`FRTRI003` payloads
+have no corresponding named BodySlide shape association. OSD sparse records reject
+duplicate vertex indexes. TRI/OSD payloads retain only their represented index span; nearby NIFs are not used
 to inflate that span, and it must not be mistaken for a complete shape vertex count.
 Topology retargeting is also withheld unless an explicit retarget map is verified.
 Generated BodySlide OSD morph records are currently withheld because authored
@@ -462,15 +478,20 @@ files total roughly 1.4 MB, so a large output requires a byte inventory of the
 actual NIF, texture, morph and archive payloads before attributing it to JSON.
 
 Linked OSP discovery now selects matching output projects before resolving their
-DataFolders and morph payloads, with project-scoped cache keys. This prevents
-cross-project payload reuse but does not establish per-shape ownership within a
-selected project. Original multi-project support assets remain preserved.
-Matched source OSPs are audited for nonzero slider defaults, inversion/UV flags,
-source slider-data links, shape/reference and zap mappings, custom base shapes,
+DataFolders and morph payloads, with project-scoped cache keys. OSD association
+requires the exact OSP-linked record name and target shape in a uniquely resolved
+supported source NIF; duplicate sparse indexes and conflicting OSP settings fail
+closed. This establishes only source-side ownership and does not prove source to
+target vertex correspondence. Original multi-project support assets remain preserved.
+Matched source OSPs preserve finite slider `default`/`small`/`big` values, the
+`invert` flag, and slider-level zap classification when each matched slider has
+unambiguous control settings. Remaining audited settings include UV flags, source
+slider-data links, shape/reference and zap-target mappings, custom base shapes,
 non-current OSP versions, external DataFolders, seam/lock-normal settings,
-output options, weight-variant mode, and unrecognized set/slider fields. These
-settings are not silently copied: `SourceAssetSupport.UnsupportedOspSemantics` records the detected categories,
+output options, weight-variant mode, and unrecognized set/slider fields. Settings
+that are rebuilt or unsupported are recorded in `SourceAssetSupport.UnsupportedOspSemantics`,
 and `conversion-quality.json` adds `source-osp-semantics-not-preserved` for review.
+Conflicting controls are not copied; malformed control values are reported.
 Detection is evidence that a setting was present, not proof the generated project
 preserves its behavior; absence of a category is not a general OSP compatibility claim.
 
