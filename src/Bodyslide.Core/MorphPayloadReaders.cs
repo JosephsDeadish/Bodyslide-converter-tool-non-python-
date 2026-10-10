@@ -408,6 +408,7 @@ internal static class TriMorphReader
             }
 
             var shapeMorphs = new List<(string Name, List<(int Index, float X, float Y, float Z)> Sparse)>(morphCount);
+            var morphNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var shapeVertexCount = 0;
             for (var morphIndex = 0; morphIndex < morphCount; morphIndex++)
             {
@@ -423,6 +424,10 @@ internal static class TriMorphReader
                 }
 
                 var morphName = Encoding.UTF8.GetString(bytes[offset..(offset + morphNameLength)]);
+                if (!morphNames.Add(morphName))
+                {
+                    return false;
+                }
                 offset += morphNameLength;
                 var multiplier = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]));
                 offset += 4;

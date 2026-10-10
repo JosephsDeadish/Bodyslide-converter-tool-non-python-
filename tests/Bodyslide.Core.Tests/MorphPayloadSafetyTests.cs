@@ -145,6 +145,18 @@ public sealed class MorphPayloadSafetyTests
     }
 
     [Fact]
+    public void BodyTriRejectsDuplicateMorphNamesWithinAShapeButAllowsThemAcrossShapes()
+    {
+        Assert.False(TriMorphReader.TryRead(BodyTriWithMorphNames("Torso", "Waist", "waist"), out _));
+
+        Assert.True(TriMorphReader.TryRead(
+            BodyTriWithShapes(("Torso", "Waist", 0, 1), ("Hands", "Waist", 1, 1)),
+            out var payload));
+        Assert.Equal("Waist", Assert.Single(payload!.Shapes[0].Morphs).Name);
+        Assert.Equal("Waist", Assert.Single(payload.Shapes[1].Morphs).Name);
+    }
+
+    [Fact]
     public void ValidFiniteOsdRemainsReadable()
     {
         Assert.True(OsdMorphReader.TryRead(Osd(5, 0.25f), out var payload));
@@ -266,6 +278,27 @@ public sealed class MorphPayloadSafetyTests
             writer.Write(x);
             writer.Write((short)0);
             writer.Write((short)0);
+        }
+        return stream.ToArray();
+    }
+
+    private static byte[] BodyTriWithMorphNames(string shapeName, params string[] morphNames)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8);
+        writer.Write("PIRT"u8);
+        writer.Write((ushort)1);
+        var encodedShapeName = Encoding.UTF8.GetBytes(shapeName);
+        writer.Write((byte)encodedShapeName.Length);
+        writer.Write(encodedShapeName);
+        writer.Write((ushort)morphNames.Length);
+        foreach (var morphName in morphNames)
+        {
+            var encodedMorphName = Encoding.UTF8.GetBytes(morphName);
+            writer.Write((byte)encodedMorphName.Length);
+            writer.Write(encodedMorphName);
+            writer.Write(1f);
+            writer.Write((ushort)0);
         }
         return stream.ToArray();
     }
