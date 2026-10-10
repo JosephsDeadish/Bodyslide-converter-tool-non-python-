@@ -329,7 +329,8 @@ Morph diagnostics in `morphs.json` and the conversion manifest describe parsed
 source payloads as candidates, recording the source asset filename and explicit
 shape-identity/vertex-order verification states without duplicating per-vertex
 arrays. Explicit OSP `Data` links to OSD records retain a declared source shape
-only when that exact shape exists in the associated supported source NIF; ambiguous
+only when that exact shape exists in the associated supported source NIF and the
+record's represented index span fits its vertex count; ambiguous or out-of-range
 links are not associated. This source-side association does not establish a match
 to the exported target, and source readers still mark identity unresolved and
 vertex order unverified, so exact vertex-count matches are not enough to reuse a payload. Sparse
