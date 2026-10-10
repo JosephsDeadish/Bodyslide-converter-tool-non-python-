@@ -84,7 +84,7 @@ public sealed class BodySlideBuildPathTests
                 [firstMesh, secondMesh]);
 
             Assert.Empty(result.UnresolvedSliderSets);
-            Assert.Equal(["source_001.nif", "source_002.nif"], result.References.Select(static reference => reference.FileName));
+            Assert.Equal(new[] { "shared_0.nif", "shared_0__2.nif" }, result.References.Select(static reference => reference.FileName));
             Assert.Equal(
                 new[] { "first mesh", "second mesh" },
                 result.References.Select(reference => System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(reference.SourcePath))));
@@ -92,14 +92,14 @@ public sealed class BodySlideBuildPathTests
                 .Descendants("SliderSet")
                 .Select(set => (string?)set.Element("SourceFile"))
                 .ToArray();
-            Assert.Equal(new[] { "source_001.nif", "source_002.nif" }, sourceFiles);
+            Assert.Equal(new[] { "shared_0.nif", "shared_0__2.nif" }, sourceFiles);
 
             var shapeExport = LocalExportService.BuildShapeLinkedOsdExport(
                 result.OspXml,
                 new Dictionary<string, IReadOnlyList<SkyrimSseNifShape>>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["source_001.nif"] = [new("ArmorAShape", [new(0, 0, 0)], [], 12)],
-                    ["source_002.nif"] = [new("ArmorBShape", [new(0, 0, 0)], [], 12)]
+                    ["shared_0.nif"] = [new("ArmorAShape", [new(0, 0, 0)], [], 12)],
+                    ["shared_0__2.nif"] = [new("ArmorBShape", [new(0, 0, 0)], [], 12)]
                 });
             var shapeNames = XDocument.Parse(shapeExport.OspXml)
                 .Descendants("SliderSet")

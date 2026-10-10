@@ -40498,7 +40498,29 @@ internal sealed class LocalExportService(
             matches.Add(fullPath);
         }
 
+        var stagedFileNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var references = new List<(string FileName, string SourcePath)>();
+        var usedFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (fileName, paths) in writtenByFileName.OrderBy(static item => item.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var orderedPaths = paths.OrderBy(
+                path => Path.GetRelativePath(outputRoot, path),
+                StringComparer.OrdinalIgnoreCase);
+            var collisionIndex = 0;
+            foreach (var path in orderedPaths)
+            {
+                var stagedFileName = fileName;
+                while (!usedFileNames.Add(stagedFileName))
+                {
+                    collisionIndex++;
+                    stagedFileName = $"{Path.GetFileNameWithoutExtension(fileName)}__{collisionIndex + 1}{Path.GetExtension(fileName)}";
+                }
+
+                stagedFileNames[path] = stagedFileName;
+                references.Add((stagedFileName, path));
+            }
+        }
+
         var unresolved = new List<string>();
         var sliderSets = document.Descendants()
             .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase))
@@ -40548,13 +40570,12 @@ internal sealed class LocalExportService(
                 }
             }
 
-            if (sourcePath is null)
+            if (sourcePath is null || !stagedFileNames.TryGetValue(sourcePath, out var referenceFileName))
             {
                 unresolved.Add(setName);
                 continue;
             }
 
-            var referenceFileName = $"source_{index + 1:D3}.nif";
             var sourceElement = sliderSet.Elements()
                 .FirstOrDefault(static element => string.Equals(element.Name.LocalName, "SourceFile", StringComparison.OrdinalIgnoreCase));
             if (sourceElement is null)
@@ -40563,7 +40584,6 @@ internal sealed class LocalExportService(
                 sliderSet.AddFirst(sourceElement);
             }
             sourceElement.Value = referenceFileName;
-            references.Add((referenceFileName, sourcePath));
         }
 
         var xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" + Environment.NewLine
