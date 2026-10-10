@@ -23865,6 +23865,21 @@ internal sealed class LocalExportService(
         var relativeSegments = meshesIndex >= 0
             ? sourceSegments.Skip(meshesIndex + 1).ToArray()
             : [Path.GetFileName(sourceMesh)];
+        var outputSegments = Path.GetFullPath(nifDirectory)
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        var outputMeshesIndex = Array.FindLastIndex(outputSegments, static segment =>
+            segment.Equals("meshes", StringComparison.OrdinalIgnoreCase));
+        if (outputMeshesIndex >= 0)
+        {
+            var outputContext = outputSegments.Skip(outputMeshesIndex + 1).ToArray();
+            if (outputContext.Length > 0 &&
+                relativeSegments.Length > outputContext.Length &&
+                relativeSegments.Take(outputContext.Length)
+                    .SequenceEqual(outputContext, StringComparer.OrdinalIgnoreCase))
+            {
+                relativeSegments = relativeSegments.Skip(outputContext.Length).ToArray();
+            }
+        }
         if (relativeSegments.Length == 0 ||
             relativeSegments.Any(static segment => string.IsNullOrWhiteSpace(segment) || segment is "." or ".."))
         {
