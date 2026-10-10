@@ -48,6 +48,9 @@ public sealed class SkyrimSseNifShapeReaderTests
         Assert.True(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, identicalTarget, out var identicalEvidence));
         Assert.StartsWith("exact-ordered-shape-geometry-and-topology-sha256:", evidence, StringComparison.Ordinal);
         Assert.Equal(evidence, identicalEvidence);
+        Assert.Equal(
+            SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(source),
+            SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(target));
     }
 
     [Fact]
@@ -71,6 +74,12 @@ public sealed class SkyrimSseNifShapeReaderTests
         Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, reorderedVertices, out _));
         Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, differentTopology, out _));
         Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, negativeZero, out _));
+        Assert.NotEqual(
+            SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(source),
+            SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(reorderedVertices));
+        Assert.NotEqual(
+            SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(source),
+            SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(negativeZero));
     }
 
     [Fact]

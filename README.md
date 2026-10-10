@@ -341,6 +341,10 @@ Generated BodySlide OSD morph records are currently withheld because authored
 deformation provenance, shape identity, and vertex order are not verified. Any
 synthesized morph deltas used elsewhere remain unverified and are not authored
 BodySlide OSD data; generated TRI files are withheld for the same provenance gap.
+Explicitly linked source OSD candidates retain a fingerprint of the associated
+source NIF shape's ordered vertex positions. This is source-only evidence: target
+fingerprints are not yet produced, so it does not verify correspondence or enable
+source morph reuse.
 Readable BodySlide projects no longer automatically force every pack texture into
 each armor export: their resolved input NIFs participate in shader dependency
 checks, including `ShapeData`/`DataFolder` references. Morph-only OSD files do not

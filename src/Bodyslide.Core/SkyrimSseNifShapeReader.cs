@@ -341,6 +341,26 @@ internal static class SkyrimSseNifShapeReader
 
 internal static class SkyrimSseNifShapeCorrespondence
 {
+    public static string ComputeVertexOrderFingerprint(SkyrimSseNifShape shape)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Span<byte> value = stackalloc byte[sizeof(uint)];
+        hash.AppendData("SlideSmith.OrderedVertexPositions.v1\0"u8);
+        BinaryPrimitives.WriteInt32LittleEndian(value, shape.Vertices.Count);
+        hash.AppendData(value);
+        foreach (var vertex in shape.Vertices)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(value, BitConverter.SingleToInt32Bits(vertex.X));
+            hash.AppendData(value);
+            BinaryPrimitives.WriteInt32LittleEndian(value, BitConverter.SingleToInt32Bits(vertex.Y));
+            hash.AppendData(value);
+            BinaryPrimitives.WriteInt32LittleEndian(value, BitConverter.SingleToInt32Bits(vertex.Z));
+            hash.AppendData(value);
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
     public static bool TryVerifyExactOrderedMatch(
         SkyrimSseNifShape source,
         SkyrimSseNifShape target,

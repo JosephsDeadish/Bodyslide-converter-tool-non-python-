@@ -72,7 +72,11 @@ internal static class BodySlideSourceProjectSupport
         IReadOnlyList<string> ReferencedPaths,
         IReadOnlyList<string>? DataFolders = null);
 
-    private sealed record OspOsdShapeTarget(string Name, int VertexCount, string SourceNifPath);
+    private sealed record OspOsdShapeTarget(
+        string Name,
+        int VertexCount,
+        string SourceNifPath,
+        string VertexOrderFingerprint);
 
     public static Task<ResolvedBodySlideSliders> ResolveAsync(
         ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
@@ -325,7 +329,8 @@ internal static class BodySlideSourceProjectSupport
                                 {
                                        ReusablePayload = candidate.ReusablePayload with
                                        {
-                                       SourceShapeName = shapeTargets.Single().Name
+                                       SourceShapeName = shapeTargets.Single().Name,
+                                       SourceVertexOrderFingerprint = shapeTargets.Single().VertexOrderFingerprint
                                        }
                                 };
                             })
@@ -578,7 +583,8 @@ internal static class BodySlideSourceProjectSupport
                             shapeTargets.Add(new OspOsdShapeTarget(
                                 sourceShape.Name,
                                 sourceShape.Vertices.Count,
-                                Path.GetFullPath(sourcePath)));
+                                Path.GetFullPath(sourcePath),
+                                SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(sourceShape)));
                         }
                     }
                 }

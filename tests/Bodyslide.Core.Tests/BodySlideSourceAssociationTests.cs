@@ -187,6 +187,12 @@ public sealed class BodySlideSourceAssociationTests
             Assert.Equal("Torso", payload.SourceShapeName);
             Assert.Equal("unresolved", payload.ShapeIdentityStatus);
             Assert.Equal("unverified", payload.VertexOrderStatus);
+            var sourceShape = Assert.Single(SkyrimSseNifShapeReader.Read(
+                SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso")).Shapes);
+            Assert.Equal(
+                SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(sourceShape),
+                payload.SourceVertexOrderFingerprint);
+            Assert.Null(payload.TargetVertexOrderFingerprint);
         }
         finally { Directory.Delete(root, true); }
     }
