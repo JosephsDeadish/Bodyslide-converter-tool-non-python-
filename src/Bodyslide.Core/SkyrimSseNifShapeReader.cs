@@ -9,7 +9,8 @@ internal sealed record SkyrimSseNifShape(
     IReadOnlyList<MeshVertex> Vertices,
     IReadOnlyList<ushort> TriangleIndices,
     int VertexStride,
-    int VertexDataOffset = -1);
+    int VertexDataOffset = -1,
+    bool IsSkinned = false);
 
 internal sealed record SkyrimSseNifShapeReadResult(
     bool Supported,
@@ -93,7 +94,10 @@ internal static class SkyrimSseNifShapeReader
         try
         {
             var shapes = ReadSupportedShapes(bytes);
-            return new SkyrimSseNifShapeReadResult(true, "supported-unskinned-bstrishape", shapes);
+            var diagnostic = shapes.Any(static shape => shape.IsSkinned)
+                ? "supported-skinned-bstrishape-position-index-only"
+                : "supported-unskinned-bstrishape";
+            return new SkyrimSseNifShapeReadResult(true, diagnostic, shapes);
         }
         catch (InvalidDataException exception)
         {
@@ -210,7 +214,7 @@ internal static class SkyrimSseNifShapeReader
 
             if (string.Equals(typeName, "BSTriShape", StringComparison.Ordinal))
             {
-                var shape = ReadBSTriShape(bytes, blockOffset, blockEnd, strings);
+                var shape = ReadBSTriShape(bytes, blockOffset, blockEnd, strings, blockTypes, blockTypeIndexes);
                 if (!shapeNames.Add(shape.Name))
                 {
                     throw new InvalidDataException($"duplicate-shape-name:{shape.Name}");
@@ -234,7 +238,9 @@ internal static class SkyrimSseNifShapeReader
         ReadOnlySpan<byte> bytes,
         int blockStart,
         int blockEnd,
-        IReadOnlyList<string> strings)
+        IReadOnlyList<string> strings,
+        IReadOnlyList<string> blockTypes,
+        IReadOnlyList<ushort> blockTypeIndexes)
     {
         var offset = blockStart;
         var nameIndex = ReadUInt32(bytes[..blockEnd], ref offset);
@@ -252,9 +258,14 @@ internal static class SkyrimSseNifShapeReader
         Skip(bytes[..blockEnd], ref offset, NiAvObjectFieldBytes + BoundFieldBytes);
         var skinInstance = ReadInt32(bytes[..blockEnd], ref offset);
         Skip(bytes[..blockEnd], ref offset, 2 * sizeof(int));
-        if (skinInstance != -1)
+        var isSkinned = skinInstance != -1;
+        if (isSkinned &&
+            (skinInstance < 0 ||
+             skinInstance >= blockTypeIndexes.Count ||
+             blockTypeIndexes[skinInstance] >= blockTypes.Count ||
+             !IsSupportedSkinInstanceType(blockTypes[blockTypeIndexes[skinInstance]])))
         {
-            throw new InvalidDataException($"unsupported-skinned-shape:{strings[(int)nameIndex]}");
+            throw new InvalidDataException($"unsupported-skin-instance-reference:{strings[(int)nameIndex]}");
         }
 
         var descriptor = ReadUInt64(bytes[..blockEnd], ref offset);
@@ -305,8 +316,18 @@ internal static class SkyrimSseNifShapeReader
             triangleIndexes[i] = index;
         }
 
-        return new SkyrimSseNifShape(strings[(int)nameIndex], vertices, triangleIndexes, vertexStride, vertexDataOffset);
+        return new SkyrimSseNifShape(
+            strings[(int)nameIndex],
+            vertices,
+            triangleIndexes,
+            vertexStride,
+            vertexDataOffset,
+            isSkinned);
     }
+
+    private static bool IsSupportedSkinInstanceType(string typeName) =>
+        string.Equals(typeName, "NiSkinInstance", StringComparison.Ordinal) ||
+        string.Equals(typeName, "BSDismemberSkinInstance", StringComparison.Ordinal);
 
     private static bool IsUnsupportedGeometryType(string typeName) =>
         !string.Equals(typeName, "BSTriShape", StringComparison.Ordinal) &&

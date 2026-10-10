@@ -325,13 +325,52 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
-    public void RejectsSkinnedShapesRatherThanTreatingTheirInlinePayloadAsComplete()
+    public void ReadsSkinnedShapePositionsAndTopologyWithoutClaimingSkinPayloadSupport()
     {
         var result = SkyrimSseNifShapeReader.Read(CreateNif(
             [new TestShape("SkinnedBody", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)], SkinInstance: 1)]));
 
+        Assert.True(result.Supported, result.Diagnostic);
+        Assert.Equal("supported-skinned-bstrishape-position-index-only", result.Diagnostic);
+        var shape = Assert.Single(result.Shapes);
+        Assert.True(shape.IsSkinned);
+        Assert.Equal(new MeshVertex(1f, 0f, 0f), shape.Vertices[1]);
+        Assert.Equal(new ushort[] { 0, 1, 2 }, shape.TriangleIndices);
+    }
+
+    [Theory]
+    [InlineData(17, "NiSkinInstance", "unsupported-skin-instance-reference:SkinnedBody")]
+    [InlineData(1, "NiNode", "unsupported-skin-instance-reference:SkinnedBody")]
+    public void RejectsInvalidOrUnsupportedSkinInstanceReferences(int skinInstance, string skinBlockType, string diagnostic)
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("SkinnedBody", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)], SkinInstance: skinInstance)],
+            skinBlockType: skinBlockType));
+
         Assert.False(result.Supported);
-        Assert.Equal("unsupported-skinned-shape:SkinnedBody", result.Diagnostic);
+        Assert.Equal(diagnostic, result.Diagnostic);
+    }
+
+    [Fact]
+    public void WriterLeavesSkinnedShapesUnchangedUntilSkinAwareWritesAreSupported()
+    {
+        var source = CreateNif(
+            [new TestShape("SkinnedBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)], SkinInstance: 1)]);
+
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        Assert.Same(source, transformed);
     }
 
     [Fact]
@@ -384,22 +423,31 @@ public sealed class SkyrimSseNifShapeReaderTests
     private static byte[] CreateNif(
         IReadOnlyList<TestShape> shapes,
         uint streamVersion = 100,
-        string blockType = "BSTriShape")
+        string blockType = "BSTriShape",
+        string skinBlockType = "NiSkinInstance")
     {
-        var blockBytes = shapes
+        var shapeBlockBytes = shapes
             .Select((shape, index) => CreateShapeBlock(shape with { NameIndex = index }))
             .ToArray();
+        var hasSkinInstance = shapes.Any(static shape => shape.SkinInstance >= 0);
+        var blockBytes = hasSkinInstance
+            ? shapeBlockBytes.Append(Array.Empty<byte>()).ToArray()
+            : shapeBlockBytes;
+        var blockTypes = hasSkinInstance
+            ? new[] { blockType, skinBlockType }
+            : [blockType];
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write(Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
         writer.Write(0x14020007u);
         writer.Write((byte)1);
         writer.Write(12u);
-        writer.Write((uint)shapes.Count);
+        writer.Write((uint)blockBytes.Length);
         writer.Write(streamVersion);
-        writer.Write(1u);
-        WriteSizedString(writer, blockType);
-        foreach (var _ in shapes) writer.Write((ushort)0);
+        writer.Write((uint)blockTypes.Length);
+        foreach (var type in blockTypes) WriteSizedString(writer, type);
+        for (var i = 0; i < shapes.Count; i++) writer.Write((ushort)0);
+        if (hasSkinInstance) writer.Write((ushort)1);
         foreach (var block in blockBytes) writer.Write((uint)block.Length);
         writer.Write((uint)shapes.Count);
         writer.Write((uint)shapes.Max(shape => Encoding.UTF8.GetByteCount(shape.Name)));
