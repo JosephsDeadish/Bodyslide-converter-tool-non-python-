@@ -219,8 +219,8 @@ public sealed class BodySlideSourceAssociationTests
                 new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
 
             Assert.Equal(new OspSliderControlSettings(null, 0.1, 0.9, true), result.SliderControlSettings!["Fit"]);
-            Assert.Contains("slider-weight-ranges-normalized", result.SourceAssetSupport!.UnsupportedOspSemantics);
-            Assert.DoesNotContain("slider-weight-ranges-rebuilt", result.SourceAssetSupport.UnsupportedOspSemantics);
+            Assert.DoesNotContain("slider-weight-ranges-rebuilt", result.SourceAssetSupport!.UnsupportedOspSemantics);
+            Assert.DoesNotContain("slider-weight-range-options", result.SourceAssetSupport.UnsupportedOspSemantics);
 
             var target = new BodySlideMeshTarget(
                 "Project", "Project", "source.nif", "meshes\\armor\\", "jacket_0.nif", "jacket_1.nif");

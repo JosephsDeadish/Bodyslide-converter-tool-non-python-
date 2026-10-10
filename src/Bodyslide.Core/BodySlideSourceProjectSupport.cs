@@ -1521,9 +1521,10 @@ internal static class BodySlideSourceProjectSupport
             if (sliderRangeElements.Length > 0)
             {
                 var hasSimpleRanges = TryReadSimpleSliderRanges(slider, out _, out _, out var hasConflictingRanges);
-                semantics.Add(hasSimpleRanges
-                    ? "slider-weight-ranges-normalized"
-                    : "slider-weight-ranges-rebuilt");
+                if (!hasSimpleRanges)
+                {
+                    semantics.Add("slider-weight-ranges-rebuilt");
+                }
                 if (hasConflictingRanges)
                 {
                     semantics.Add("ambiguous-slider-control-settings");
