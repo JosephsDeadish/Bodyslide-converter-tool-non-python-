@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="GentlemanHarnessPhysics">
+  <bone name="NPC L Pec" />
+  <bone name="NPC R Pec" />
+  <bone name="NPC Belly" />
+  <bone name="TNG Genitals" />
+  <bone name="TNG Shaft" />
+  <bone name="TNG Glans" />
+  <bone name="TNG Balls" />
+  <bone name="HDT Mouth" />
+  <bone name="HDT Throat" />
+</system>

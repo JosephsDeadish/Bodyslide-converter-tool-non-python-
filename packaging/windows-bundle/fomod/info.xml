@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fomod>
+  <Name>SlideSmith Windows Bundle</Name>
+  <Author>DeadOnTheInside</Author>
+  <Version MachineVersion="1.0.1">1.0.1</Version>
+  <Website></Website>
+  <Description>Windows tool bundle for SlideSmith. Installs the MO2-ready desktop app into the SlideSmith folder at the mod's Data root for easy executable setup.</Description>
+</fomod>

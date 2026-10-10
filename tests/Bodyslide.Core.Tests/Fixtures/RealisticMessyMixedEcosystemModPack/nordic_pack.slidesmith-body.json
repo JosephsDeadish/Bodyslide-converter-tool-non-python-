@@ -1,0 +1,23 @@
+{
+  "name": "MessyMixedEcosystemReference",
+  "referenceTokens": [
+    "3ba",
+    "3bbb",
+    "bhunp",
+    "himbo",
+    "sam-light",
+    "vanilla-beast"
+  ],
+  "zapSliderNames": [
+    "ZapSleeves",
+    "HideTail"
+  ],
+  "physicsBones": [
+    "NPC L Breast01",
+    "NPC R Breast01",
+    "NPC Belly",
+    "NPC Tail"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female"
+}

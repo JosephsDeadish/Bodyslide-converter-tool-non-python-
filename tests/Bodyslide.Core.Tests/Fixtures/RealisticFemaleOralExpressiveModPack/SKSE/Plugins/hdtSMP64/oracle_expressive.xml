@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="OracleExpressivePhysics">
+  <bone name="BreastUpper" />
+  <bone name="BreastOuter" />
+  <bone name="BellyLower" />
+  <bone name="HDT JawLower" />
+  <bone name="HDT JawUpper" />
+  <bone name="HDT TongueMid" />
+  <bone name="HDT TongueTip" />
+  <bone name="HDT ThroatLower" />
+</system>

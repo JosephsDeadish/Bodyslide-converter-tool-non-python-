@@ -1,0 +1,10 @@
+<SliderSetInfo version="1">
+  <SliderSet name="RigidSegmentPlatePack" set="Humanoid Rigid">
+    <OutputPath>meshes\armor\rigidsegment\</OutputPath>
+    <OutputFile gender="f" use="true">rigid_segment_plate_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">rigid_segment_plate_1.nif</OutputFile>
+    <Slider name="RigidSegmentScale" />
+    <Slider name="PlateDepth" />
+    <Slider name="GearRing" />
+  </SliderSet>
+</SliderSetInfo>

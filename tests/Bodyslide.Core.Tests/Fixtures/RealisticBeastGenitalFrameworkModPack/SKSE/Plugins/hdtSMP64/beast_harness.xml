@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="BeastHarnessPhysics">
+  <bone name="TailSheath" />
+  <bone name="BeastForeskin" />
+  <bone name="BeastGlans" />
+  <bone name="BeastScrotum" />
+  <bone name="BeastVagina" />
+  <bone name="BeastAnus" />
+  <bone name="TongueTip" />
+  <bone name="JawLower" />
+  <bone name="Tail2" />
+  <bone name="Hock.L" />
+</system>

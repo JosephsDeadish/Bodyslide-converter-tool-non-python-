@@ -51,10 +51,18 @@ jobs:
           -p:DebugSymbols=false
           --output artifacts/linux-x64
 
+      - name: Smoke-test packaged Linux CLI
+        run: |
+          chmod +x artifacts/linux-x64/SlideSmith
+          artifacts/linux-x64/SlideSmith --self-check
+
       - name: Zip Linux CLI (single binary)
         run: |
           cd artifacts/linux-x64
           zip ../slidesmith-linux-x64.zip SlideSmith
+
+      - name: Verify Linux CLI zip contents
+        run: unzip -l artifacts/slidesmith-linux-x64.zip SlideSmith
 
       - name: Upload Linux CLI zip artifact
         uses: actions/upload-artifact@v4
@@ -92,6 +100,12 @@ jobs:
           name: slidesmith-linux-x64
           path: artifacts
 
+      - name: Build on Windows
+        run: dotnet build BodyslideConverter.slnx --configuration Release --no-restore
+
+      - name: Test on Windows
+        run: dotnet test tests/Bodyslide.Core.Tests/Bodyslide.Core.Tests.csproj --configuration Release --no-build
+
       - name: Publish Windows desktop app (single file)
         run: >
           dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj
@@ -104,6 +118,17 @@ jobs:
           -p:DebugType=none
           -p:DebugSymbols=false
           --output artifacts/win-x64
+
+      - name: Publish Windows mod-manager desktop (no self-extraction)
+        run: >
+          dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=false
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --output artifacts/win-x64-manager
 
       - name: Publish Windows standalone CLI (single file)
         run: >
@@ -121,8 +146,104 @@ jobs:
       - name: Rename CLI exe to avoid collision
         run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
 
+      - name: Smoke-test packaged Windows binaries
+        shell: pwsh
+        run: |
+          $desktopProcess = Start-Process -FilePath (Resolve-Path artifacts/win-x64/SlideSmith.exe).Path -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($desktopProcess.ExitCode -ne 0) {
+            Get-Content (Join-Path $env:LOCALAPPDATA "SlideSmith/startup-launch-diagnostics.log") -ErrorAction SilentlyContinue
+            throw "Packaged Windows desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
+          }
+          & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged Windows CLI self-check failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Stage Windows bundle contents
+        shell: pwsh
+        run: |
+          $bundleRoot = "artifacts/win-bundle"
+          $desktopBundle = Join-Path $bundleRoot "desktop"
+          $cliBundle = Join-Path $bundleRoot "cli"
+          $metaBundle = Join-Path $bundleRoot "meta"
+          Remove-Item $bundleRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $desktopBundle -Force | Out-Null
+          New-Item -ItemType Directory -Path $cliBundle -Force | Out-Null
+          New-Item -ItemType Directory -Path $metaBundle -Force | Out-Null
+          Copy-Item artifacts/win-x64/SlideSmith.exe $bundleRoot
+          Copy-Item artifacts/win-x64-manager/* $desktopBundle -Recurse -Force
+          Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
+          Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
+          $bundleMetadata = [ordered]@{
+            portableDesktop = "SlideSmith.exe"
+            desktop = "desktop/SlideSmith.exe"
+            installedDesktop = "SlideSmith/SlideSmith.exe"
+            cli = "cli/SlideSmith-CLI.exe"
+            readme = "README.txt"
+            fomodModuleConfig = "fomod/ModuleConfig.xml"
+            fomodInfo = "fomod/info.xml"
+            modOrganizerMetadata = "meta.ini"
+            sourceDesktopPublish = "artifacts/win-x64-manager"
+            sourceCliPublish = "artifacts/win-x64-cli"
+          } | ConvertTo-Json
+          Set-Content -Path (Join-Path $metaBundle "slidesmith-bundle.json") -Value $bundleMetadata -Encoding UTF8
+
       - name: Create Windows bundle zip (desktop + CLI)
-        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+        run: Compress-Archive -Path artifacts/win-bundle/* -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+
+      - name: Verify Windows bundle zip contents
+        shell: pwsh
+        run: |
+          $extractPath = Join-Path $env:RUNNER_TEMP "slidesmith-win-x64-bundle-check"
+          if (Test-Path $extractPath) {
+            Remove-Item $extractPath -Recurse -Force
+          }
+          Expand-Archive artifacts/slidesmith-win-x64-bundle.zip -DestinationPath $extractPath
+          if (!(Test-Path (Join-Path $extractPath "SlideSmith.exe"))) {
+            throw "Missing root-level SlideSmith.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "desktop/SlideSmith.exe"))) {
+            throw "Missing desktop/SlideSmith.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "cli/SlideSmith-CLI.exe"))) {
+            throw "Missing cli/SlideSmith-CLI.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "README.txt"))) {
+            throw "Missing README.txt in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "meta/slidesmith-bundle.json"))) {
+            throw "Missing meta/slidesmith-bundle.json in bundle zip."
+          }
+          [xml]$moduleConfig = Get-Content (Join-Path $extractPath "fomod/ModuleConfig.xml") -Raw
+          $requiredMappings = @(
+            'folder[@source="desktop" and @destination="SlideSmith"]',
+            'folder[@source="cli" and @destination="SlideSmith/cli"]',
+            'folder[@source="meta" and @destination="SlideSmith/meta"]',
+            'file[@source="cli/SlideSmith-CLI.exe" and @destination="SlideSmith/SlideSmith-CLI.exe"]',
+            'file[@source="README.txt" and @destination="SlideSmith/README.txt"]',
+            'file[@source="meta.ini" and @destination="SlideSmith/meta.ini"]'
+          )
+          foreach ($mapping in $requiredMappings) {
+            if (!$moduleConfig.SelectSingleNode("/config/requiredInstallFiles/$mapping")) {
+              throw "Bundle FOMOD metadata is missing installer mapping $mapping."
+            }
+          }
+          $installPath = Join-Path $extractPath "installed/SlideSmith"
+          New-Item -ItemType Directory -Path $installPath -Force | Out-Null
+          Copy-Item (Join-Path $extractPath "desktop/*") $installPath -Recurse -Force
+          foreach ($dependency in @("SlideSmith.dll", "SlideSmith.runtimeconfig.json", "hostfxr.dll", "coreclr.dll")) {
+            if (!(Test-Path (Join-Path $installPath $dependency))) {
+              throw "Missing desktop dependency $dependency in installed bundle."
+            }
+          }
+          $desktopProcess = Start-Process -FilePath (Join-Path $installPath "SlideSmith.exe") -WorkingDirectory $installPath -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($desktopProcess.ExitCode -ne 0) {
+            Get-Content (Join-Path $env:LOCALAPPDATA "SlideSmith/startup-launch-diagnostics.log") -ErrorAction SilentlyContinue
+            throw "Installed Windows bundle desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
+          }
+
+      - name: Name standalone desktop download clearly
+        run: Copy-Item artifacts/win-x64/SlideSmith.exe artifacts/SlideSmith-Desktop-Portable.exe
 
       - name: Upload Windows app zip artifact
         uses: actions/upload-artifact@v4
@@ -142,16 +263,17 @@ jobs:
 
             | File | Description |
             |---|---|
-            | `SlideSmith.exe` | Windows desktop GUI (drag-and-drop armor, no terminal needed) |
+            | `SlideSmith-Desktop-Portable.exe` | Windows desktop GUI for direct standalone launch |
             | `SlideSmith-CLI.exe` | Windows command-line tool |
-            | `slidesmith-win-x64-bundle.zip` | Windows bundle with both GUI + CLI side-by-side |
+            | `slidesmith-win-x64-bundle.zip` | Windows bundle with a root-level standalone GUI, the multi-file MO2-ready desktop app, CLI, and setup guide |
             | `slidesmith-linux-x64.zip` | Linux CLI binary |
 
-            **Quick start (desktop):** download `SlideSmith.exe`, double-click it.
+            **Quick start (desktop):** download `SlideSmith-Desktop-Portable.exe`, double-click it.
+            **Quick start (MO2):** install the bundle, then configure the installed `SlideSmith\SlideSmith.exe` as MO2's executable and run it from MO2.
             **Quick start (CLI):** `.\SlideSmith-CLI.exe --input "path\to\armor.nif" --target CBBE --output "C:\output"`
             Run `.\SlideSmith-CLI.exe --help` for all options.
           files: |
-            artifacts/win-x64/SlideSmith.exe
+            artifacts/SlideSmith-Desktop-Portable.exe
             artifacts/win-x64-cli/SlideSmith-CLI.exe
             artifacts/slidesmith-win-x64-bundle.zip
             artifacts/slidesmith-linux-x64.zip
@@ -183,6 +305,12 @@ jobs:
       - name: Restore
         run: dotnet restore BodyslideConverter.slnx
 
+      - name: Build on Windows
+        run: dotnet build BodyslideConverter.slnx --configuration Release --no-restore
+
+      - name: Test on Windows
+        run: dotnet test tests/Bodyslide.Core.Tests/Bodyslide.Core.Tests.csproj --configuration Release --no-build
+
       - name: Publish Windows desktop app (single file)
         run: >
           dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj
@@ -195,6 +323,17 @@ jobs:
           -p:DebugType=none
           -p:DebugSymbols=false
           --output artifacts/win-x64
+
+      - name: Publish Windows mod-manager desktop (no self-extraction)
+        run: >
+          dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=false
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --output artifacts/win-x64-manager
 
       - name: Publish Windows standalone CLI (single file)
         run: >
@@ -212,8 +351,111 @@ jobs:
       - name: Rename CLI exe to avoid collision
         run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
 
+      - name: Smoke-test packaged Windows binaries
+        shell: pwsh
+        run: |
+          $desktopProcess = Start-Process -FilePath (Resolve-Path artifacts/win-x64/SlideSmith.exe).Path -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($desktopProcess.ExitCode -ne 0) {
+            Get-Content (Join-Path $env:LOCALAPPDATA "SlideSmith/startup-launch-diagnostics.log") -ErrorAction SilentlyContinue
+            throw "Packaged Windows desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
+          }
+          & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged Windows CLI self-check failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Stage Windows bundle contents
+        shell: pwsh
+        run: |
+          $bundleRoot = "artifacts/win-bundle"
+          $desktopBundle = Join-Path $bundleRoot "desktop"
+          $cliBundle = Join-Path $bundleRoot "cli"
+          $metaBundle = Join-Path $bundleRoot "meta"
+          Remove-Item $bundleRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $desktopBundle -Force | Out-Null
+          New-Item -ItemType Directory -Path $cliBundle -Force | Out-Null
+          New-Item -ItemType Directory -Path $metaBundle -Force | Out-Null
+          Copy-Item artifacts/win-x64/SlideSmith.exe $bundleRoot
+          Copy-Item artifacts/win-x64-manager/* $desktopBundle -Recurse -Force
+          Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
+          Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
+          $bundleMetadata = [ordered]@{
+            portableDesktop = "SlideSmith.exe"
+            desktop = "desktop/SlideSmith.exe"
+            cli = "cli/SlideSmith-CLI.exe"
+            readme = "README.txt"
+            fomodModuleConfig = "fomod/ModuleConfig.xml"
+            fomodInfo = "fomod/info.xml"
+            modOrganizerMetadata = "meta.ini"
+            sourceDesktopPublish = "artifacts/win-x64-manager"
+            sourceCliPublish = "artifacts/win-x64-cli"
+          } | ConvertTo-Json
+          Set-Content -Path (Join-Path $metaBundle "slidesmith-bundle.json") -Value $bundleMetadata -Encoding UTF8
+
       - name: Zip Windows bundle (desktop + CLI)
-        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+        run: Compress-Archive -Path artifacts/win-bundle/* -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+
+      - name: Verify Windows bundle zip contents
+        shell: pwsh
+        run: |
+          $extractPath = Join-Path $env:RUNNER_TEMP "slidesmith-win-x64-bundle-check"
+          if (Test-Path $extractPath) {
+            Remove-Item $extractPath -Recurse -Force
+          }
+          Expand-Archive artifacts/slidesmith-win-x64-bundle.zip -DestinationPath $extractPath
+          if (!(Test-Path (Join-Path $extractPath "desktop/SlideSmith.exe"))) {
+            throw "Missing desktop/SlideSmith.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "cli/SlideSmith-CLI.exe"))) {
+            throw "Missing cli/SlideSmith-CLI.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "README.txt"))) {
+            throw "Missing README.txt in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "meta/slidesmith-bundle.json"))) {
+            throw "Missing meta/slidesmith-bundle.json in bundle zip."
+          }
+          $portableProcess = Start-Process -FilePath (Join-Path $extractPath "SlideSmith.exe") -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($portableProcess.ExitCode -ne 0) {
+            throw "Root-level portable desktop smoke test failed with exit code $($portableProcess.ExitCode)."
+          }
+          $installPath = Join-Path $extractPath "installed/SlideSmith"
+          New-Item -ItemType Directory -Path $installPath -Force | Out-Null
+          Copy-Item (Join-Path $extractPath "desktop/*") $installPath -Recurse -Force
+          foreach ($dependency in @("SlideSmith.dll", "SlideSmith.runtimeconfig.json", "hostfxr.dll", "coreclr.dll")) {
+            if (!(Test-Path (Join-Path $installPath $dependency))) {
+              throw "Missing desktop dependency $dependency in installed bundle."
+            }
+          }
+          $desktopProcess = Start-Process -FilePath (Join-Path $installPath "SlideSmith.exe") -WorkingDirectory $installPath -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($desktopProcess.ExitCode -ne 0) {
+            Get-Content (Join-Path $env:LOCALAPPDATA "SlideSmith/startup-launch-diagnostics.log") -ErrorAction SilentlyContinue
+            throw "Installed Windows bundle desktop smoke test failed with exit code $($desktopProcess.ExitCode)."
+          }
+          if (!(Test-Path (Join-Path $extractPath "fomod/ModuleConfig.xml"))) {
+            throw "Missing fomod/ModuleConfig.xml in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "fomod/info.xml"))) {
+            throw "Missing fomod/info.xml in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "meta.ini"))) {
+            throw "Missing meta.ini in bundle zip."
+          }
+
+          [xml]$moduleConfig = Get-Content (Join-Path $extractPath "fomod/ModuleConfig.xml") -Raw
+          $requiredMappings = @(
+            'folder[@source="desktop" and @destination="SlideSmith"]',
+            'folder[@source="cli" and @destination="SlideSmith/cli"]',
+            'folder[@source="meta" and @destination="SlideSmith/meta"]',
+            'file[@source="cli/SlideSmith-CLI.exe" and @destination="SlideSmith/SlideSmith-CLI.exe"]',
+            'file[@source="README.txt" and @destination="SlideSmith/README.txt"]',
+            'file[@source="meta.ini" and @destination="SlideSmith/meta.ini"]'
+          )
+          foreach ($mapping in $requiredMappings) {
+            if (!$moduleConfig.SelectSingleNode("/config/requiredInstallFiles/$mapping")) {
+              throw "Bundle FOMOD metadata is missing installer mapping $mapping."
+            }
+          }
 
       - name: Set Windows artifact name
         shell: pwsh

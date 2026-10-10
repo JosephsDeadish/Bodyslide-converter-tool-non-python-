@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="SosSupportPhysics">
+  <bone name="NPC L Pec" />
+  <bone name="NPC R Pec" />
+  <bone name="NPC Belly" />
+  <bone name="SOS GenitalsBase" />
+  <bone name="SOS Foreskin" />
+  <bone name="SOS Shaft" />
+  <bone name="SOS Glans" />
+  <bone name="SOS Scrotum" />
+</system>

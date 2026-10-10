@@ -1,0 +1,12 @@
+<SliderSetInfo version="1">
+  <SliderSet name="AvianFramework" set="Avian Humanoid">
+    <OutputPath>meshes\beast\avian\</OutputPath>
+    <OutputFile gender="f" use="true">avian_regalia_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">avian_regalia_1.nif</OutputFile>
+    <Slider name="WingSpan" />
+    <Slider name="FeatherSpread" />
+    <Slider name="TalonWidth" />
+    <Slider name="Shoulders" />
+    <Slider name="Belly" />
+  </SliderSet>
+</SliderSetInfo>

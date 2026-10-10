@@ -1,0 +1,293 @@
+namespace Bodyslide.Core.Tests;
+
+public sealed class ExecutionEnvironmentTests
+{
+    [Fact]
+    public void GetStartupWorkingDirectory_PreservesManagerAndCliRelativePathContext()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var dataDirectory = Path.Combine(root, "game", "Data");
+        var executableDirectory = Path.Combine(root, "tools", "desktop");
+        Directory.CreateDirectory(dataDirectory);
+        Directory.CreateDirectory(executableDirectory);
+        try
+        {
+            var resolved = ExecutionEnvironment.GetStartupWorkingDirectory(
+                dataDirectory, Path.Combine(executableDirectory, "SlideSmith.exe"));
+
+            Assert.Equal(Path.GetFullPath(dataDirectory), resolved);
+            Assert.Equal(Path.Combine(dataDirectory, "meshes", "armor.nif"),
+                Path.GetFullPath(Path.Combine("meshes", "armor.nif"), resolved));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void GetStartupWorkingDirectory_FallsBackWhenCallerDirectoryDoesNotExist()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var processPath = Path.Combine(root, "desktop", "SlideSmith.exe");
+
+        Assert.Equal(Path.GetDirectoryName(processPath),
+            ExecutionEnvironment.GetStartupWorkingDirectory(Path.Combine(root, "missing"), processPath));
+    }
+
+    [Fact]
+    public void GetExecutionRoot_PrefersProcessDirectory()
+    {
+        var processPath = Path.Combine(Path.GetTempPath(), "slidesmith-process", "SlideSmith.exe");
+        var appBaseDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-appbase");
+        var currentDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-current");
+
+        var root = ExecutionEnvironment.GetExecutionRoot(processPath, appBaseDirectory, currentDirectory);
+
+        Assert.Equal(Path.GetDirectoryName(Path.GetFullPath(processPath)), root);
+    }
+
+    [Fact]
+    public void GetExecutionRoot_FallsBackToAppContextBaseDirectory()
+    {
+        var appBaseDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-appbase");
+        var currentDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-current");
+
+        var root = ExecutionEnvironment.GetExecutionRoot(processPath: null, appBaseDirectory, currentDirectory);
+
+        Assert.Equal(Path.GetFullPath(appBaseDirectory), root);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRoot_UsesResolvedExecutionRoot()
+    {
+        var processPath = Path.Combine(Path.GetTempPath(), "slidesmith-process", "SlideSmith.exe");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRoot(processPath, appContextBaseDirectory: null, currentDirectory: null);
+
+        Assert.Equal(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(processPath))!, "output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_UsesInputParentForFiles()
+    {
+        var inputPath = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", "armor.nif");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputPath);
+
+        Assert.Equal(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputPath))!, "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_UsesDirectoryParentForFolders()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", "pack");
+        Directory.CreateDirectory(inputDirectory);
+
+        try
+        {
+            var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
+
+            Assert.Equal(
+                Path.Combine(Path.GetFullPath(inputDirectory), "SlideSmith-output"),
+                outputRoot);
+        }
+        finally
+        {
+            Directory.Delete(inputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsNonExistentDirectoryPathAsDirectory()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "pack") + Path.DirectorySeparatorChar;
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
+
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(inputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)), "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsNonExistentFilePathAsFile()
+    {
+        var inputFile = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "armor.nif");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputFile);
+
+        Assert.Equal(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputFile))!, "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsNonExistentExtensionlessFilePathAsFile()
+    {
+        var inputFile = $"modarchive-{Guid.NewGuid():N}";
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputFile);
+
+        Assert.Equal(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputFile))!, "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsNonExistentExtensionlessNestedPathAsFile()
+    {
+        var inputFile = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "downloads", "modarchive");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputFile);
+
+        Assert.Equal(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputFile))!, "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsExtensionlessNestedPathUnderExistingParentAsFile()
+    {
+        var parentDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "downloads");
+        Directory.CreateDirectory(parentDirectory);
+        var inputFile = Path.Combine(parentDirectory, "modarchive");
+
+        try
+        {
+            var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputFile);
+
+            Assert.Equal(
+                Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputFile))!, "SlideSmith-output"),
+                outputRoot);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(parentDirectory)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsNonExistentExtensionlessPackPathAsDirectory()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "mods", "custom-pack");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
+
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(inputDirectory), "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsSingleSegmentExtensionlessPackPathAsDirectory()
+    {
+        var inputDirectory = $"custom-pack-{Guid.NewGuid():N}";
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
+
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(inputDirectory), "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsUnknownExtensionlessNestedPathAsDirectoryByDefault()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "downloads", "inputset");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
+
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(inputDirectory), "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsUnknownSingleSegmentExtensionlessPathAsDirectoryByDefault()
+    {
+        var inputDirectory = $"release-{Guid.NewGuid():N}";
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
+
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(inputDirectory), "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsNonExistentExtensionlessNestedDirectoryAsDirectory()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "downloads", "input");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
+
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(inputDirectory), "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void TryNormalizeCurrentDirectoryToExecutionRoot_TreatsCaseVariantPathsAsDistinctOnCaseSensitivePlatforms()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var lowerDirectory = Path.Combine(workingDirectory, "slidesmith");
+        var upperDirectory = Path.Combine(workingDirectory, "SLIDESMITH");
+        Directory.CreateDirectory(lowerDirectory);
+        Directory.CreateDirectory(upperDirectory);
+        var originalCurrentDirectory = Environment.CurrentDirectory;
+
+        try
+        {
+            Environment.CurrentDirectory = upperDirectory;
+            var processPath = Path.Combine(lowerDirectory, "SlideSmith");
+
+            var changed = ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(processPath);
+
+            Assert.True(changed);
+            Assert.Equal(Path.GetFullPath(lowerDirectory), Path.GetFullPath(Environment.CurrentDirectory));
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalCurrentDirectory;
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryNormalizeCurrentDirectoryToExecutionRoot_UsesAppContextBaseDirectoryWhenProcessPathMissing()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var currentDirectory = Path.Combine(workingDirectory, "current");
+        var appBaseDirectory = Path.Combine(workingDirectory, "app-base");
+        Directory.CreateDirectory(currentDirectory);
+        Directory.CreateDirectory(appBaseDirectory);
+        var originalCurrentDirectory = Environment.CurrentDirectory;
+
+        try
+        {
+            Environment.CurrentDirectory = currentDirectory;
+
+            var changed = ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(
+                processPath: null,
+                appContextBaseDirectory: appBaseDirectory);
+
+            Assert.True(changed);
+            Assert.Equal(Path.GetFullPath(appBaseDirectory), Path.GetFullPath(Environment.CurrentDirectory));
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalCurrentDirectory;
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}

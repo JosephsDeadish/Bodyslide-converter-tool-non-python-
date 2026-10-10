@@ -1,0 +1,12 @@
+<SliderSetInfo version="1">
+  <SliderSet name="SprigganFramework" set="Spriggan">
+    <OutputPath>meshes\armor\sprigganbranch\</OutputPath>
+    <OutputFile gender="f" use="true">spriggan_branch_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">spriggan_branch_1.nif</OutputFile>
+    <Slider name="BranchSpread" />
+    <Slider name="WaistWidth" />
+    <Slider name="Shoulders" />
+    <Slider name="Arms" />
+    <Slider name="Belly" />
+  </SliderSet>
+</SliderSetInfo>

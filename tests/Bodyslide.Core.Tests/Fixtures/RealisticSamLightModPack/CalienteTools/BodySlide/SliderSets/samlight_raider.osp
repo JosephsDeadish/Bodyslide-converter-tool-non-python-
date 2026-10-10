@@ -1,0 +1,10 @@
+<SliderSetInfo version="1">
+  <SliderSet name="SamLightSupport" set="SAM Light">
+    <OutputPath>meshes\male/samlight\variant\</OutputPath>
+    <OutputFile gender="m" use="true">samlight_raider_0.nif</OutputFile>
+    <OutputFile gender="m" use="true" morphfile="1">samlight_raider_1.nif</OutputFile>
+    <Slider name="SamChest" />
+    <Slider name="BellyLean" />
+    <Slider name="HideSheath" />
+  </SliderSet>
+</SliderSetInfo>

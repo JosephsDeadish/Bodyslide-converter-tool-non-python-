@@ -1,0 +1,465 @@
+namespace Bodyslide.Core;
+
+public sealed record StandaloneDesktopLaunchDecision(
+    bool ShouldAttemptDesktopHandoff,
+    bool LauncherSignalDetected,
+    bool ModManagerLaunchDetected,
+    bool ExplicitCliLaunchDetected,
+    bool StrictLauncherModeEnabled = false,
+    string RoutingReason = "");
+
+public static class StandaloneStartupRouting
+{
+    public static Dictionary<string, string> ParseNamedArguments(IReadOnlyList<string> args)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < args.Count; index++)
+        {
+            if (!args[index].StartsWith("--", StringComparison.Ordinal) ||
+                !TryReadOptionToken(args[index], out var option, out var inlineValue))
+            {
+                continue;
+            }
+
+            if (inlineValue is not null)
+            {
+                values[option] = inlineValue;
+            }
+            else if (index + 1 < args.Count && !args[index + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                values[option] = args[++index];
+            }
+            else
+            {
+                values[option] = "true";
+            }
+        }
+
+        return values;
+    }
+
+    public static StandaloneDesktopLaunchDecision EvaluateDesktopLaunchDecision(
+        IReadOnlyList<string> args,
+        string? executablePath,
+        string? workingDirectory,
+        Func<string, bool>? hasEnvironmentVariable = null,
+        bool strictLauncherMode = false)
+    {
+        hasEnvironmentVariable ??= static name =>
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
+
+        var launcherSignal = IsExplicitLauncherSignal(args, hasEnvironmentVariable);
+        var modManagerLaunch = IsLikelyModManagerLaunch(args, executablePath, workingDirectory, hasEnvironmentVariable);
+        var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args, modManagerLaunch);
+        // Strict launcher mode is currently diagnostics-only; it preserves the same
+        // handoff decision but records a stricter routing reason for launcher logs.
+        var desktopStartupOption = EnumerateStandaloneOptions(args).Any(static option =>
+            option.ToLowerInvariant() is "load-result" or "result" or "startup-diagnostics" or "strict-launcher-mode" or "smoke-test");
+        var shouldAttemptDesktopHandoff = !explicitCliLaunch &&
+            (args.Count == 0 || launcherSignal || modManagerLaunch || desktopStartupOption);
+        var routingReason = BuildRoutingReason(strictLauncherMode, shouldAttemptDesktopHandoff, launcherSignal,
+            modManagerLaunch, explicitCliLaunch, desktopStartupOption);
+
+        return new StandaloneDesktopLaunchDecision(
+            shouldAttemptDesktopHandoff,
+            launcherSignal,
+            modManagerLaunch,
+            explicitCliLaunch,
+            strictLauncherMode,
+            routingReason);
+    }
+
+    public static bool IsModManagerLauncherArgument(string? arg)
+    {
+        if (!TryReadOptionName(arg, out var option))
+        {
+            return false;
+        }
+
+        return ModManagerLaunchArgumentCatalog.LauncherSwitchNames.Contains(option, StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static bool HasLauncherPathOptionArgument(IReadOnlyList<string> args)
+    {
+        for (var index = 0; index < args.Count; index++)
+        {
+            var arg = args[index];
+            if (!TryReadOptionName(arg, out var option))
+            {
+                continue;
+            }
+
+            if (!ModManagerLaunchArgumentCatalog.LauncherPathOptionNames.Contains(option, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!TryReadOptionValue(args, index, out var value) || string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var normalized = value.Trim().Trim('"');
+            if (normalized.Length == 0)
+            {
+                continue;
+            }
+
+            if (IsModManagerSpecificPathOption(option) || File.Exists(normalized) || Directory.Exists(normalized))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static bool PathLooksLikeModManagerManagedLocation(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        var normalizedPath = path.Replace('\\', '/');
+        return normalizedPath.Contains("mod organizer", StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.Contains("modorganizer", StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.EndsWith("/mo2", StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.Contains("/vortex/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.EndsWith("/vortex", StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.Contains("black tree gaming", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsLikelyLauncherPathArgument(string? arg)
+    {
+        if (string.IsNullOrWhiteSpace(arg) || TryReadOptionName(arg, out _))
+        {
+            return false;
+        }
+
+        var trimmed = arg.Trim().Trim('"');
+        if (trimmed.Length == 0 || trimmed.StartsWith("--", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (trimmed.StartsWith("/", StringComparison.Ordinal))
+        {
+            var nextSeparator = trimmed.IndexOfAny(['/', '\\'], 1);
+            var optionSeparator = trimmed.IndexOfAny(['=', ':'], 1);
+            if (nextSeparator >= 0 && (optionSeparator < 0 || nextSeparator < optionSeparator))
+            {
+                return false;
+            }
+        }
+
+        if (!trimmed.Contains('\\') &&
+            !trimmed.Contains('/') &&
+            !trimmed.Contains(':'))
+        {
+            return false;
+        }
+
+        return PathLooksLikeModManagerManagedLocation(trimmed);
+    }
+
+    private static bool IsMoshortcutUri(string? arg) =>
+        !string.IsNullOrWhiteSpace(arg) &&
+        arg.Trim().StartsWith("moshortcut://", StringComparison.OrdinalIgnoreCase);
+
+    public static bool HasExplicitStandaloneCliSwitch(IReadOnlyList<string> args, bool modManagerLaunch = false) =>
+        HasStandaloneCommandSwitch(args) || HasStandaloneConversionSwitches(args, modManagerLaunch) || HasStandalonePositionalConversionUsage(args);
+
+    public static bool HasOption(IReadOnlyList<string> args, string optionName) =>
+        EnumerateStandaloneOptions(args).Any(option => option.Equals(optionName, StringComparison.OrdinalIgnoreCase));
+
+    public static bool IsExplicitLauncherSignal(IReadOnlyList<string> args, Func<string, bool> hasEnvironmentVariable) =>
+        HasLauncherSignal(args, hasEnvironmentVariable);
+
+    public static bool IsLikelyModManagerLaunch(
+        IReadOnlyList<string> args,
+        string? executablePath,
+        string? workingDirectory,
+        Func<string, bool> hasEnvironmentVariable) =>
+        HasLauncherSignal(args, hasEnvironmentVariable) ||
+        (PathLooksLikeModManagerManagedLocation(executablePath) &&
+         PathLooksLikeModManagerManagedLocation(workingDirectory));
+
+    public static bool TryReadOptionName(string? arg, out string option)
+    {
+        if (TryReadOptionToken(arg, out option, out _))
+        {
+            return true;
+        }
+
+        option = string.Empty;
+        return false;
+    }
+
+    public static bool TryReadOptionToken(string? arg, out string option, out string? inlineValue)
+    {
+        option = string.Empty;
+        inlineValue = null;
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            return false;
+        }
+
+        var trimmed = arg.Trim();
+        if (trimmed.StartsWith("--", StringComparison.Ordinal))
+        {
+            option = trimmed[2..].Trim();
+        }
+        else if (trimmed.StartsWith("-", StringComparison.Ordinal) || trimmed.StartsWith("/", StringComparison.Ordinal))
+        {
+            option = trimmed[1..].Trim();
+        }
+        else
+        {
+            return false;
+        }
+
+        if (option.Length == 0)
+        {
+            return false;
+        }
+
+        var separatorIndex = option.IndexOfAny(['=', ':']);
+        if (separatorIndex >= 0)
+        {
+            inlineValue = separatorIndex + 1 < option.Length ? option[(separatorIndex + 1)..] : string.Empty;
+            option = option[..separatorIndex].Trim();
+        }
+        if (option.Contains(Path.DirectorySeparatorChar) || option.Contains(Path.AltDirectorySeparatorChar))
+        {
+            option = string.Empty;
+            return false;
+        }
+
+        return option.Length > 0;
+    }
+
+    private static bool TryReadOptionValue(IReadOnlyList<string> args, int index, out string? value)
+    {
+        value = null;
+        var arg = args[index];
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            return false;
+        }
+
+        var inlineSeparatorIndex = arg.IndexOfAny(['=', ':']);
+
+        if (inlineSeparatorIndex >= 0)
+        {
+            if (inlineSeparatorIndex < arg.Length - 1)
+            {
+                value = arg[(inlineSeparatorIndex + 1)..];
+                return true;
+            }
+
+            return false;
+        }
+
+        if (index + 1 < args.Count && !TryReadOptionName(args[index + 1], out _))
+        {
+            value = args[index + 1];
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsLikelyModManagerEnvironment(Func<string, bool> hasEnvironmentVariable) =>
+        hasEnvironmentVariable("MO2_INSTANCE") ||
+        hasEnvironmentVariable("USVFS_PARAMETERS") ||
+        hasEnvironmentVariable("USVFS_PROCESS") ||
+        hasEnvironmentVariable("USVFS_PROXY") ||
+        hasEnvironmentVariable("MODORGANIZER_INSTANCE") ||
+        hasEnvironmentVariable("MODORGANIZER_PATH") ||
+        hasEnvironmentVariable("MODORGANIZER_ROOT") ||
+        hasEnvironmentVariable("VORTEX_USERDATA") ||
+        hasEnvironmentVariable("VORTEX_PROFILE_ID") ||
+        hasEnvironmentVariable("VORTEX_STAGING_FOLDER") ||
+        hasEnvironmentVariable("VORTEX_INSTANCE_ID") ||
+        hasEnvironmentVariable("VORTEX_SESSION");
+
+    private static bool IsModManagerSpecificPathOption(string option) =>
+        option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
+        option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase) ||
+        option.StartsWith("vortex-", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasLauncherSignal(IReadOnlyList<string> args, Func<string, bool> hasEnvironmentVariable) =>
+        IsLikelyModManagerEnvironment(hasEnvironmentVariable) ||
+        args.Any(IsMoshortcutUri) ||
+        args.Any(IsModManagerLauncherArgument) ||
+        args.Any(IsLikelyLauncherPathArgument) ||
+        HasLauncherPathOptionArgument(args);
+
+    private static string BuildRoutingReason(
+        bool strictLauncherMode,
+        bool shouldAttemptDesktopHandoff,
+        bool launcherSignal,
+        bool modManagerLaunch,
+        bool explicitCliLaunch,
+        bool desktopStartupOption)
+    {
+        if (explicitCliLaunch)
+        {
+            return strictLauncherMode
+                ? "strict-launcher-mode: explicit cli takes precedence"
+                : "explicit cli takes precedence";
+        }
+
+        if (strictLauncherMode)
+        {
+            if (!shouldAttemptDesktopHandoff)
+            {
+                return "strict-launcher-mode: no launcher signal";
+            }
+
+            if (launcherSignal)
+            {
+                return "strict-launcher-mode: launcher signal detected";
+            }
+
+            if (modManagerLaunch)
+            {
+                return "strict-launcher-mode: mod-manager launch detected";
+            }
+
+            if (desktopStartupOption)
+            {
+                return "strict-launcher-mode: desktop startup option detected";
+            }
+
+            return "strict-launcher-mode: no args";
+        }
+
+        if (!shouldAttemptDesktopHandoff)
+        {
+            return "no launcher signal";
+        }
+
+        if (launcherSignal)
+        {
+            return "launcher signal detected";
+        }
+
+        if (modManagerLaunch)
+        {
+            return "mod-manager launch detected";
+        }
+
+        if (desktopStartupOption)
+        {
+            return "desktop startup option detected";
+        }
+
+        return "default desktop handoff";
+    }
+
+    private static bool HasStandaloneCommandSwitch(IReadOnlyList<string> args) =>
+        EnumerateStandaloneOptions(args).Any(static option =>
+        {
+            return option.Equals("pause", StringComparison.OrdinalIgnoreCase) ||
+                   option.Equals("help", StringComparison.OrdinalIgnoreCase) ||
+                   option.Equals("h", StringComparison.OrdinalIgnoreCase) ||
+                   option.Equals("list-bodies", StringComparison.OrdinalIgnoreCase) ||
+                   option.Equals("list-presets", StringComparison.OrdinalIgnoreCase) ||
+                   option.Equals("list-profiles", StringComparison.OrdinalIgnoreCase) ||
+                   option.Equals("list-physics", StringComparison.OrdinalIgnoreCase) ||
+                   option.Equals("self-check", StringComparison.OrdinalIgnoreCase) ||
+                   option.Equals("conversion-guide", StringComparison.OrdinalIgnoreCase) ||
+                   option.Equals("export-cache", StringComparison.OrdinalIgnoreCase) ||
+                   option.Equals("body-reference", StringComparison.OrdinalIgnoreCase);
+        });
+
+    private static bool HasStandaloneConversionSwitches(IReadOnlyList<string> args, bool modManagerLaunch)
+    {
+        var hasModManagerLauncherArgument = modManagerLaunch || args.Any(IsModManagerLauncherArgument);
+        var hasTarget = false;
+        var hasConversionModifier = false;
+
+        foreach (var option in EnumerateStandaloneOptions(args))
+        {
+            if (option.Equals("target", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("targets", StringComparison.OrdinalIgnoreCase))
+            {
+                hasTarget = true;
+                continue;
+            }
+
+            if (option.Equals("preset", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("presets", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("input", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("output", StringComparison.OrdinalIgnoreCase) ||
+                (option.Equals("profile", StringComparison.OrdinalIgnoreCase) && !hasModManagerLauncherArgument) ||
+                option.Equals("source", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("physics", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("cache-path", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("output-zip", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("skeleton-nif", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("skeleton-nif-path", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("build-sliders", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("compact-diagnostics", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("custom-profiles", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("world-mode", StringComparison.OrdinalIgnoreCase) ||
+                option.Equals("shared-plugin-output", StringComparison.OrdinalIgnoreCase))
+            {
+                hasConversionModifier = true;
+            }
+        }
+
+        return hasTarget || hasConversionModifier;
+    }
+
+    private static IEnumerable<string> EnumerateStandaloneOptions(IReadOnlyList<string> args)
+    {
+        for (var index = 0; index < args.Count; index++)
+        {
+            if (!TryReadOptionToken(args[index], out var option, out var inlineValue))
+            {
+                continue;
+            }
+
+            yield return option;
+
+            // Slash-prefixed values can be absolute Unix paths, including /help or /target.
+            // Do not interpret a path option's separate value as another CLI command.
+            if (inlineValue is null &&
+                HasSeparateOptionValue(option) &&
+                index + 1 < args.Count &&
+                !args[index + 1].TrimStart().StartsWith("-", StringComparison.Ordinal))
+            {
+                index++;
+            }
+        }
+    }
+
+    private static bool HasSeparateOptionValue(string option) =>
+        ModManagerLaunchArgumentCatalog.PathOptionNames.Contains(option, StringComparer.OrdinalIgnoreCase) ||
+        ModManagerLaunchArgumentCatalog.StartupDiagnosticsArgumentNames.Contains(option, StringComparer.OrdinalIgnoreCase) ||
+        option.ToLowerInvariant() is "input" or "output" or "target" or "targets" or "preset" or "presets" or
+            "profile" or "source" or "physics" or "cache-path" or "skeleton-nif" or "skeleton-nif-path" or
+            "build-sliders" or "compact-diagnostics" or "custom-profiles" or "world-mode" or "shared-plugin-output" or "game" or "instance";
+
+    public static bool HasStandalonePositionalConversionUsage(IReadOnlyList<string> args)
+    {
+        if (args.Count < 2)
+        {
+            return false;
+        }
+
+        if (args[0].TrimStart().StartsWith("-", StringComparison.Ordinal) ||
+            args[1].TrimStart().StartsWith("-", StringComparison.Ordinal) ||
+            TryReadOptionName(args[0], out _) || TryReadOptionName(args[1], out _))
+        {
+            return false;
+        }
+
+        return !IsMoshortcutUri(args[0]) && !IsMoshortcutUri(args[1]);
+    }
+
+}

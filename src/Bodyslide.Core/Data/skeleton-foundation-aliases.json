@@ -1,0 +1,159 @@
+[
+  {
+    "canonical": "xpmsse",
+    "aliases": [
+      "XPMSSE",
+      "XPMSE",
+      "XP32 Maximum Skeleton Special Extended",
+      "XP32 Maximum Skeleton Extended",
+      "XP32MSE",
+      "XP32 Skeleton",
+      "XPMSSE + COCO weighting"
+    ]
+  },
+  {
+    "canonical": "vanilla-skyrim",
+    "aliases": [
+      "Vanilla Skyrim",
+      "Vanilla Body",
+      "Skyrim Vanilla",
+      "Vanilla Skyrim skeleton"
+    ]
+  },
+  {
+    "canonical": "sam-light",
+    "aliases": [
+      "SAM",
+      "SAM Light",
+      "Shape Atlas for Men"
+    ]
+  },
+  {
+    "canonical": "ube-extended",
+    "aliases": [
+      "UBE",
+      "Ultimate Body Enhancer",
+      "XPMSSE + custom UBE bones"
+    ]
+  },
+  {
+    "canonical": "tng-extended",
+    "aliases": [
+      "TNG",
+      "TNG Extended",
+      "TNGExtended",
+      "The New Gentleman",
+      "New Gentleman"
+    ]
+  },
+  {
+    "canonical": "beast-humanoid",
+    "aliases": [
+      "Vanilla Beast",
+      "Beast Vanilla",
+      "Khajiit Vanilla",
+      "Argonian Vanilla",
+      "Beast-humanoid vanilla skeleton"
+    ]
+  },
+  {
+    "canonical": "horned-humanoid",
+    "aliases": [
+      "Goat Humanoid",
+      "Goat Reborn",
+      "Goatkin",
+      "Goat Folk",
+      "Namira's Goat Reborn",
+      "Horned beast-humanoid skeleton"
+    ]
+  },
+  {
+    "canonical": "winged-humanoid",
+    "aliases": [
+      "Hagraven",
+      "Hag Raven",
+      "Hagraven Humanoid",
+      "Spriggan",
+      "Spriggan Humanoid",
+      "Spriggan Body",
+      "Winged creature-humanoid skeleton"
+    ]
+  },
+  {
+    "canonical": "digitigrade-beast",
+    "aliases": [
+      "Digitigrade Beast",
+      "Beast Follower",
+      "Digitigrade beast hybrid skeleton",
+      "Feline beast-humanoid skeleton",
+      "Canine beast-humanoid skeleton"
+    ]
+  },
+  {
+    "canonical": "equine-humanoid",
+    "aliases": [
+      "Equine Humanoid",
+      "Horse Follower",
+      "Equine beast-humanoid skeleton"
+    ]
+  },
+  {
+    "canonical": "avian-humanoid",
+    "aliases": [
+      "Avian Humanoid",
+      "Winged Follower",
+      "Avian winged-humanoid skeleton"
+    ]
+  },
+  {
+    "canonical": "serpentine-humanoid",
+    "aliases": [
+      "Serpentine Humanoid",
+      "Lamia Humanoid",
+      "Naga Humanoid",
+      "Serpentine Coil Skeleton",
+      "Lamia Coil Rig",
+      "Serpentine beast-humanoid skeleton"
+    ]
+  },
+  {
+    "canonical": "spriggan-branch",
+    "aliases": [
+      "Spriggan Branch",
+      "Spriggan Branch Body",
+      "Verdant Spirit",
+      "Branch Warden",
+      "Briar Skeleton",
+      "Branch or vine creature-humanoid skeleton"
+    ]
+  },
+  {
+    "canonical": "draconic-humanoid",
+    "aliases": [
+      "Draconic Humanoid",
+      "Dragonkin Humanoid",
+      "Wyvern Humanoid",
+      "Drake Humanoid",
+      "Dragonkin Wing Skeleton",
+      "Draconic beast-humanoid skeleton"
+    ]
+  },
+  {
+    "canonical": "insectoid-humanoid",
+    "aliases": [
+      "Insectoid Humanoid",
+      "Insectoid chitin-wing skeleton",
+      "Arachne Humanoid",
+      "Hive Follower"
+    ]
+  },
+  {
+    "canonical": "aquatic-humanoid",
+    "aliases": [
+      "Aquatic Humanoid",
+      "Aquatic fin-tail skeleton",
+      "Siren Humanoid",
+      "Merrow Follower"
+    ]
+  }
+]

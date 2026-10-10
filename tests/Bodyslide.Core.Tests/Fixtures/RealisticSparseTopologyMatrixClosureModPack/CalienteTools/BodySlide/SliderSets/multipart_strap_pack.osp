@@ -1,0 +1,10 @@
+<SliderSetInfo version="1">
+  <SliderSet name="MultipartStrapPack" set="Humanoid Strapwork">
+    <OutputPath>meshes\armor\strapworks\</OutputPath>
+    <OutputFile gender="f" use="true">multipart_strap_harness_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">multipart_strap_harness_1.nif</OutputFile>
+    <Slider name="StrapWidth" />
+    <Slider name="MultipartSplit" />
+    <Slider name="HarnessTension" />
+  </SliderSet>
+</SliderSetInfo>
