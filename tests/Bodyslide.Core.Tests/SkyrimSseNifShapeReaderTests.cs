@@ -139,6 +139,29 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void WriterPreservesRecognizedNifWhenItsLayoutIsUnsupported()
+    {
+        var source = CreateNif(
+            [new TestShape("Body", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)])],
+            streamVersion: 83);
+
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        Assert.Same(source, transformed);
+    }
+
+    [Fact]
     public void WriterPreservesExtendedVertexAttributesAndTopology()
     {
         var source = CreateNif(

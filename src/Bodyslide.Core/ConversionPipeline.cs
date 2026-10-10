@@ -25569,6 +25569,11 @@ internal sealed class LocalExportService(
             }
         }
 
+        if (sourceBytes.AsSpan().StartsWith("Gamebryo File Format,"u8))
+        {
+            return sourceBytes;
+        }
+
         if (!NifGeometrySignatureReader.TryLocateVertexBlock(sourceBytes, out var vertexDataOffset, out var vertexCount))
         {
             var floatStrideTransformed = TryApplyNifInterleavedFloatVertexTransform(sourceBytes, sourcePath, regionalMorphing, deformationCage);
