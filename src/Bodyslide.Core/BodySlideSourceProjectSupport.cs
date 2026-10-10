@@ -83,7 +83,10 @@ internal static class BodySlideSourceProjectSupport
         string Name,
         int VertexCount,
         string SourceNifPath,
-        string VertexOrderFingerprint);
+        string VertexOrderFingerprint,
+        string? MatchedMeshShapeName = null,
+        string? MatchedMeshVertexOrderFingerprint = null,
+        string? CorrespondenceEvidence = null);
 
     public static Task<ResolvedBodySlideSliders> ResolveAsync(
         ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
@@ -349,16 +352,43 @@ internal static class BodySlideSourceProjectSupport
                                     shapeTargets.Count != 1 ||
                                     candidate.ReusablePayload.VertexCount > shapeTargets.Single().VertexCount)
                                 {
-                                       return candidate;
+                                    return candidate;
                                 }
 
+                                var shapeTarget = shapeTargets.Single();
+                                if (string.IsNullOrWhiteSpace(shapeTarget.MatchedMeshShapeName) ||
+                                    string.IsNullOrWhiteSpace(shapeTarget.MatchedMeshVertexOrderFingerprint) ||
+                                    string.IsNullOrWhiteSpace(shapeTarget.CorrespondenceEvidence))
+                                {
+                                    return candidate with
+                                    {
+                                        ReusablePayload = candidate.ReusablePayload with
+                                        {
+                                            SourceShapeName = shapeTarget.Name,
+                                            SourceVertexOrderFingerprint = shapeTarget.VertexOrderFingerprint
+                                        }
+                                    };
+                                }
+
+                                var expandedDeltas = new (float X, float Y, float Z)[shapeTarget.VertexCount];
+                                for (var index = 0; index < candidate.ReusablePayload.Deltas.Count; index++)
+                                {
+                                    expandedDeltas[index] = candidate.ReusablePayload.Deltas[index];
+                                }
                                 return candidate with
                                 {
-                                       ReusablePayload = candidate.ReusablePayload with
-                                       {
-                                       SourceShapeName = shapeTargets.Single().Name,
-                                       SourceVertexOrderFingerprint = shapeTargets.Single().VertexOrderFingerprint
-                                       }
+                                    ReusablePayload = candidate.ReusablePayload with
+                                    {
+                                        VertexCount = shapeTarget.VertexCount,
+                                        Deltas = expandedDeltas,
+                                        ShapeIdentityStatus = "verified",
+                                        VertexOrderStatus = "verified",
+                                        SourceShapeName = shapeTarget.Name,
+                                        TargetShapeName = shapeTarget.MatchedMeshShapeName,
+                                        SourceVertexOrderFingerprint = shapeTarget.VertexOrderFingerprint,
+                                        TargetVertexOrderFingerprint = shapeTarget.MatchedMeshVertexOrderFingerprint,
+                                        ShapeCorrespondenceEvidence = [shapeTarget.CorrespondenceEvidence]
+                                    }
                                 };
                             })
                             .ToArray();
@@ -517,6 +547,7 @@ internal static class BodySlideSourceProjectSupport
             .Select(Path.GetFullPath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var associations = new Dictionary<string, Dictionary<string, HashSet<OspOsdShapeTarget>>>(StringComparer.OrdinalIgnoreCase);
+        var meshShapeCache = new Dictionary<string, IReadOnlyList<SkyrimSseNifShape>?>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var ospPath in ospFiles)
         {
@@ -612,11 +643,41 @@ internal static class BodySlideSourceProjectSupport
                                 targetsBySlider.Add(morphName, shapeTargets);
                             }
 
+                            var exactMatches = new List<(SkyrimSseNifShape Shape, string Evidence)>();
+                            foreach (var meshPath in meshFiles
+                                         .Where(static path => path.EndsWith(".nif", StringComparison.OrdinalIgnoreCase))
+                                         .Select(Path.GetFullPath)
+                                         .Distinct(StringComparer.OrdinalIgnoreCase))
+                            {
+                                if (!meshShapeCache.TryGetValue(meshPath, out var meshShapes))
+                                {
+                                    meshShapes = await TryReadSupportedNifShapesAsync(meshPath, cancellationToken);
+                                    meshShapeCache[meshPath] = meshShapes;
+                                }
+
+                                foreach (var meshShape in meshShapes ?? [])
+                                {
+                                    if (SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(
+                                            sourceShape,
+                                            meshShape,
+                                            out var correspondenceEvidence))
+                                    {
+                                        exactMatches.Add((meshShape, correspondenceEvidence));
+                                    }
+                                }
+                            }
+
+                            var exactMatch = exactMatches.Count == 1 ? exactMatches[0] : default;
                             shapeTargets.Add(new OspOsdShapeTarget(
                                 sourceShape.Name,
                                 sourceShape.Vertices.Count,
                                 Path.GetFullPath(sourcePath),
-                                SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(sourceShape)));
+                                SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(sourceShape),
+                                exactMatches.Count == 1 ? exactMatch.Shape.Name : null,
+                                exactMatches.Count == 1
+                                    ? SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(exactMatch.Shape)
+                                    : null,
+                                exactMatches.Count == 1 ? exactMatch.Evidence : null));
                         }
                     }
                 }
@@ -627,6 +688,28 @@ internal static class BodySlideSourceProjectSupport
         }
 
         return associations;
+    }
+
+    private static async Task<IReadOnlyList<SkyrimSseNifShape>?> TryReadSupportedNifShapesAsync(
+        string nifPath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var fileInfo = new FileInfo(nifPath);
+            if (!fileInfo.Exists || fileInfo.Length <= 0 || fileInfo.Length > 512L * 1024 * 1024)
+            {
+                return null;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(nifPath, cancellationToken);
+            var result = SkyrimSseNifShapeReader.Read(bytes);
+            return result.Supported ? result.Shapes : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static string? ResolveUniqueLinkedAssetPath(

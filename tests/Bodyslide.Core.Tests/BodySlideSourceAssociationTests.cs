@@ -75,6 +75,73 @@ public sealed class BodySlideSourceAssociationTests
     }
 
     [Theory]
+    [InlineData("Torso", false, true)]
+    [InlineData("OtherShape", false, false)]
+    [InlineData("Torso", true, false)]
+    public async Task OsdPayloadReuseRequiresExactUniqueInputShapeCorrespondence(
+        string inputShapeName,
+        bool duplicateExactMesh,
+        bool expectedVerified)
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(root, "meshes", "armor", "traveler");
+        var projectDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+        try
+        {
+            var mesh = Path.Combine(meshDirectory, "traveler_0.nif");
+            var project = Path.Combine(projectDirectory, "traveler.osp");
+            var inputNif = SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets(inputShapeName);
+            await File.WriteAllBytesAsync(mesh, inputNif);
+            var inputMeshes = new List<string> { mesh };
+            if (duplicateExactMesh)
+            {
+                var duplicateMesh = Path.Combine(root, "meshes", "duplicate", "copy.nif");
+                Directory.CreateDirectory(Path.GetDirectoryName(duplicateMesh)!);
+                await File.WriteAllBytesAsync(duplicateMesh, inputNif);
+                inputMeshes.Add(duplicateMesh);
+            }
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "base.nif"),
+                SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso"));
+            await File.WriteAllBytesAsync(Path.Combine(shapeDataDirectory, "shared.osd"), OsdMorph("Waist"));
+            await File.WriteAllTextAsync(project, OspWithDataTarget("Torso"));
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, inputMeshes, [], [], [project]), "CBBE", CancellationToken.None);
+
+            var payload = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
+            Assert.Equal(expectedVerified ? "verified" : "unresolved", payload.ShapeIdentityStatus);
+            Assert.Equal(expectedVerified ? "verified" : "unverified", payload.VertexOrderStatus);
+            if (expectedVerified)
+            {
+                Assert.Equal("Torso", payload.SourceShapeName);
+                Assert.Equal("Torso", payload.TargetShapeName);
+                Assert.Equal(3, payload.VertexCount);
+                Assert.Equal(3, payload.Deltas.Count);
+                Assert.Equal((0.25f, 0f, 0f), payload.Deltas[0]);
+                Assert.Equal((0f, 0f, 0f), payload.Deltas[1]);
+                Assert.Equal(payload.SourceVertexOrderFingerprint, payload.TargetVertexOrderFingerprint);
+                Assert.Contains(
+                    payload.ShapeCorrespondenceEvidence!,
+                    static evidence => evidence.StartsWith(
+                        "exact-ordered-shape-geometry-and-topology-sha256:",
+                        StringComparison.Ordinal));
+            }
+            else
+            {
+                Assert.Null(payload.TargetShapeName);
+                Assert.Null(payload.TargetVertexOrderFingerprint);
+                Assert.Null(payload.ShapeCorrespondenceEvidence);
+            }
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ImportedPackProjectsDoNotAddUnrelatedArmorSliders(bool singleProjectFile)

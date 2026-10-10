@@ -31014,7 +31014,7 @@ public sealed class OutputCompletenessTests
             TargetShapeName: "Body",
             SourceVertexOrderFingerprint: new string('a', 64),
             TargetVertexOrderFingerprint: new string('A', 64),
-            ShapeCorrespondenceEvidence: [$"exact-ordered-shape-geometry-and-topology-sha256:{new string('b', 64)}"]);
+            ShapeCorrespondenceEvidence: [$"exact-ordered-shape-geometry-and-topology-sha256:{new string('b', 64)}:vertex-order-sha256:{new string('a', 64)}"]);
         var payloads = new SourceMorphPayloadVariants(candidate, Payloads: [candidate, candidate with { SourceAssetName = "second.tri" }]);
         var candidates = new Dictionary<string, SourceMorphPayloadVariants>(StringComparer.OrdinalIgnoreCase)
         {
@@ -31029,6 +31029,20 @@ public sealed class OutputCompletenessTests
         candidates["Waist"] = new SourceMorphPayloadVariants(
             mismatchedShapeCase,
             Payloads: [mismatchedShapeCase]);
+        arguments = [candidates, "Waist", false, 2, null, null, null, null];
+        Assert.False(Assert.IsType<bool>(select.Invoke(null, arguments)));
+        Assert.Null(arguments[5]);
+
+        var evidenceWithMismatchedOrderFingerprint = candidate with
+        {
+            ShapeCorrespondenceEvidence =
+            [
+                $"exact-ordered-shape-geometry-and-topology-sha256:{new string('b', 64)}:vertex-order-sha256:{new string('c', 64)}"
+            ]
+        };
+        candidates["Waist"] = new SourceMorphPayloadVariants(
+            evidenceWithMismatchedOrderFingerprint,
+            Payloads: [evidenceWithMismatchedOrderFingerprint]);
         arguments = [candidates, "Waist", false, 2, null, null, null, null];
         Assert.False(Assert.IsType<bool>(select.Invoke(null, arguments)));
         Assert.Null(arguments[5]);

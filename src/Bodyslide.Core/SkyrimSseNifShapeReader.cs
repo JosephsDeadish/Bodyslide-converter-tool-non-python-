@@ -461,7 +461,9 @@ internal static class SkyrimSseNifShapeCorrespondence
             return false;
         }
 
-        evidence = $"exact-ordered-shape-geometry-and-topology-sha256:{ComputeFingerprint(source)}";
+        evidence =
+            $"exact-ordered-shape-geometry-and-topology-sha256:{ComputeFingerprint(source)}" +
+            $":vertex-order-sha256:{ComputeVertexOrderFingerprint(source)}";
         return true;
     }
 

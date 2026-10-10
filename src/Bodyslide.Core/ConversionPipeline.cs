@@ -41645,13 +41645,28 @@ internal sealed class LocalExportService(
             string.Equals(payload.SourceShapeName, payload.TargetShapeName, StringComparison.Ordinal) &&
             IsSha256Fingerprint(payload.SourceVertexOrderFingerprint) &&
             string.Equals(payload.SourceVertexOrderFingerprint, payload.TargetVertexOrderFingerprint, StringComparison.OrdinalIgnoreCase) &&
-            payload.ShapeCorrespondenceEvidence!.Any(IsExactShapeCorrespondenceEvidence);
+            payload.ShapeCorrespondenceEvidence!.Any(evidence =>
+                IsExactShapeCorrespondenceEvidence(evidence, payload.SourceVertexOrderFingerprint!));
 
-        private static bool IsExactShapeCorrespondenceEvidence(string evidence)
+        private static bool IsExactShapeCorrespondenceEvidence(string evidence, string expectedVertexOrderFingerprint)
         {
             const string prefix = "exact-ordered-shape-geometry-and-topology-sha256:";
-            return evidence.StartsWith(prefix, StringComparison.Ordinal) &&
-                   IsSha256Fingerprint(evidence[prefix.Length..]);
+            const string vertexOrderMarker = ":vertex-order-sha256:";
+            if (!evidence.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var separator = evidence.IndexOf(vertexOrderMarker, prefix.Length, StringComparison.Ordinal);
+            if (separator != prefix.Length + 64 ||
+                !IsSha256Fingerprint(evidence[prefix.Length..separator]))
+            {
+                return false;
+            }
+
+            var evidenceVertexOrder = evidence[(separator + vertexOrderMarker.Length)..];
+            return IsSha256Fingerprint(evidenceVertexOrder) &&
+                   string.Equals(evidenceVertexOrder, expectedVertexOrderFingerprint, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsSha256Fingerprint(string? value) =>
