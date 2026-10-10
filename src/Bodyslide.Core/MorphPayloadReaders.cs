@@ -529,6 +529,7 @@ internal static class TriMorphReader
             if (bytes.Length - offset < 3) return false;
             var nameLength = bytes[offset++];
             if (bytes.Length - offset < nameLength + 2) return false;
+            _ = StrictUtf8.GetString(bytes.Slice(offset, nameLength));
             offset += nameLength;
             var morphCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..]);
             offset += 2;
@@ -537,6 +538,7 @@ internal static class TriMorphReader
                 if (bytes.Length - offset < 7) return false;
                 var morphNameLength = bytes[offset++];
                 if (bytes.Length - offset < morphNameLength + 6) return false;
+                _ = StrictUtf8.GetString(bytes.Slice(offset, morphNameLength));
                 offset += morphNameLength;
                 var multiplier = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..]));
                 offset += 4;

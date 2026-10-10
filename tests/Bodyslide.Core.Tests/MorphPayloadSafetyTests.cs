@@ -159,6 +159,18 @@ public sealed class MorphPayloadSafetyTests
     }
 
     [Fact]
+    public void BodyTriRejectsMalformedUtf8NamesInOptionalUvSection()
+    {
+        var malformedShapeName = BodyTriWithUv(false, true);
+        malformedShapeName[9] = 0xff;
+        Assert.False(TriMorphReader.TryRead(malformedShapeName, out _));
+
+        var malformedMorphName = BodyTriWithUv(false, true);
+        malformedMorphName[13] = 0xff;
+        Assert.False(TriMorphReader.TryRead(malformedMorphName, out _));
+    }
+
+    [Fact]
     public void BodyTriRejectsDuplicateShapeNamesThatWouldMakeAssociationAmbiguous()
     {
         Assert.False(TriMorphReader.TryRead(
