@@ -19046,11 +19046,19 @@ internal static class BodySlideLayoutPlanner
             .Select(group =>
             {
                 var items = group.ToList();
-                var primary = items.FirstOrDefault(static item => item.IsLowWeightVariant) ?? items[0];
-                var lowVariant = items.FirstOrDefault(static item => item.IsLowWeightVariant) ?? primary;
-                var highVariant = lowVariant.IsLowWeightVariant
-                    ? items.FirstOrDefault(static item => item.IsHighWeightVariant)
-                    : null;
+                var lowVariant = items.FirstOrDefault(static item => item.IsLowWeightVariant);
+                var highVariant = items.FirstOrDefault(static item => item.IsHighWeightVariant);
+                var primary = lowVariant ?? highVariant ?? items[0];
+                var outputFile0 = lowVariant is not null
+                    ? lowVariant.FileName
+                    : highVariant is not null
+                        ? BuildWeightVariantFileName(highVariant.FileName, isHighWeight: false)
+                        : primary.FileName;
+                var outputFile1 = highVariant is not null
+                    ? highVariant.FileName
+                    : lowVariant is not null
+                        ? BuildWeightVariantFileName(lowVariant.FileName, isHighWeight: true)
+                        : null;
                 var sliderSetName = meshInfos.Count > 1
                     ? $"{projectName} - {group.First().GroupName}"
                     : projectName;
@@ -19059,11 +19067,25 @@ internal static class BodySlideLayoutPlanner
                     sliderSetName,
                     setFolder,
                     primary.FileName,
-                    armor.BodySlideOutputPath ?? lowVariant.OutputPath,
-                    lowVariant.FileName,
-                    highVariant?.FileName);
+                    armor.BodySlideOutputPath ?? primary.OutputPath,
+                    outputFile0,
+                    outputFile1);
             })
             .ToList();
+    }
+
+    private static string BuildWeightVariantFileName(string fileName, bool isHighWeight)
+    {
+        var suffix = isHighWeight ? "_1" : "_0";
+        var extension = Path.GetExtension(fileName);
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        if (stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+            stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+        {
+            stem = stem[..^2];
+        }
+
+        return stem + suffix + extension;
     }
 
     private static MeshInfo CreateMeshInfo(string sourcePath, string meshPath)

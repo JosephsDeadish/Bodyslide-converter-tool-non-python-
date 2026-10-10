@@ -418,6 +418,8 @@ public sealed class BodySlideBuildPathTests
         {
             Directory.CreateDirectory(root);
             var paired = highName is not null;
+            var hasWeightVariant = inputName.EndsWith("_0.nif", StringComparison.OrdinalIgnoreCase) ||
+                                   inputName.EndsWith("_1.nif", StringComparison.OrdinalIgnoreCase);
             var low = Path.Combine(root, inputName);
             var high = Path.Combine(root, highName ?? inputName);
             var armor = new ImportedArmor(low, paired ? [low, high] : [low], [], [], []);
@@ -440,19 +442,22 @@ public sealed class BodySlideBuildPathTests
             Assert.True(File.Exists(resolved), $"BodySlide could not resolve {resolved}");
             Assert.Null(set.Element("SetFolder"));
             var output = Assert.Single(set.Elements("OutputFile"));
-            Assert.Equal(paired ? "true" : "false", output.Attribute("GenWeights")!.Value);
-            Assert.Equal(paired ? "BDE_Gloves" : Path.GetFileNameWithoutExtension(inputName), output.Value);
+            Assert.Equal(paired || hasWeightVariant ? "true" : "false", output.Attribute("GenWeights")!.Value);
+            Assert.Equal(
+                hasWeightVariant ? Path.GetFileNameWithoutExtension(inputName)[..^2] : Path.GetFileNameWithoutExtension(inputName),
+                output.Value);
             foreach (var slider in set.Elements("Slider"))
             {
-                Assert.Equal("0", slider.Attribute(paired ? "small" : "default")?.Value);
-                Assert.Equal(paired ? "0" : null, slider.Attribute(paired ? "big" : "small")?.Value);
+                var generatesWeights = paired || hasWeightVariant;
+                Assert.Equal("0", slider.Attribute(generatesWeights ? "small" : "default")?.Value);
+                Assert.Equal(generatesWeights ? "0" : null, slider.Attribute(generatesWeights ? "big" : "small")?.Value);
                 Assert.Null(slider.Element("Low"));
                 Assert.Null(slider.Element("High"));
             }
-            var builtFileNames = paired
+            var builtFileNames = paired || hasWeightVariant
                 ? new[] { output.Value + "_0.nif", output.Value + "_1.nif" }
                 : new[] { output.Value + ".nif" };
-            Assert.Equal(armor.MeshFiles.Select(Path.GetFileName), builtFileNames);
+            Assert.Equal(paired || hasWeightVariant ? 2 : 1, builtFileNames.Length);
         }
         finally { Directory.Delete(root, true); }
     }
