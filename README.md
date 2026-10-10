@@ -122,15 +122,17 @@ semantics. Conversion quality reports the high-severity
 not build-ready; missing, unreadable, unsupported, or unverified source data must
 not be guessed into a successful OSD build.
 For unambiguous matched sliders, the exporter carries across finite `default`,
-`small`, and `big` values plus the `invert` flag; the slider-level zap flag is
-retained as well. Conflicting controls for the same slider are withheld and
-reported. Other matched source OSP settings that the exporter rebuilds or does not
-understand—including custom set/path options, output-path relocation, nested
-`<Low>`/`<High>` ranges, UV data, weight-output mode, references, and seam/normal
-flags—are listed in `SourceAssetSupport.UnsupportedOspSemantics` and produce the
-medium-severity `source-osp-semantics-not-preserved` issue. Invalid control values
-are also reported. These diagnostics identify settings needing review; they do not
-claim the project is otherwise compatible.
+`small`, and `big` values plus the `invert` flag; paired simple numeric `<Low>`
+and `<High>` elements are normalized to the generated `small` and `big` controls.
+The slider-level zap flag is retained as well. Conflicting controls or conflicting
+range representations are withheld and reported. Other matched source OSP
+settings that the exporter rebuilds or does not understand—including custom
+set/path options, output-path relocation, incomplete or extended `<Low>`/`<High>`
+ranges, UV data, weight-output mode, references, and seam/normal flags—are listed
+in `SourceAssetSupport.UnsupportedOspSemantics` and produce the medium-severity
+`source-osp-semantics-not-preserved` issue. Invalid control values are also
+reported. These diagnostics identify settings needing review; they do not claim
+the project is otherwise compatible.
 TRI files are a separate in-game morph format, not substitutes for OSD shape
 deltas. The converter intentionally withholds generated TRI files because its
 current morph path cannot prove target-shape identity and vertex-order

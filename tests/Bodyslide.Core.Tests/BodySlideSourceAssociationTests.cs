@@ -193,6 +193,77 @@ public sealed class BodySlideSourceAssociationTests
     }
 
     [Fact]
+    public async Task MatchedOspNormalizesSimpleLowHighRangesToWeightControls()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var mesh = Path.Combine(root, "jacket_0.nif");
+            var project = Path.Combine(root, "source.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <SliderSet name="Jacket">
+                    <OutputFile GenWeights="true">jacket</OutputFile>
+                    <Slider name="Fit" invert="true">
+                      <Low value="0.1" />
+                      <High value="0.9" />
+                    </Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            Assert.Equal(new OspSliderControlSettings(null, 0.1, 0.9, true), result.SliderControlSettings!["Fit"]);
+            Assert.Contains("slider-weight-ranges-normalized", result.SourceAssetSupport!.UnsupportedOspSemantics);
+            Assert.DoesNotContain("slider-weight-ranges-rebuilt", result.SourceAssetSupport.UnsupportedOspSemantics);
+
+            var target = new BodySlideMeshTarget(
+                "Project", "Project", "source.nif", "meshes\\armor\\", "jacket_0.nif", "jacket_1.nif");
+            var outputSlider = Assert.Single(XDocument.Parse(BodySlideOspProjectService.BuildOspXmlWithSliderSettings(
+                ["Fit"], [], [target], "female", result.SliderControlSettings)).Descendants("Slider"));
+            Assert.Equal("0.1", (string?)outputSlider.Attribute("small"));
+            Assert.Equal("0.9", (string?)outputSlider.Attribute("big"));
+            Assert.Equal("true", (string?)outputSlider.Attribute("invert"));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task ConflictingOspSliderRangesAreReportedAndNotPreserved()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var mesh = Path.Combine(root, "jacket_0.nif");
+            var project = Path.Combine(root, "source.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <SliderSet name="Jacket">
+                    <OutputFile GenWeights="true">jacket</OutputFile>
+                    <Slider name="Fit" small="0.2">
+                      <Low value="0.1" />
+                      <High value="0.9" />
+                    </Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            Assert.DoesNotContain("Fit", result.SliderControlSettings!.Keys);
+            Assert.Contains("ambiguous-slider-control-settings", result.SourceAssetSupport!.UnsupportedOspSemantics);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task ConflictingOrInvalidOspSliderControlsAreNotPreservedSilently()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

@@ -1438,7 +1438,12 @@ internal static class BodySlideSourceProjectSupport
                     continue;
                 }
 
-                var settings = ParseSliderControlSettings(sliderElement);
+                var settings = ParseSliderControlSettings(sliderElement, out var hasConflictingRanges);
+                if (hasConflictingRanges)
+                {
+                    sliderControlSettings.Remove(name!);
+                    ambiguousSliderControlSettings.Add(name!);
+                }
                 if (!ambiguousSliderControlSettings.Contains(name!))
                 {
                     if (sliderControlSettings.TryGetValue(name!, out var existing) && existing != settings)
@@ -1515,13 +1520,26 @@ internal static class BodySlideSourceProjectSupport
                 element.Name.LocalName.Equals("High", StringComparison.OrdinalIgnoreCase)).ToArray();
             if (sliderRangeElements.Length > 0)
             {
-                semantics.Add("slider-weight-ranges-rebuilt");
+                var hasSimpleRanges = TryReadSimpleSliderRanges(slider, out _, out _, out var hasConflictingRanges);
+                semantics.Add(hasSimpleRanges
+                    ? "slider-weight-ranges-normalized"
+                    : "slider-weight-ranges-rebuilt");
+                if (hasConflictingRanges)
+                {
+                    semantics.Add("ambiguous-slider-control-settings");
+                }
                 if (sliderRangeElements.Any(static element =>
                         element.Attributes().Any(attribute =>
                             !attribute.Name.LocalName.Equals("value", StringComparison.OrdinalIgnoreCase)) ||
                         element.Elements().Any()))
                 {
                     semantics.Add("slider-weight-range-options");
+                }
+                if (sliderRangeElements.Any(static element =>
+                        element.Attribute("value") is { } value &&
+                        !TryParseFiniteSliderValue(value.Value, out _)))
+                {
+                    semantics.Add("invalid-slider-control-values");
                 }
             }
 
@@ -1654,7 +1672,7 @@ internal static class BodySlideSourceProjectSupport
         return semantics.Order(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    private static OspSliderControlSettings ParseSliderControlSettings(XElement slider)
+    private static OspSliderControlSettings ParseSliderControlSettings(XElement slider, out bool hasConflictingRanges)
     {
         double? ReadValue(string name)
         {
@@ -1664,11 +1682,78 @@ internal static class BodySlideSourceProjectSupport
                 : null;
         }
 
+        var hasSimpleRanges = TryReadSimpleSliderRanges(slider, out var lowValue, out var highValue, out hasConflictingRanges);
+        var smallValue = ReadValue("small");
+        var bigValue = ReadValue("big");
+        if (hasSimpleRanges)
+        {
+            smallValue ??= lowValue;
+            bigValue ??= highValue;
+        }
+
         return new OspSliderControlSettings(
             ReadValue("default"),
-            ReadValue("small"),
-            ReadValue("big"),
+            smallValue,
+            bigValue,
             IsTruthy(slider.Attribute("invert")?.Value));
+    }
+
+    private static bool TryReadSimpleSliderRanges(
+        XElement slider,
+        out double? lowValue,
+        out double? highValue,
+        out bool hasConflictingRanges)
+    {
+        lowValue = null;
+        highValue = null;
+        hasConflictingRanges = false;
+
+        var ranges = slider.Elements().Where(static element =>
+            element.Name.LocalName.Equals("Low", StringComparison.OrdinalIgnoreCase) ||
+            element.Name.LocalName.Equals("High", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (ranges.Length != 2 ||
+            ranges.Count(static element => element.Name.LocalName.Equals("Low", StringComparison.OrdinalIgnoreCase)) != 1 ||
+            ranges.Count(static element => element.Name.LocalName.Equals("High", StringComparison.OrdinalIgnoreCase)) != 1)
+        {
+            return false;
+        }
+
+        foreach (var range in ranges)
+        {
+            if (range.Attributes().Any(static attribute => !attribute.Name.LocalName.Equals("value", StringComparison.OrdinalIgnoreCase)) ||
+                range.Elements().Any() ||
+                range.Attribute("value") is not { } valueAttribute ||
+                !TryParseFiniteSliderValue(valueAttribute.Value, out var value))
+            {
+                return false;
+            }
+
+            var isLow = range.Name.LocalName.Equals("Low", StringComparison.OrdinalIgnoreCase);
+            var explicitValue = slider.Attribute(isLow ? "small" : "big");
+            if (explicitValue is not null)
+            {
+                if (!TryParseFiniteSliderValue(explicitValue.Value, out var parsedExplicitValue))
+                {
+                    continue;
+                }
+
+                if (parsedExplicitValue != value)
+                {
+                    hasConflictingRanges = true;
+                }
+            }
+
+            if (isLow)
+            {
+                lowValue = value;
+            }
+            else
+            {
+                highValue = value;
+            }
+        }
+
+        return !hasConflictingRanges;
     }
 
     private static bool TryParseFiniteSliderValue(string? rawValue, out double value)
