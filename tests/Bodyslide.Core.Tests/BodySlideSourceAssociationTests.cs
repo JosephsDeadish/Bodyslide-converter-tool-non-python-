@@ -649,7 +649,7 @@ public sealed class BodySlideSourceAssociationTests
                 new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
 
             Assert.Equal(
-                ["output-path-rebuilt", "weight-variant-output-mode-rebuilt"],
+                ["data-folder-rebuilt", "output-path-rebuilt", "weight-variant-output-mode-rebuilt"],
                 result.SourceAssetSupport!.UnsupportedOspSemantics);
         }
         finally { Directory.Delete(root, true); }
