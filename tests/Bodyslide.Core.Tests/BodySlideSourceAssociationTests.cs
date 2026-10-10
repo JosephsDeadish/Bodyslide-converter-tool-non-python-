@@ -224,6 +224,40 @@ public sealed class BodySlideSourceAssociationTests
     }
 
     [Fact]
+    public async Task OsdPayloadLinkedFromDifferentSourceNifsRemainsAmbiguous()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(root, "meshes", "armor", "traveler");
+        var projectDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+        try
+        {
+            var mesh = Path.Combine(meshDirectory, "traveler_0.nif");
+            var project = Path.Combine(projectDirectory, "traveler.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "base.nif"),
+                SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso"));
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "alternate.nif"),
+                SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso"));
+            await File.WriteAllBytesAsync(Path.Combine(shapeDataDirectory, "shared.osd"), OsdMorph("Waist"));
+            await File.WriteAllTextAsync(project, OspWithMultipleSourceNifs());
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            var payload = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
+            Assert.Null(payload.SourceShapeName);
+            Assert.Equal("unresolved", payload.ShapeIdentityStatus);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task OsdPayloadDoesNotAssociateWhenOspTargetIsNotInSourceNif()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -397,6 +431,25 @@ public sealed class BodySlideSourceAssociationTests
     }
 
     private static string OspWithDataTarget(string target) => OspWithDataTargets(target);
+
+    private static string OspWithMultipleSourceNifs() => """
+        <SliderSetInfo>
+          <SliderSet name="TravelerBase">
+            <DataFolder>TravelerProject</DataFolder>
+            <SourceFile>base.nif</SourceFile>
+            <OutputPath>meshes\armor\traveler\</OutputPath>
+            <OutputFile>traveler_0.nif</OutputFile>
+            <Slider name="Waist"><Data target="Torso">shared.osd#Waist</Data></Slider>
+          </SliderSet>
+          <SliderSet name="TravelerAlternate">
+            <DataFolder>TravelerProject</DataFolder>
+            <SourceFile>alternate.nif</SourceFile>
+            <OutputPath>meshes\armor\traveler\</OutputPath>
+            <OutputFile>traveler_0.nif</OutputFile>
+            <Slider name="Waist"><Data target="Torso">shared.osd#Waist</Data></Slider>
+          </SliderSet>
+        </SliderSetInfo>
+        """;
 
     private static string OspWithDataTargets(params string[] targets) => $"""
         <SliderSetInfo>

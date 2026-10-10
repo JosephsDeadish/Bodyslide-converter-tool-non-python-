@@ -72,7 +72,7 @@ internal static class BodySlideSourceProjectSupport
         IReadOnlyList<string> ReferencedPaths,
         IReadOnlyList<string>? DataFolders = null);
 
-    private sealed record OspOsdShapeTarget(string Name, int VertexCount);
+    private sealed record OspOsdShapeTarget(string Name, int VertexCount, string SourceNifPath);
 
     public static Task<ResolvedBodySlideSliders> ResolveAsync(
         ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
@@ -575,7 +575,10 @@ internal static class BodySlideSourceProjectSupport
                                 targetsBySlider.Add(morphName, shapeTargets);
                             }
 
-                            shapeTargets.Add(new OspOsdShapeTarget(sourceShape.Name, sourceShape.Vertices.Count));
+                            shapeTargets.Add(new OspOsdShapeTarget(
+                                sourceShape.Name,
+                                sourceShape.Vertices.Count,
+                                Path.GetFullPath(sourcePath)));
                         }
                     }
                 }
