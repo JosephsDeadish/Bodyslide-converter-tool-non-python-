@@ -56,10 +56,9 @@ public sealed class BodySlideOspProjectServiceTests
         var slider = Assert.Single(document.Descendants("Slider"));
 
         Assert.Equal(expectedValue, (string?)slider.Attribute(expectedAttribute));
-        if (generateWeights)
-        {
-            Assert.Equal("0.8", (string?)slider.Attribute("big"));
-        }
+        Assert.Equal("0.25", (string?)slider.Attribute("default"));
+        Assert.Equal("0.1", (string?)slider.Attribute("small"));
+        Assert.Equal("0.8", (string?)slider.Attribute("big"));
         Assert.Equal("true", (string?)slider.Attribute("invert"));
         Assert.Equal("true", (string?)slider.Attribute("uv"));
     }

@@ -18905,10 +18905,33 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
         static string Format(double? value) =>
             (value ?? 0d).ToString("R", System.Globalization.CultureInfo.InvariantCulture);
 
-        var endpoints = generateWeights
-            ? $"small=\"{Format(settings?.SmallValue)}\" big=\"{Format(settings?.BigValue)}\""
-            : $"default=\"{Format(settings?.DefaultValue)}\"";
-        return $"{endpoints} invert=\"{(settings?.Invert == true ? "true" : "false")}\" uv=\"{(settings?.Uv == true ? "true" : "false")}\"";
+        var controls = new List<string>();
+        if (generateWeights)
+        {
+            controls.Add($"small=\"{Format(settings?.SmallValue)}\"");
+            controls.Add($"big=\"{Format(settings?.BigValue)}\"");
+        }
+        else
+        {
+            controls.Add($"default=\"{Format(settings?.DefaultValue)}\"");
+        }
+
+        if (settings?.DefaultValue is not null && generateWeights)
+        {
+            controls.Add($"default=\"{Format(settings.DefaultValue)}\"");
+        }
+        if (settings?.SmallValue is not null && !generateWeights)
+        {
+            controls.Add($"small=\"{Format(settings.SmallValue)}\"");
+        }
+        if (settings?.BigValue is not null && !generateWeights)
+        {
+            controls.Add($"big=\"{Format(settings.BigValue)}\"");
+        }
+
+        controls.Add($"invert=\"{(settings?.Invert == true ? "true" : "false")}\"");
+        controls.Add($"uv=\"{(settings?.Uv == true ? "true" : "false")}\"");
+        return string.Join(' ', controls);
     }
 
     internal static string BuildSliderGroupsXml(
