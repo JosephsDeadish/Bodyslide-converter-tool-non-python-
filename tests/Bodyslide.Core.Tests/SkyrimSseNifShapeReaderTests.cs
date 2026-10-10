@@ -191,20 +191,21 @@ public sealed class SkyrimSseNifShapeReaderTests
 
             Assert.True(result.Success);
             var sourceShapes = SkyrimSseNifShapeReader.Read(sourceBytes).Shapes;
-            var savedNifs = Directory.GetFiles(outputDirectory, "*.nif", SearchOption.AllDirectories);
-            var roundTrippedShapes = savedNifs
-                .Select(path => (Path: path, Read: SkyrimSseNifShapeReader.Read(File.ReadAllBytes(path))))
-                .Where(static item => item.Read.Supported &&
-                                      item.Read.Shapes.Select(static shape => shape.Name)
-                                          .SequenceEqual(["RoundTripBody", "RoundTripDetail"]))
-                .ToArray();
+            var outputMeshesDirectory = Path.Combine(outputDirectory, "meshes");
+            var savedArmorNifs = Directory.GetFiles(outputMeshesDirectory, "*.nif", SearchOption.AllDirectories);
+            Assert.NotEmpty(savedArmorNifs);
+            Assert.Contains(savedArmorNifs, path =>
+                !File.ReadAllBytes(path).AsSpan().SequenceEqual(sourceBytes));
 
-            var savedNif = Assert.Single(roundTrippedShapes);
-            Assert.True(new FileInfo(savedNif.Path).Length > 0);
-            Assert.Equal(sourceShapes.Select(static shape => shape.Name), savedNif.Read.Shapes.Select(static shape => shape.Name));
-            Assert.Equal(sourceShapes.Select(static shape => shape.TriangleIndices), savedNif.Read.Shapes.Select(static shape => shape.TriangleIndices));
-            Assert.All(savedNif.Read.Shapes.SelectMany(static shape => shape.Vertices),
-                static vertex => Assert.True(float.IsFinite(vertex.X) && float.IsFinite(vertex.Y) && float.IsFinite(vertex.Z)));
+            foreach (var savedNif in savedArmorNifs)
+            {
+                var readResult = SkyrimSseNifShapeReader.Read(await File.ReadAllBytesAsync(savedNif));
+                Assert.True(readResult.Supported, readResult.Diagnostic);
+                Assert.Equal(sourceShapes.Select(static shape => shape.Name), readResult.Shapes.Select(static shape => shape.Name));
+                Assert.Equal(sourceShapes.Select(static shape => shape.TriangleIndices), readResult.Shapes.Select(static shape => shape.TriangleIndices));
+                Assert.All(readResult.Shapes.SelectMany(static shape => shape.Vertices),
+                    static vertex => Assert.True(float.IsFinite(vertex.X) && float.IsFinite(vertex.Y) && float.IsFinite(vertex.Z)));
+            }
         }
         finally
         {
