@@ -3838,11 +3838,6 @@ internal static class NifGeometrySignatureReader
     private static readonly int[] CommonFloatVertexPrefixPaddings = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96];
     private static readonly string[] FootwearKeywords = ["boot", "boots", "shoe", "shoes", "sandal", "sandals", "slipper", "slippers", "footwear", "heel", "heels"];
     private static readonly string[] HighHeelKeywords = ["highheel", "high-heel", "heel", "heels", "stiletto", "platform", "wedge", "pump", "pumps"];
-    private static readonly IReadOnlySet<int> SupportedPartitionSlots = new HashSet<int>
-    {
-        30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 54, 55, 56
-    };
-
     internal sealed record NifMeshMetadata(
         string? SkinInstanceType,
         IReadOnlyList<int> PartitionSlots,
@@ -6015,6 +6010,7 @@ internal static class NifGeometrySignatureReader
         if (!string.IsNullOrWhiteSpace(metadata.SkinInstanceType))
         {
             messages.Add($"skin-instance:{metadata.SkinInstanceType}");
+            messages.Add("skin-partition-slots-unverified");
         }
 
         if (metadata.PartitionSlots.Count > 0)
@@ -6191,7 +6187,6 @@ internal static class NifGeometrySignatureReader
     private static NifMeshMetadata ExtractMetadata(byte[] bytes)
     {
         var boneNames = SkeletonNifBoneParser.ExtractBoneNames(bytes);
-        var partitionSlots = new HashSet<int>();
         string? skinInstanceType = null;
 
         if (NifBlockGraphParser.TryParse(bytes, out var graph) && graph is not null)
@@ -6211,43 +6206,12 @@ internal static class NifGeometrySignatureReader
                 ?? skinNodes
                     .Select(static node => node.TypeName)
                     .FirstOrDefault();
-
-            foreach (var node in skinNodes)
-            {
-                CollectLikelyPartitionSlots(bytes, node.StartOffset, node.EndOffset, partitionSlots);
-                foreach (var referenceIndex in node.ReferencedBlockIndices)
-                {
-                    if (referenceIndex >= 0 && referenceIndex < graph.Nodes.Count)
-                    {
-                        var referenced = graph.Nodes[referenceIndex];
-                        CollectLikelyPartitionSlots(bytes, referenced.StartOffset, referenced.EndOffset, partitionSlots);
-                    }
-                }
-            }
         }
 
         return new NifMeshMetadata(
             skinInstanceType,
-            partitionSlots.OrderBy(static slot => slot).ToList(),
+            [],
             boneNames);
-    }
-
-    private static void CollectLikelyPartitionSlots(
-        byte[] bytes,
-        int startOffset,
-        int endOffset,
-        ISet<int> slots)
-    {
-        var scanStart = Math.Max(0, startOffset);
-        var scanEnd = Math.Min(bytes.Length - sizeof(int), endOffset);
-        for (var offset = scanStart; offset <= scanEnd; offset++)
-        {
-            var candidate = BitConverter.ToInt32(bytes, offset);
-            if (SupportedPartitionSlots.Contains(candidate))
-            {
-                slots.Add(candidate);
-            }
-        }
     }
 
     private static (MeshGeometrySignature? Signature, string Mode) TryReadWithMode(byte[] bytes)

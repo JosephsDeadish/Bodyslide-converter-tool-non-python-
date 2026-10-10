@@ -36073,7 +36073,7 @@ public async Task ConvertAsync_WithUnsupportedNif_RecordsNifSupportValidation()
 }
 
 [Fact]
-public async Task ConvertAsync_WithSkinPartitionNif_SurfacesParsedPartitionMetadata()
+public async Task ConvertAsync_WithSkinPartitionNif_DoesNotTreatHeuristicSlotMatchesAsParsedMetadata()
 {
     var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
     var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -36090,19 +36090,20 @@ public async Task ConvertAsync_WithSkinPartitionNif_SurfacesParsedPartitionMetad
         var inspection = await inspector.InspectAsync(inputFile, "CBBE");
         var nifSupport = Assert.Single(inspection.NifSupport ?? []);
         Assert.Equal("BSDismemberSkinInstance", nifSupport.SkinInstanceType);
-        Assert.Equal([32, 37], nifSupport.PartitionSlots);
+        Assert.Empty(nifSupport.PartitionSlots ?? []);
+        Assert.Contains("skin-partition-slots-unverified", nifSupport.Messages);
 
         var orchestrator = StandaloneConversionModules.CreateDefault();
         var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
         Assert.True(result.Success);
-        Assert.Contains(result.Steps, step => step == "nif-skin-partitions:32,37");
+        Assert.DoesNotContain(result.Steps, step => step.StartsWith("nif-skin-partitions:", StringComparison.Ordinal));
 
         var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
         Assert.Contains("\"SkinInstanceType\": \"BSDismemberSkinInstance\"", qualityJson, StringComparison.Ordinal);
-        Assert.Contains("\"PartitionSlots\": [", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"PartitionSlots\": []", qualityJson, StringComparison.Ordinal);
         Assert.Contains("\"PartitionSignals\":", qualityJson, StringComparison.Ordinal);
-        Assert.Contains("\"SourceNifSlots\": [", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"SourceNifSlots\": []", qualityJson, StringComparison.Ordinal);
         Assert.Contains("\"FinalSlots\": [", qualityJson, StringComparison.Ordinal);
     }
     finally

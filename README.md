@@ -350,7 +350,9 @@ shape's own ordered positions and triangle indexes, retaining the original verte
 stride. For supported skinned shapes, the writer patches only position bytes and
 preserves topology, skin/partition blocks, other vertex attributes, and all other
 file bytes unchanged. Skin weights and partition semantics are not decoded or
-rewritten; these outputs remain manual-review cases. Unsupported profiles, other
+rewritten; these outputs remain manual-review cases. Partition IDs are not inferred
+by scanning arbitrary skin-block bytes, and source-NIF slot hints remain empty until
+a structure-aware partition decoder validates their ownership and range. Unsupported profiles, other
 geometry blocks, invalid indices, and malformed fields fail closed with specific
 parser diagnostics. When the Skyrim SE profile is recognized but its layout is
 unsupported, heuristic geometry fallback is disabled rather than guessing at
