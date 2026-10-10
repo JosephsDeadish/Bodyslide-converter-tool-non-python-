@@ -22836,20 +22836,23 @@ internal sealed class LocalExportService(
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", bodySlideProject.ProjectName);
             Directory.CreateDirectory(shapeDataDirectory);
 
-            // Stage all source-shape NIFs into one ShapeData project folder so BodySlide can edit
-            // the full armor set without rescanning generated output or splitting meshes per folder.
-            var stagedShapeDataNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var writtenNif in writtenNifs)
+            var sourceNifReferences = BuildBodySlideSourceNifReferences(
+                bodySlideProject.OspXml,
+                outputDirectory,
+                writtenNifs);
+            foreach (var reference in sourceNifReferences.References)
             {
-                var shapeDataFileName = Path.GetFileName(writtenNif);
-                if (string.IsNullOrWhiteSpace(shapeDataFileName) || !stagedShapeDataNames.Add(shapeDataFileName))
-                {
-                    continue;
-                }
-
-                var shapeDataNifPath = Path.Combine(shapeDataDirectory, shapeDataFileName);
-                await CopyFileAsync(writtenNif, shapeDataNifPath, cancellationToken);
+                var shapeDataNifPath = Path.Combine(shapeDataDirectory, reference.FileName);
+                await CopyFileAsync(reference.SourcePath, shapeDataNifPath, cancellationToken);
                 outputFiles.Add(shapeDataNifPath);
+            }
+            if (sourceNifReferences.UnresolvedSliderSets.Count > 0)
+            {
+                qualityWarnings =
+                [
+                    .. qualityWarnings,
+                    $"BodySlide source NIF reference could not be matched to a unique converted mesh for SliderSet(s): {string.Join(", ", sourceNifReferences.UnresolvedSliderSets.Take(5))}"
+                ];
             }
 
             var shapeDataBySourceFile = new Dictionary<string, IReadOnlyList<SkyrimSseNifShape>>(StringComparer.OrdinalIgnoreCase);
@@ -22878,7 +22881,7 @@ internal sealed class LocalExportService(
             }
 
             var linkedShapeData = BuildShapeLinkedOsdExport(
-                bodySlideProject.OspXml,
+                sourceNifReferences.OspXml,
                 shapeDataBySourceFile);
             withheldBodySlideOsdMorphCount = linkedShapeData.WithheldMorphRecordCount;
             if (withheldBodySlideOsdMorphCount > 0)
@@ -40457,6 +40460,116 @@ internal sealed class LocalExportService(
         string OspXml,
         IReadOnlyList<(string FileName, byte[] Bytes)> OsdFiles,
         int WithheldMorphRecordCount);
+
+    internal sealed record BodySlideSourceNifReferenceExport(
+        string OspXml,
+        IReadOnlyList<(string FileName, string SourcePath)> References,
+        IReadOnlyList<string> UnresolvedSliderSets);
+
+    internal static BodySlideSourceNifReferenceExport BuildBodySlideSourceNifReferences(
+        string ospXml,
+        string outputDirectory,
+        IReadOnlyList<string> writtenNifs)
+    {
+        var document = System.Xml.Linq.XDocument.Parse(ospXml);
+        var outputRoot = Path.GetFullPath(outputDirectory);
+        var writtenByRelativePath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var writtenByFileName = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var writtenNif in writtenNifs)
+        {
+            var fullPath = Path.GetFullPath(writtenNif);
+            var relativePath = Path.GetRelativePath(outputRoot, fullPath);
+            if (Path.IsPathRooted(relativePath) ||
+                relativePath.Equals("..", StringComparison.Ordinal) ||
+                relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var normalizedRelativePath = relativePath.Replace('\\', '/');
+            writtenByRelativePath[normalizedRelativePath] = fullPath;
+            var fileName = Path.GetFileName(fullPath);
+            if (!writtenByFileName.TryGetValue(fileName, out var matches))
+            {
+                matches = [];
+                writtenByFileName[fileName] = matches;
+            }
+            matches.Add(fullPath);
+        }
+
+        var references = new List<(string FileName, string SourcePath)>();
+        var unresolved = new List<string>();
+        var sliderSets = document.Descendants()
+            .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        for (var index = 0; index < sliderSets.Length; index++)
+        {
+            var sliderSet = sliderSets[index];
+            var setName = ((string?)sliderSet.Attribute("name"))?.Trim();
+            setName = string.IsNullOrWhiteSpace(setName) ? $"<unnamed-{index + 1}>" : setName;
+            var outputPath = sliderSet.Elements()
+                .FirstOrDefault(static element => string.Equals(element.Name.LocalName, "OutputPath", StringComparison.OrdinalIgnoreCase))
+                ?.Value.Trim()
+                .Replace('\\', '/')
+                .Trim('/');
+            var outputFile = sliderSet.Elements()
+                .FirstOrDefault(static element => string.Equals(element.Name.LocalName, "OutputFile", StringComparison.OrdinalIgnoreCase));
+            var outputStem = outputFile?.Value.Trim();
+            var generateWeights = string.Equals(
+                (string?)outputFile?.Attribute("GenWeights"),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+            string? sourcePath = null;
+
+            if (!string.IsNullOrWhiteSpace(outputPath) &&
+                !string.IsNullOrWhiteSpace(outputStem) &&
+                !outputPath.Split('/').Any(static segment => segment is "." or "..") &&
+                !outputStem.Contains('/') &&
+                !outputStem.Contains('\\') &&
+                !Path.IsPathRooted(outputStem))
+            {
+                var expectedOutputName = generateWeights ? $"{outputStem}_0.nif" : $"{outputStem}.nif";
+                var expectedRelativePath = $"{outputPath}/{expectedOutputName}".TrimStart('/');
+                writtenByRelativePath.TryGetValue(expectedRelativePath, out sourcePath);
+            }
+
+            if (sourcePath is null)
+            {
+                var sourceFile = sliderSet.Elements()
+                    .FirstOrDefault(static element => string.Equals(element.Name.LocalName, "SourceFile", StringComparison.OrdinalIgnoreCase))
+                    ?.Value.Trim();
+                var sourceFileName = string.IsNullOrWhiteSpace(sourceFile) ? null : Path.GetFileName(sourceFile.Replace('\\', '/'));
+                if (sourceFileName is not null &&
+                    writtenByFileName.TryGetValue(sourceFileName, out var sourceMatches) &&
+                    sourceMatches.Count == 1)
+                {
+                    sourcePath = sourceMatches[0];
+                }
+            }
+
+            if (sourcePath is null)
+            {
+                unresolved.Add(setName);
+                continue;
+            }
+
+            var referenceFileName = $"source_{index + 1:D3}.nif";
+            var sourceElement = sliderSet.Elements()
+                .FirstOrDefault(static element => string.Equals(element.Name.LocalName, "SourceFile", StringComparison.OrdinalIgnoreCase));
+            if (sourceElement is null)
+            {
+                sourceElement = new System.Xml.Linq.XElement("SourceFile");
+                sliderSet.AddFirst(sourceElement);
+            }
+            sourceElement.Value = referenceFileName;
+            references.Add((referenceFileName, sourcePath));
+        }
+
+        var xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" + Environment.NewLine
+            + document.ToString(System.Xml.Linq.SaveOptions.None);
+        return new BodySlideSourceNifReferenceExport(xml, references, unresolved);
+    }
 
     internal static BodySlideShapeDataExport BuildShapeLinkedOsdExport(
         string ospXml,
