@@ -4027,8 +4027,8 @@ internal static class NifGeometrySignatureReader
         var parsedShapes = SkyrimSseNifShapeReader.Read(bytes);
         if (parsedShapes.Supported)
         {
-            var vertexCount = parsedShapes.Shapes.Sum(static shape => (long)shape.Vertices.Count);
-            return vertexCount is > 0 and <= MaxPlausibleVertexCount
+            var parsedVertexCount = parsedShapes.Shapes.Sum(static shape => (long)shape.Vertices.Count);
+            return parsedVertexCount is > 0 and <= MaxPlausibleVertexCount
                 ? parsedShapes.Shapes.SelectMany(static shape => shape.Vertices).ToArray()
                 : null;
         }
