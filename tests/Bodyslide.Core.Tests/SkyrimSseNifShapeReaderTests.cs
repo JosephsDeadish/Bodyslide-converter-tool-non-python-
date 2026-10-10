@@ -170,6 +170,49 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public async Task ConvertAsync_SupportedShapeAwareArmorIsSavedAsReadableNif()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input", "meshes", "armor");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(inputDirectory);
+        var inputPath = Path.Combine(inputDirectory, "shape-aware-armor.nif");
+        var sourceBytes = CreateNif(
+        [
+            new TestShape("RoundTripBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)]),
+            new TestShape("RoundTripDetail", [(0f, 2f, 1f), (24f, 2f, 9f), (0f, 18f, 18f)])
+        ]);
+        await File.WriteAllBytesAsync(inputPath, sourceBytes);
+
+        try
+        {
+            var result = await StandaloneConversionModules.CreateDefault().ConvertAsync(
+                new ConversionRequest(inputPath, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var sourceShapes = SkyrimSseNifShapeReader.Read(sourceBytes).Shapes;
+            var savedNifs = Directory.GetFiles(outputDirectory, "*.nif", SearchOption.AllDirectories);
+            var roundTrippedShapes = savedNifs
+                .Select(path => (Path: path, Read: SkyrimSseNifShapeReader.Read(File.ReadAllBytes(path))))
+                .Where(static item => item.Read.Supported &&
+                                      item.Read.Shapes.Select(static shape => shape.Name)
+                                          .SequenceEqual(["RoundTripBody", "RoundTripDetail"]))
+                .ToArray();
+
+            var savedNif = Assert.Single(roundTrippedShapes);
+            Assert.True(new FileInfo(savedNif.Path).Length > 0);
+            Assert.Equal(sourceShapes.Select(static shape => shape.Name), savedNif.Read.Shapes.Select(static shape => shape.Name));
+            Assert.Equal(sourceShapes.Select(static shape => shape.TriangleIndices), savedNif.Read.Shapes.Select(static shape => shape.TriangleIndices));
+            Assert.All(savedNif.Read.Shapes.SelectMany(static shape => shape.Vertices),
+                static vertex => Assert.True(float.IsFinite(vertex.X) && float.IsFinite(vertex.Y) && float.IsFinite(vertex.Z)));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void WriterPreservesRecognizedNifWhenItsLayoutIsUnsupported()
     {
         var source = CreateNif(
