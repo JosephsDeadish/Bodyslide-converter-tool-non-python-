@@ -328,8 +328,11 @@ single-level header, and derivation checks cancellation during processing.
 Morph diagnostics in `morphs.json` and the conversion manifest describe parsed
 source payloads as candidates, recording the source asset filename and explicit
 shape-identity/vertex-order verification states without duplicating per-vertex
-arrays. The current source readers mark shape identity unresolved and vertex order
-unverified, so exact vertex-count matches are not enough to reuse a payload. Sparse
+arrays. Explicit OSP `Data` links to OSD records retain a declared source shape
+only when that exact shape exists in the associated supported source NIF; ambiguous
+links are not associated. This source-side association does not establish a match
+to the exported target, and source readers still mark identity unresolved and
+vertex order unverified, so exact vertex-count matches are not enough to reuse a payload. Sparse
 TRI/OSD payloads retain only their represented index span; nearby NIFs are not used
 to inflate that span, and it must not be mistaken for a complete shape vertex count.
 Topology retargeting is also withheld unless an explicit retarget map is verified.

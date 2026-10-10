@@ -267,6 +267,11 @@ internal static class BodySlideSourceProjectSupport
         var unsupportedOspSemantics = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var discoveryStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var discovery = EnumerateAssociatedBodySlideFiles(armor, cancellationToken);
+        var ospOsdShapeTargets = await ReadOspOsdShapeTargetsAsync(
+            discovery.Files.Where(static path => path.EndsWith(".osp", StringComparison.OrdinalIgnoreCase)),
+            discovery.Files,
+            armor.MeshFiles,
+            cancellationToken);
         discoveryStopwatch.Stop();
 
         foreach (var filePath in discovery.Files)
@@ -300,6 +305,30 @@ internal static class BodySlideSourceProjectSupport
             {
                 if (TryReadOsdSliders(filePath, out var osdCandidates))
                 {
+                    var fullPath = Path.GetFullPath(filePath);
+                    if (ospOsdShapeTargets.TryGetValue(fullPath, out var targetsBySlider))
+                    {
+                        osdCandidates = osdCandidates
+                            .Select(candidate =>
+                            {
+                                if (candidate.ReusablePayload is null ||
+                                    !targetsBySlider.TryGetValue(candidate.Name, out var shapeTargets) ||
+                                    shapeTargets.Count != 1)
+                                {
+                                    return candidate;
+                                }
+
+                                return candidate with
+                                {
+                                    ReusablePayload = candidate.ReusablePayload with
+                                    {
+                                        SourceShapeName = shapeTargets.Single()
+                                    }
+                                };
+                            })
+                            .ToArray();
+                    }
+
                     hasOsdPayloads |= osdCandidates.Any(static candidate => candidate.ReusablePayload is not null);
                     foreach (var candidate in osdCandidates)
                     {
@@ -435,6 +464,150 @@ internal static class BodySlideSourceProjectSupport
             .ToArray();
 
         return new BodySlideDiscoveryResult(files, hasReferenceAssets);
+    }
+
+    private static async Task<IReadOnlyDictionary<string, Dictionary<string, HashSet<string>>>> ReadOspOsdShapeTargetsAsync(
+        IEnumerable<string> ospFiles,
+        IReadOnlyList<string> discoveredFiles,
+        IReadOnlyList<string> meshFiles,
+        CancellationToken cancellationToken)
+    {
+        var discoveredOsdPaths = discoveredFiles
+            .Where(static path => path.EndsWith(".osd", StringComparison.OrdinalIgnoreCase))
+            .Select(Path.GetFullPath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var associations = new Dictionary<string, Dictionary<string, HashSet<string>>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var ospPath in ospFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryProbeOspProject(ospPath, out var probe, meshFiles))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (new FileInfo(ospPath).Length > 4 * 1024 * 1024)
+                {
+                    continue;
+                }
+
+                await using var stream = File.OpenRead(ospPath);
+                var document = await XDocument.LoadAsync(stream, LoadOptions.None, cancellationToken);
+                foreach (var sliderSet in document.Descendants()
+                             .Where(static element => element.Name.LocalName.Equals("SliderSet", StringComparison.OrdinalIgnoreCase))
+                             .Where(set => MatchesOutput(set, meshFiles)))
+                {
+                    var sourceFile = sliderSet.Elements()
+                        .FirstOrDefault(static element => element.Name.LocalName.Equals("SourceFile", StringComparison.OrdinalIgnoreCase))
+                        ?.Value.Trim();
+                    var sourcePath = ResolveUniqueLinkedAssetPath(probe, sourceFile, ".nif");
+                    if (sourcePath is null)
+                    {
+                        continue;
+                    }
+
+                    var sourceInfo = new FileInfo(sourcePath);
+                    if (sourceInfo.Length <= 0 || sourceInfo.Length > 512L * 1024 * 1024)
+                    {
+                        continue;
+                    }
+
+                    byte[] sourceBytes;
+                    try
+                    {
+                        sourceBytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken);
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                        continue;
+                    }
+
+                    var sourceShapes = SkyrimSseNifShapeReader.Read(sourceBytes);
+                    if (!sourceShapes.Supported)
+                    {
+                        continue;
+                    }
+
+                    var shapeNames = sourceShapes.Shapes
+                        .Select(static shape => shape.Name)
+                        .ToHashSet(StringComparer.Ordinal);
+                    foreach (var slider in sliderSet.Elements()
+                                 .Where(static element => element.Name.LocalName.Equals("Slider", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        foreach (var data in slider.Elements()
+                                     .Where(static element => element.Name.LocalName.Equals("Data", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            var targetShape = ((string?)data.Attribute("target"))?.Trim();
+                            var dataReference = data.Value.Trim().Replace('\\', '/');
+                            var separator = dataReference.LastIndexOf('#');
+                            if (string.IsNullOrWhiteSpace(targetShape) ||
+                                !shapeNames.Contains(targetShape) ||
+                                separator <= 0 ||
+                                separator == dataReference.Length - 1)
+                            {
+                                continue;
+                            }
+
+                            var osdReference = dataReference[..separator];
+                            var morphName = NormalizeSliderFileName(dataReference[(separator + 1)..]);
+                            var osdPath = ResolveUniqueLinkedAssetPath(probe, osdReference, ".osd");
+                            if (string.IsNullOrWhiteSpace(morphName) ||
+                                osdPath is null ||
+                                !discoveredOsdPaths.Contains(Path.GetFullPath(osdPath)))
+                            {
+                                continue;
+                            }
+
+                            var fullOsdPath = Path.GetFullPath(osdPath);
+                            if (!associations.TryGetValue(fullOsdPath, out var targetsBySlider))
+                            {
+                                targetsBySlider = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+                                associations.Add(fullOsdPath, targetsBySlider);
+                            }
+
+                            if (!targetsBySlider.TryGetValue(morphName, out var shapeTargets))
+                            {
+                                shapeTargets = new HashSet<string>(StringComparer.Ordinal);
+                                targetsBySlider.Add(morphName, shapeTargets);
+                            }
+
+                            shapeTargets.Add(targetShape);
+                        }
+                    }
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+            {
+            }
+        }
+
+        return associations;
+    }
+
+    private static string? ResolveUniqueLinkedAssetPath(
+        BodySlideProjectProbe probe,
+        string? reference,
+        string expectedExtension)
+    {
+        if (string.IsNullOrWhiteSpace(reference) ||
+            Path.IsPathRooted(reference) ||
+            reference.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries)
+                .Any(static segment => segment is "." or "..") ||
+            reference.Contains(':') ||
+            !Path.GetExtension(reference).Equals(expectedExtension, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var candidates = ResolveLinkedPathCandidates(probe, reference)
+            .Where(File.Exists)
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(2)
+            .ToArray();
+        return candidates.Length == 1 ? candidates[0] : null;
     }
 
     internal static bool TryResolveTextureReferenceMeshes(

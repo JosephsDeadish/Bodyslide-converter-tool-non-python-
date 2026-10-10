@@ -160,6 +160,102 @@ public sealed class BodySlideSourceAssociationTests
     }
 
     [Fact]
+    public async Task OsdPayloadRecordsRetainOnlyExplicitOspShapeLinksVerifiedBySourceNif()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(root, "meshes", "armor", "traveler");
+        var projectDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+        try
+        {
+            var mesh = Path.Combine(meshDirectory, "traveler_0.nif");
+            var project = Path.Combine(projectDirectory, "traveler.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "base.nif"),
+                SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso"));
+            await File.WriteAllBytesAsync(Path.Combine(shapeDataDirectory, "shared.osd"), OsdMorph("Waist"));
+            await File.WriteAllTextAsync(project, OspWithDataTarget("Torso"));
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            var payload = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
+            Assert.Equal("Torso", payload.SourceShapeName);
+            Assert.Equal("unresolved", payload.ShapeIdentityStatus);
+            Assert.Equal("unverified", payload.VertexOrderStatus);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task OsdPayloadDoesNotAssociateWhenOspTargetIsNotInSourceNif()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(root, "meshes", "armor", "traveler");
+        var projectDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+        try
+        {
+            var mesh = Path.Combine(meshDirectory, "traveler_0.nif");
+            var project = Path.Combine(projectDirectory, "traveler.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "base.nif"),
+                SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso"));
+            await File.WriteAllBytesAsync(Path.Combine(shapeDataDirectory, "shared.osd"), OsdMorph("Waist"));
+            await File.WriteAllTextAsync(project, OspWithDataTarget("ArmorOverlay"));
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            var payload = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
+            Assert.Null(payload.SourceShapeName);
+            Assert.Equal("unresolved", payload.ShapeIdentityStatus);
+            Assert.Equal("unverified", payload.VertexOrderStatus);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task OsdPayloadDoesNotAssociateWhenOspLinksOneRecordToMultipleShapes()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(root, "meshes", "armor", "traveler");
+        var projectDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+        try
+        {
+            var mesh = Path.Combine(meshDirectory, "traveler_0.nif");
+            var project = Path.Combine(projectDirectory, "traveler.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "base.nif"),
+                SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso", "ArmorOverlay"));
+            await File.WriteAllBytesAsync(Path.Combine(shapeDataDirectory, "shared.osd"), OsdMorph("Waist"));
+            await File.WriteAllTextAsync(project, OspWithDataTargets("Torso", "ArmorOverlay"));
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            var payload = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
+            Assert.Null(payload.SourceShapeName);
+            Assert.Equal("unresolved", payload.ShapeIdentityStatus);
+            Assert.Equal("unverified", payload.VertexOrderStatus);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task MatchedOspReportsWeightVariantModeAsRebuilt()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -265,6 +361,37 @@ public sealed class BodySlideSourceAssociationTests
             writer.Write((short)0);
             writer.Write((short)0);
         }
+        return stream.ToArray();
+    }
+
+    private static string OspWithDataTarget(string target) => OspWithDataTargets(target);
+
+    private static string OspWithDataTargets(params string[] targets) => $"""
+        <SliderSetInfo>
+          <SliderSet name="TravelerProject">
+            <DataFolder>TravelerProject</DataFolder>
+            <SourceFile>base.nif</SourceFile>
+            <OutputPath>meshes\armor\traveler\</OutputPath>
+            <OutputFile>traveler_0.nif</OutputFile>
+            <Slider name="Waist">{string.Concat(targets.Select(static target => $"<Data target=\"{target}\">shared.osd#Waist</Data>"))}</Slider>
+          </SliderSet>
+        </SliderSetInfo>
+        """;
+
+    private static byte[] OsdMorph(string name)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8);
+        writer.Write("OSD\0"u8);
+        writer.Write(1);
+        writer.Write(1);
+        writer.Write((byte)Encoding.UTF8.GetByteCount(name));
+        writer.Write(Encoding.UTF8.GetBytes(name));
+        writer.Write((ushort)1);
+        writer.Write(0);
+        writer.Write(0.25f);
+        writer.Write(0f);
+        writer.Write(0f);
         return stream.ToArray();
     }
 }
