@@ -404,6 +404,32 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void PreservesRecognizedLegacyNetImmerseInputWithoutHeuristicRewrite()
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: true))
+        {
+            writer.Write("NetImmerse File Format, Version 10.0.1.0\n"u8);
+            writer.Write(0x0A000100u);
+            writer.Write((byte)1);
+            writer.Write(0u);
+            writer.Write(0u);
+            writer.Write(0u);
+        }
+        var nif = stream.ToArray();
+
+        Assert.True(SkyrimSseNifShapeReader.HasRecognizedNifHeader(nif));
+        Assert.False(SkyrimSseNifShapeReader.Read(nif).Supported);
+
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            nif,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.2d },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+        Assert.Same(nif, transformed);
+    }
+
+    [Fact]
     public void ReadsSkinnedShapePositionsAndTopologyWithoutClaimingSkinPayloadSupport()
     {
         var result = SkyrimSseNifShapeReader.Read(CreateNif(
