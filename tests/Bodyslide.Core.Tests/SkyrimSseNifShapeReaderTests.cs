@@ -352,7 +352,7 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
-    public void WriterTransformsSkinnedShapePositionsAndPreservesAllOtherBytes()
+    public void WriterLeavesSkinnedShapeUnchangedUntilSkinSemanticsAreValidated()
     {
         var source = CreateNif(
             [new TestShape("SkinnedBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)], SkinInstance: 1)]);
@@ -386,30 +386,7 @@ public sealed class SkyrimSseNifShapeReaderTests
                 ["thighs"] = 1.22d
             },
             BasicCageGenerationService.CreatePresetCage("mixed"));
-
-        Assert.NotSame(source, transformed);
-        var sourceShape = Assert.Single(SkyrimSseNifShapeReader.Read(source).Shapes);
-        var transformedShape = Assert.Single(SkyrimSseNifShapeReader.Read(transformed).Shapes);
-        Assert.NotEqual(sourceShape.Vertices, transformedShape.Vertices);
-        Assert.Equal(sourceShape.TriangleIndices, transformedShape.TriangleIndices);
-        Assert.Equal(sourceShape.Name, transformedShape.Name);
-
-        var expected = source.ToArray();
-        for (var index = 0; index < transformedShape.Vertices.Count; index++)
-        {
-            var positionOffset = sourceShape.VertexDataOffset + index * sourceShape.VertexStride;
-            var vertex = transformedShape.Vertices[index];
-            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
-                expected.AsSpan(positionOffset),
-                BitConverter.SingleToInt32Bits(vertex.X));
-            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
-                expected.AsSpan(positionOffset + sizeof(float)),
-                BitConverter.SingleToInt32Bits(vertex.Y));
-            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
-                expected.AsSpan(positionOffset + (2 * sizeof(float))),
-                BitConverter.SingleToInt32Bits(vertex.Z));
-        }
-        Assert.Equal(expected, transformed);
+        Assert.Same(source, transformed);
     }
 
     [Fact]
