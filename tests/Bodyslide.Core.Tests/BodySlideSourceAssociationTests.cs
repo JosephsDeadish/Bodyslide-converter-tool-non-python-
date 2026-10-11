@@ -885,6 +885,73 @@ public sealed class BodySlideSourceAssociationTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [Theory]
+    [InlineData("Torso", "Waist", true)]
+    [InlineData("OtherShape", "Waist", false)]
+    [InlineData("Torso", "DifferentRecord", false)]
+    public async Task TriMorphReuseRequiresAnExactOspRecordAndShapeAssociation(
+        string triShapeName,
+        string linkedRecordName,
+        bool expectedVerified)
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            var meshDirectory = Path.Combine(root, "meshes", "armor", "traveler");
+            var projectDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+            var shapeDataDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+            Directory.CreateDirectory(meshDirectory);
+            Directory.CreateDirectory(projectDirectory);
+            Directory.CreateDirectory(shapeDataDirectory);
+
+            var mesh = Path.Combine(meshDirectory, "traveler_0.nif");
+            var project = Path.Combine(projectDirectory, "traveler.osp");
+            var nif = SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso");
+            await File.WriteAllBytesAsync(mesh, nif);
+            await File.WriteAllBytesAsync(Path.Combine(shapeDataDirectory, "source.nif"), nif);
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "traveler.tri"),
+                BodyTri((triShapeName, "Waist", (ushort)0, (short)2)));
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <SliderSet name="TravelerProject">
+                    <DataFolder>TravelerProject</DataFolder>
+                    <SourceFile>source.nif</SourceFile>
+                    <OutputPath>meshes\armor\traveler\</OutputPath>
+                    <OutputFile>traveler_0.nif</OutputFile>
+                    <Slider name="Waist"><Data target="Torso">traveler.tri#{linkedRecordName}</Data></Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            var payload = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
+            Assert.Equal(expectedVerified ? "verified" : "unresolved", payload.ShapeIdentityStatus);
+            Assert.Equal(expectedVerified ? "verified" : "unverified", payload.VertexOrderStatus);
+            Assert.Equal(triShapeName, payload.SourceShapeName);
+            if (expectedVerified)
+            {
+                Assert.Equal("Torso", payload.TargetShapeName);
+                Assert.Equal(3, payload.VertexCount);
+                Assert.Equal(3, payload.Deltas.Count);
+                Assert.Equal((2f, 0f, 0f), payload.Deltas[0]);
+                Assert.Equal((0f, 0f, 0f), payload.Deltas[1]);
+                Assert.Contains(payload.ShapeCorrespondenceEvidence!, static evidence =>
+                    evidence.StartsWith(
+                        "exact-ordered-shape-geometry-and-topology-sha256:",
+                        StringComparison.Ordinal));
+            }
+            else
+            {
+                Assert.Null(payload.TargetShapeName);
+                Assert.Null(payload.ShapeCorrespondenceEvidence);
+            }
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     private static byte[] BodyTri(params (string Shape, string Morph, ushort Index, short X)[] shapes)
     {
         using var stream = new MemoryStream();

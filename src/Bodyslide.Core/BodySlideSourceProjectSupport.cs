@@ -288,7 +288,7 @@ internal static class BodySlideSourceProjectSupport
         var ambiguousSliderControlSettings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var discoveryStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var discovery = EnumerateAssociatedBodySlideFiles(armor, cancellationToken);
-        var ospOsdShapeTargets = await ReadOspOsdShapeTargetsAsync(
+        var ospMorphShapeTargets = await ReadOspMorphShapeTargetsAsync(
             discovery.Files.Where(static path => path.EndsWith(".osp", StringComparison.OrdinalIgnoreCase)),
             discovery.Files,
             armor.MeshFiles,
@@ -343,7 +343,7 @@ internal static class BodySlideSourceProjectSupport
                 if (TryReadOsdSliders(filePath, out var osdCandidates))
                 {
                     var fullPath = Path.GetFullPath(filePath);
-                    if (ospOsdShapeTargets.TryGetValue(fullPath, out var targetsBySlider))
+                    if (ospMorphShapeTargets.TryGetValue(fullPath, out var targetsBySlider))
                     {
                         osdCandidates = osdCandidates
                             .Select(candidate =>
@@ -435,9 +435,64 @@ internal static class BodySlideSourceProjectSupport
                             "tri",
                             out var candidate,
                             Path.GetFileName(filePath),
-                            sourceShapeName: shape.Name))
+                            sourceShapeName: shape.Name,
+                            sourceMorphRecordName: morph.Name))
                         {
                             continue;
+                        }
+
+                        if (candidate.ReusablePayload is { } triMorph &&
+                            !string.IsNullOrWhiteSpace(triMorph.SourceMorphRecordName) &&
+                            ospMorphShapeTargets.TryGetValue(Path.GetFullPath(filePath), out var triTargetsByRecord) &&
+                            triTargetsByRecord.TryGetValue(triMorph.SourceMorphRecordName, out var triShapeTargets) &&
+                            triShapeTargets.Count == 1)
+                        {
+                            var triShapeTarget = triShapeTargets.Single();
+                            if (string.Equals(shape.Name, triShapeTarget.Name, StringComparison.Ordinal) &&
+                               string.Equals(
+                                   NormalizeSliderFileName(triMorph.SourceMorphRecordName),
+                                   NormalizeSliderFileName(triShapeTarget.SliderName),
+                                   StringComparison.OrdinalIgnoreCase) &&
+                               triMorph.VertexCount <= triShapeTarget.VertexCount)
+                            {
+                               if (string.IsNullOrWhiteSpace(triShapeTarget.MatchedMeshShapeName) ||
+                                   string.IsNullOrWhiteSpace(triShapeTarget.MatchedMeshVertexOrderFingerprint) ||
+                                   string.IsNullOrWhiteSpace(triShapeTarget.CorrespondenceEvidence))
+                               {
+                                   candidate = candidate with
+                                   {
+                                       ReusablePayload = triMorph with
+                                       {
+                                           SourceShapeName = triShapeTarget.Name,
+                                           SourceVertexOrderFingerprint = triShapeTarget.VertexOrderFingerprint
+                                       }
+                                   };
+                               }
+                               else
+                               {
+                                   var expandedDeltas = new (float X, float Y, float Z)[triShapeTarget.VertexCount];
+                                   for (var index = 0; index < triMorph.Deltas.Count; index++)
+                                   {
+                                       expandedDeltas[index] = triMorph.Deltas[index];
+                                   }
+
+                                   candidate = candidate with
+                                   {
+                                       ReusablePayload = triMorph with
+                                       {
+                                           VertexCount = triShapeTarget.VertexCount,
+                                           Deltas = expandedDeltas,
+                                           ShapeIdentityStatus = "verified",
+                                           VertexOrderStatus = "verified",
+                                           SourceShapeName = triShapeTarget.Name,
+                                           TargetShapeName = triShapeTarget.MatchedMeshShapeName,
+                                           SourceVertexOrderFingerprint = triShapeTarget.VertexOrderFingerprint,
+                                           TargetVertexOrderFingerprint = triShapeTarget.MatchedMeshVertexOrderFingerprint,
+                                           ShapeCorrespondenceEvidence = [triShapeTarget.CorrespondenceEvidence]
+                                       }
+                                   };
+                               }
+                            }
                         }
 
                         hasTriPayloads |= candidate.ReusablePayload is not null;
@@ -546,14 +601,16 @@ internal static class BodySlideSourceProjectSupport
         return new BodySlideDiscoveryResult(files, hasReferenceAssets);
     }
 
-    private static async Task<IReadOnlyDictionary<string, Dictionary<string, HashSet<OspOsdShapeTarget>>>> ReadOspOsdShapeTargetsAsync(
+    private static async Task<IReadOnlyDictionary<string, Dictionary<string, HashSet<OspOsdShapeTarget>>>> ReadOspMorphShapeTargetsAsync(
         IEnumerable<string> ospFiles,
         IReadOnlyList<string> discoveredFiles,
         IReadOnlyList<string> meshFiles,
         CancellationToken cancellationToken)
     {
-        var discoveredOsdPaths = discoveredFiles
-            .Where(static path => path.EndsWith(".osd", StringComparison.OrdinalIgnoreCase))
+        var discoveredMorphPaths = discoveredFiles
+            .Where(static path =>
+                path.EndsWith(".osd", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase))
             .Select(Path.GetFullPath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var associations = new Dictionary<string, Dictionary<string, HashSet<OspOsdShapeTarget>>>(StringComparer.OrdinalIgnoreCase);
@@ -630,21 +687,28 @@ internal static class BodySlideSourceProjectSupport
                                 continue;
                             }
 
-                            var osdReference = dataReference[..separator];
+                            var morphReference = dataReference[..separator];
                             var morphName = dataReference[(separator + 1)..].Trim();
-                            var osdPath = ResolveUniqueLinkedAssetPath(probe, osdReference, ".osd");
-                            if (string.IsNullOrWhiteSpace(morphName) ||
-                                osdPath is null ||
-                                !discoveredOsdPaths.Contains(Path.GetFullPath(osdPath)))
+                            var morphExtension = Path.GetExtension(morphReference);
+                            if (!morphExtension.Equals(".osd", StringComparison.OrdinalIgnoreCase) &&
+                                !morphExtension.Equals(".tri", StringComparison.OrdinalIgnoreCase))
                             {
                                 continue;
                             }
 
-                            var fullOsdPath = Path.GetFullPath(osdPath);
-                            if (!associations.TryGetValue(fullOsdPath, out var targetsBySlider))
+                            var morphPath = ResolveUniqueLinkedAssetPath(probe, morphReference, morphExtension);
+                            if (string.IsNullOrWhiteSpace(morphName) ||
+                                morphPath is null ||
+                                !discoveredMorphPaths.Contains(Path.GetFullPath(morphPath)))
+                            {
+                                continue;
+                            }
+
+                            var fullMorphPath = Path.GetFullPath(morphPath);
+                            if (!associations.TryGetValue(fullMorphPath, out var targetsBySlider))
                             {
                                 targetsBySlider = new Dictionary<string, HashSet<OspOsdShapeTarget>>(StringComparer.OrdinalIgnoreCase);
-                                associations.Add(fullOsdPath, targetsBySlider);
+                                associations.Add(fullMorphPath, targetsBySlider);
                             }
 
                             if (!targetsBySlider.TryGetValue(morphName, out var shapeTargets))
