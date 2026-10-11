@@ -822,6 +822,81 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void WriterTransformsValidatedSkinnedSubIndexShapeAndPreservesOpaqueSegmentBytes()
+    {
+        var opaqueSegmentPayload = new byte[] { 0x5A, 0x19, 0xA3, 0x7C, 0x42, 0xD1 };
+        var source = CreateNif(
+            [
+                new TestShape(
+                    "SkinnedSegmentedBody",
+                    [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)],
+                    SkinInstance: 1,
+                    BodyPartitions: [(257, 32)],
+                    TrailingData: opaqueSegmentPayload)
+            ],
+            blockType: "BSSubIndexTriShape",
+            skinBlockType: "BSDismemberSkinInstance");
+        var sourceRead = SkyrimSseNifShapeReader.Read(source);
+        Assert.True(sourceRead.Supported, sourceRead.Diagnostic);
+        var shape = Assert.Single(sourceRead.Shapes);
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        Assert.NotSame(source, transformed);
+        var transformedRead = SkyrimSseNifShapeReader.Read(transformed);
+        Assert.True(transformedRead.Supported, transformedRead.Diagnostic);
+        var transformedShape = Assert.Single(transformedRead.Shapes);
+        Assert.Equal("BSSubIndexTriShape", transformedShape.GeometryBlockType);
+        Assert.NotEqual(shape.Vertices, transformedShape.Vertices);
+        Assert.Equal(shape.TriangleIndices, transformedShape.TriangleIndices);
+        Assert.Equal(shape.BodyPartitions, transformedShape.BodyPartitions);
+        Assert.Equal(shape.SkinBoneBlockIndices, transformedShape.SkinBoneBlockIndices);
+
+        var opaqueOffset = shape.VertexDataOffset + shape.Vertices.Count * shape.VertexStride +
+                           shape.TriangleIndices.Count * sizeof(ushort) +
+                           sizeof(uint) +
+                           (shape.ParticleVertices!.Count + shape.ParticleNormals!.Count) * 3 * sizeof(ushort) +
+                           shape.ParticleTriangleIndices!.Count * sizeof(ushort);
+        Assert.Equal(opaqueSegmentPayload, source.AsSpan(opaqueOffset, opaqueSegmentPayload.Length).ToArray());
+        Assert.Equal(opaqueSegmentPayload, transformed.AsSpan(opaqueOffset, opaqueSegmentPayload.Length).ToArray());
+        AssertOnlyShapePositionsChanged(source, transformed, [shape]);
+    }
+
+    [Fact]
+    public void WriterLeavesSkinnedSubIndexShapeUnchangedWhenSkinReferencesAreInvalid()
+    {
+        var source = CreateNif(
+            [
+                new TestShape(
+                    "InvalidSkinnedSegmentedBody",
+                    [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)],
+                    SkinInstance: 1,
+                    BodyPartitions: [(257, 32)])
+            ],
+            blockType: "BSSubIndexTriShape",
+            skinBlockType: "BSDismemberSkinInstance",
+            skinDataReferenceOverride: 99);
+
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.2d },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        Assert.Same(source, transformed);
+    }
+
+    [Fact]
     public void WriterLeavesSkinnedShapeUnchangedWhenSkinLayoutIsUnsupported()
     {
         var source = CreateNif(

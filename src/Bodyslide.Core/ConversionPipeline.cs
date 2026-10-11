@@ -25815,7 +25815,8 @@ internal sealed class LocalExportService(
         {
             if (parsedGeometry.Shapes.Any(static shape =>
                     shape.IsSkinned &&
-                    !string.Equals(shape.GeometryBlockType, "BSTriShape", StringComparison.Ordinal)))
+                    !string.Equals(shape.GeometryBlockType, "BSTriShape", StringComparison.Ordinal) &&
+                    !string.Equals(shape.GeometryBlockType, "BSSubIndexTriShape", StringComparison.Ordinal)))
             {
                 return sourceBytes;
             }
