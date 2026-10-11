@@ -152,12 +152,14 @@ build; inspect and test those files independently before packaging.
 Source TRI/BSD/OSD parsing records candidate payloads, but does not establish
 which NIF shape or vertex order they belong to. Exact reuse requires verified statuses, matching named shapes, non-empty shape
 correspondence evidence, and matching vertex-order fingerprints. Topology retarget
-additionally requires an explicit verified map method, at least 0.95 confidence,
-and non-empty map/correspondence evidence. `PayloadReuse.RetargetEvidence` records
-the source/target shape names, method, confidence, and evidence used for an
-accepted retarget. The current source
-discovery path does not produce that verified mapping, so parsed payloads remain
-ineligible by default. Duplicate normalized morph records in a single OSD file
+additionally requires a typed target-to-source weighted map covering every target
+vertex, in-range source indexes, finite positive weights normalized to one, a
+verified map method, at least 0.95 confidence, and non-empty map/correspondence
+evidence. Retargeted deltas are computed from that map rather than inferred by
+index interpolation. `PayloadReuse.RetargetEvidence` records the source/target
+shape names, method, confidence, and evidence used for an accepted retarget. The
+current source discovery path does not produce these maps, so parsed payloads
+remain ineligible for topology retargeting by default. Duplicate normalized morph records in a single OSD file
 are withheld as ambiguous rather than selecting one record during candidate
 collapse. Synthetic OSD fallback remains separately labeled and does not count
 as recovered source morph data.

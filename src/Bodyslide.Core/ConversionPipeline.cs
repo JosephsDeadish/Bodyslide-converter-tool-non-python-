@@ -234,6 +234,7 @@ public sealed record SourceMorphQualityMetrics(
     int MeaningfulPayloadMorphCount,
     double PayloadCoverageRatio,
     double PayloadStrengthScore);
+public sealed record SourceMorphRetargetInfluence(int SourceVertexIndex, float Weight);
 public sealed record SourceMorphPayload(
     string SliderName,
     bool IsHighWeight,
@@ -252,7 +253,8 @@ public sealed record SourceMorphPayload(
     string? SourceVertexOrderFingerprint = null,
     string? TargetVertexOrderFingerprint = null,
     IReadOnlyList<string>? ShapeCorrespondenceEvidence = null,
-    string? SourceMorphRecordName = null);
+    string? SourceMorphRecordName = null,
+    IReadOnlyList<IReadOnlyList<SourceMorphRetargetInfluence>>? RetargetMapTargetToSource = null);
 public sealed record SourceMorphPayloadVariants(
     SourceMorphPayload? LowWeight = null,
     SourceMorphPayload? HighWeight = null,
@@ -24393,9 +24395,11 @@ internal sealed class LocalExportService(
             payload.SourceVertexOrderFingerprint,
             payload.TargetVertexOrderFingerprint,
             payload.ShapeCorrespondenceEvidence,
+            RetargetMapTargetCount = payload.RetargetMapTargetToSource?.Count ?? 0,
             ReuseEligibility = HasExactShapeAndVertexOrder(payload)
                 ? "exact-shape-and-vertex-order-verified"
-                : HasVerifiedShapeAndVertexOrder(payload) && IsVerifiedRetargetMap(payload)
+                : HasVerifiedShapeAndVertexOrder(payload) &&
+                  IsVerifiedRetargetMap(payload, payload.RetargetMapTargetToSource?.Count ?? 0)
                     ? "shape-retarget-map-verified"
                     : "blocked-correspondence-evidence"
         };
@@ -41602,14 +41606,7 @@ internal sealed class LocalExportService(
         {
             if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount, morphTransferContext, out var sourcePayload, out var wasRetargeted, out _))
             {
-                return wasRetargeted
-                    ? BlendRetargetedMorphPayloadForHardDivergence(
-                        sliderName,
-                        isHighWeight,
-                        regionalMorphing,
-                        sourcePayload.Deltas,
-                        morphTransferContext)
-                    : sourcePayload.Deltas;
+                return sourcePayload.Deltas;
             }
 
             var deltas = new (float X, float Y, float Z)[vertexCount];
@@ -41639,11 +41636,22 @@ internal sealed class LocalExportService(
             }
             if (wasRetargeted)
             {
+                if (!TryApplyMorphRetargetMap(
+                        payload.Deltas,
+                        payload.RetargetMapTargetToSource!,
+                        out var retargetedDeltas))
+                {
+                    payload = default!;
+                    wasRetargeted = false;
+                    usedExtremeAdaptation = false;
+                    return false;
+                }
+
                 payload = payload with
                 {
                     VertexCount = vertexCount,
                     PayloadKind = $"{payload.PayloadKind}-retargeted",
-                    Deltas = RetargetMorphPayload(sliderName, payload.Deltas, vertexCount, morphTransferContext)
+                    Deltas = retargetedDeltas
                 };
             }
             return true;
@@ -41682,7 +41690,7 @@ internal sealed class LocalExportService(
                         ? HasExactShapeAndVertexOrder(candidate)
                         : candidate.Deltas.Count > 0 &&
                           vertexCount > 0 &&
-                          IsVerifiedRetargetMap(candidate)))
+                          IsVerifiedRetargetMap(candidate, vertexCount)))
                 .Take(2)
                 .ToArray();
             if (applicableCandidates.Length != 1)
@@ -41709,7 +41717,7 @@ internal sealed class LocalExportService(
             return true;
         }
 
-        private static bool IsVerifiedRetargetMap(SourceMorphPayload payload) =>
+        private static bool IsVerifiedRetargetMap(SourceMorphPayload payload, int targetVertexCount) =>
             payload.RetargetMapVerified &&
             !string.IsNullOrWhiteSpace(payload.SourceShapeName) &&
             !string.IsNullOrWhiteSpace(payload.TargetShapeName) &&
@@ -41720,7 +41728,89 @@ internal sealed class LocalExportService(
             payload.RetargetMapEvidence is { Count: > 0 } evidence &&
             evidence.All(static item => !string.IsNullOrWhiteSpace(item)) &&
             payload.ShapeCorrespondenceEvidence is { Count: > 0 } shapeEvidence &&
-            shapeEvidence.All(static item => !string.IsNullOrWhiteSpace(item));
+            shapeEvidence.All(static item => !string.IsNullOrWhiteSpace(item)) &&
+            IsStructurallyValidRetargetMap(payload.RetargetMapTargetToSource, payload.VertexCount, targetVertexCount);
+
+        private static bool IsStructurallyValidRetargetMap(
+            IReadOnlyList<IReadOnlyList<SourceMorphRetargetInfluence>>? targetToSource,
+            int sourceVertexCount,
+            int targetVertexCount)
+        {
+            if (targetToSource is null || targetToSource.Count != targetVertexCount || sourceVertexCount <= 0)
+            {
+                return false;
+            }
+
+            foreach (var influences in targetToSource)
+            {
+                if (influences is not { Count: > 0 and <= 64 })
+                {
+                    return false;
+                }
+
+                var totalWeight = 0d;
+                foreach (var influence in influences)
+                {
+                    if (influence.SourceVertexIndex < 0 ||
+                        influence.SourceVertexIndex >= sourceVertexCount ||
+                        !float.IsFinite(influence.Weight) ||
+                        influence.Weight <= 0f)
+                    {
+                        return false;
+                    }
+
+                    totalWeight += influence.Weight;
+                }
+
+                if (!double.IsFinite(totalWeight) || Math.Abs(totalWeight - 1d) > 0.0001d)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool TryApplyMorphRetargetMap(
+            IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
+            IReadOnlyList<IReadOnlyList<SourceMorphRetargetInfluence>> targetToSource,
+            out IReadOnlyList<(float X, float Y, float Z)> retargetedDeltas)
+        {
+            retargetedDeltas = [];
+            if (!IsStructurallyValidRetargetMap(targetToSource, sourceDeltas.Count, targetToSource.Count) ||
+                sourceDeltas.Any(static delta => !float.IsFinite(delta.X) || !float.IsFinite(delta.Y) || !float.IsFinite(delta.Z)))
+            {
+                return false;
+            }
+
+            var result = new (float X, float Y, float Z)[targetToSource.Count];
+            for (var targetIndex = 0; targetIndex < targetToSource.Count; targetIndex++)
+            {
+                var x = 0d;
+                var y = 0d;
+                var z = 0d;
+                foreach (var influence in targetToSource[targetIndex])
+                {
+                    var delta = sourceDeltas[influence.SourceVertexIndex];
+                    x += delta.X * influence.Weight;
+                    y += delta.Y * influence.Weight;
+                    z += delta.Z * influence.Weight;
+                }
+
+                if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(z) ||
+                    x < -float.MaxValue || x > float.MaxValue ||
+                    y < -float.MaxValue || y > float.MaxValue ||
+                    z < -float.MaxValue || z > float.MaxValue)
+                {
+                    return false;
+                }
+
+                result[targetIndex] = ((float)x, (float)y, (float)z);
+            }
+
+            retargetedDeltas = result;
+            return true;
+        }
 
         private static bool HasVerifiedShapeAndVertexOrder(SourceMorphPayload payload) =>
             string.Equals(payload.ShapeIdentityStatus, "verified", StringComparison.OrdinalIgnoreCase) &&
@@ -42144,60 +42234,6 @@ internal sealed class LocalExportService(
                 1f);
             delta = (x * ownershipDamping, y * ownershipDamping, z * ownershipDamping);
             return true;
-        }
-
-        private static IReadOnlyList<(float X, float Y, float Z)> RetargetMorphPayload(
-            string sliderName,
-            IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
-            int targetVertexCount,
-            MorphTransferContext? morphTransferContext)
-        {
-            if (targetVertexCount == sourceDeltas.Count)
-            {
-                return sourceDeltas;
-            }
-
-            if (morphTransferContext is not null &&
-                morphTransferContext.SourceVertices.Count == sourceDeltas.Count &&
-                morphTransferContext.TargetVertices.Count == targetVertexCount &&
-                morphTransferContext.TargetToSourceIndexMap.Length == targetVertexCount)
-            {
-                var nearestSurface = new (float X, float Y, float Z)[targetVertexCount];
-                for (var targetIndex = 0; targetIndex < targetVertexCount; targetIndex++)
-                {
-                    var blended = TryBlendRetargetedDelta(sliderName, sourceDeltas, morphTransferContext, targetIndex);
-                    nearestSurface[targetIndex] = blended ?? sourceDeltas[morphTransferContext.TargetToSourceIndexMap[targetIndex]];
-                }
-
-                var topologyAdapted = AdaptRetargetedMorphPayload(nearestSurface, morphTransferContext);
-                return StabilizeRetargetedMorphPayload(topologyAdapted, morphTransferContext);
-            }
-
-            var retargeted = new (float X, float Y, float Z)[targetVertexCount];
-            if (sourceDeltas.Count == 1)
-            {
-                Array.Fill(retargeted, sourceDeltas[0]);
-                return retargeted;
-            }
-
-            for (var targetIndex = 0; targetIndex < targetVertexCount; targetIndex++)
-            {
-                var normalizedPosition = targetVertexCount == 1
-                    ? 0d
-                    : (double)targetIndex / (targetVertexCount - 1);
-                var sourcePosition = normalizedPosition * (sourceDeltas.Count - 1);
-                var lowerIndex = (int)Math.Floor(sourcePosition);
-                var upperIndex = Math.Min(sourceDeltas.Count - 1, lowerIndex + 1);
-                var blend = (float)(sourcePosition - lowerIndex);
-                var lower = sourceDeltas[lowerIndex];
-                var upper = sourceDeltas[upperIndex];
-                retargeted[targetIndex] = (
-                    lower.X + ((upper.X - lower.X) * blend),
-                    lower.Y + ((upper.Y - lower.Y) * blend),
-                    lower.Z + ((upper.Z - lower.Z) * blend));
-            }
-
-            return retargeted;
         }
 
         private static IReadOnlyList<(float X, float Y, float Z)> AdaptRetargetedMorphPayload(

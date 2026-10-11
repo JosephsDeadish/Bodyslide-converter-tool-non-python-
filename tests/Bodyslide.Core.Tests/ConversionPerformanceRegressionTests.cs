@@ -11,7 +11,7 @@ namespace Bodyslide.Core.Tests;
 public sealed class ConversionPerformanceRegressionTests
 {
     [Fact]
-    public void PayloadReuseSummary_DoesNotAllocateRetargetedVertexArrays()
+    public void PayloadReuseSummary_RequiresTypedMapBeforeRetargetingAndDoesNotAllocateFallbackArrays()
     {
         var sliders = Enumerable.Range(0, 20).Select(index => $"Slider{index}").ToArray();
         var payloads = sliders.ToDictionary(slider => slider, slider =>
@@ -33,8 +33,8 @@ public sealed class ConversionPerformanceRegressionTests
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.Equal(40, summary.RequestedVariantCount);
-        Assert.Equal(40, summary.RetargetedVariantCount);
-        Assert.Equal(0, summary.FallbackVariantCount);
+        Assert.Equal(0, summary.RetargetedVariantCount);
+        Assert.Equal(40, summary.FallbackVariantCount);
         Assert.True(allocated < 1_000_000, $"Metadata-only summary allocated {allocated} bytes.");
     }
 
@@ -98,7 +98,7 @@ public sealed class ConversionPerformanceRegressionTests
         };
 
         var summary = (MorphPayloadReuseSummary)GetMethod("BuildPayloadReuseSummary")
-            .Invoke(null, [new[] { "Belly" }, payloads, 5, null])!;
+            .Invoke(null, [new[] { "Belly" }, payloads, 3, null])!;
 
         Assert.Equal(0, summary.ReusedVariantCount);
         Assert.Equal(0, summary.RetargetedVariantCount);
@@ -127,7 +127,13 @@ public sealed class ConversionPerformanceRegressionTests
                     RetargetMapEvidence: includeEvidence ? ["source/target correspondence"] : [],
                     SourceShapeName: "SourceBody",
                     TargetShapeName: "TargetBody",
-                    ShapeCorrespondenceEvidence: ["named shape correspondence"]),
+                    ShapeCorrespondenceEvidence: ["named shape correspondence"],
+                    RetargetMapTargetToSource: CreateRetargetMap(
+                        [new(0, 1f)],
+                        [new(0, 1f)],
+                        [new(1, 1f)],
+                        [new(0, 1f)],
+                        [new(1, 1f)])),
                 null)
         };
 
@@ -155,12 +161,16 @@ public sealed class ConversionPerformanceRegressionTests
                     RetargetMapEvidence: ["named-shape ownership", "vertex correspondence"],
                     SourceShapeName: "SourceBody",
                     TargetShapeName: "TargetBody",
-                    ShapeCorrespondenceEvidence: ["matched named body shape"]),
+                    ShapeCorrespondenceEvidence: ["matched named body shape"],
+                    RetargetMapTargetToSource: CreateRetargetMap(
+                        [new(0, 0.25f), new(1, 0.75f)],
+                        [new(0, 1f)],
+                        [new(1, 1f)])),
                 null)
         };
 
         var summary = (MorphPayloadReuseSummary)GetMethod("BuildPayloadReuseSummary")
-            .Invoke(null, [new[] { "Belly" }, payloads, 5, null])!;
+            .Invoke(null, [new[] { "Belly" }, payloads, 3, null])!;
 
         var evidence = Assert.Single(summary.RetargetEvidence!);
         Assert.Equal("Belly", evidence.SliderVariant);
@@ -169,6 +179,81 @@ public sealed class ConversionPerformanceRegressionTests
         Assert.Equal(new[] { "named-shape ownership", "vertex correspondence" }, evidence.Evidence);
         Assert.Equal("SourceBody", evidence.SourceShapeName);
         Assert.Equal("TargetBody", evidence.TargetShapeName);
+    }
+
+    [Fact]
+    public void ReusableMorphPayloadAppliesOnlyTheExplicitWeightedRetargetMap()
+    {
+        var payload = new SourceMorphPayload(
+            "Belly",
+            false,
+            "bsd",
+            2,
+            [(0.2f, 0f, 0f), (0f, 0.4f, 0f)],
+            ShapeIdentityStatus: "verified",
+            VertexOrderStatus: "verified",
+            RetargetMapVerified: true,
+            RetargetMapMethod: "tested-weighted-map",
+            RetargetMapConfidence: 0.99d,
+            RetargetMapEvidence: ["source/target vertex map fixture"],
+            SourceShapeName: "SourceBody",
+            TargetShapeName: "TargetBody",
+            ShapeCorrespondenceEvidence: ["named shape correspondence"],
+            RetargetMapTargetToSource: CreateRetargetMap(
+                [new(0, 0.25f), new(1, 0.75f)],
+                [new(0, 1f)],
+                [new(1, 1f)]));
+        var payloads = new Dictionary<string, SourceMorphPayloadVariants>
+        {
+            ["Belly"] = new(payload, null)
+        };
+        var arguments = new object?[] { payloads, "Belly", false, 3, null, null, null, null };
+
+        Assert.True((bool)GetMethod("TryGetReusableMorphPayload").Invoke(null, arguments)!);
+        var result = Assert.IsType<SourceMorphPayload>(arguments[5]);
+        Assert.True((bool)arguments[6]!);
+        Assert.Equal(
+            new[] { (0.05f, 0.3f, 0f), (0.2f, 0f, 0f), (0f, 0.4f, 0f) },
+            result.Deltas);
+    }
+
+    [Fact]
+    public void ReusableMorphPayloadRejectsMalformedTypedRetargetMaps()
+    {
+        IReadOnlyList<IReadOnlyList<SourceMorphRetargetInfluence>>[] invalidMaps =
+        [
+            Array.Empty<IReadOnlyList<SourceMorphRetargetInfluence>>(),
+            new IReadOnlyList<SourceMorphRetargetInfluence>[] { [new(2, 1f)] },
+            new IReadOnlyList<SourceMorphRetargetInfluence>[] { [new(0, 0.5f)] },
+            new IReadOnlyList<SourceMorphRetargetInfluence>[] { [new(0, float.NaN)] }
+        ];
+
+        foreach (var map in invalidMaps)
+        {
+            var payload = new SourceMorphPayload(
+                "Belly",
+                false,
+                "bsd",
+                2,
+                [(0.2f, 0f, 0f), (0f, 0.4f, 0f)],
+                ShapeIdentityStatus: "verified",
+                VertexOrderStatus: "verified",
+                RetargetMapVerified: true,
+                RetargetMapMethod: "test-map",
+                RetargetMapConfidence: 0.99d,
+                RetargetMapEvidence: ["map fixture"],
+                SourceShapeName: "SourceBody",
+                TargetShapeName: "TargetBody",
+                ShapeCorrespondenceEvidence: ["shape fixture"],
+                RetargetMapTargetToSource: map);
+            var payloads = new Dictionary<string, SourceMorphPayloadVariants>
+            {
+                ["Belly"] = new(payload, null)
+            };
+            var arguments = new object?[] { payloads, "Belly", false, 1, null, null, null, null };
+
+            Assert.False((bool)GetMethod("TryGetReusableMorphPayload").Invoke(null, arguments)!);
+        }
     }
 
     [Fact]
@@ -301,6 +386,10 @@ public sealed class ConversionPerformanceRegressionTests
             _ => DdsTextureDerivation.TryDeriveRoughnessFromSpecular(source, out result, cancellationToken)
         };
     }
+
+    private static IReadOnlyList<IReadOnlyList<SourceMorphRetargetInfluence>> CreateRetargetMap(
+        params SourceMorphRetargetInfluence[][] targets) =>
+        targets.Select(static influences => (IReadOnlyList<SourceMorphRetargetInfluence>)influences).ToArray();
 
     [Theory]
     [InlineData(false, false)]
