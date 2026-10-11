@@ -700,6 +700,36 @@ public sealed class SkyrimSseNifShapeReaderTests
         Assert.Equal("bstrishape-triangle-index-out-of-range:BrokenShape", result.Diagnostic);
     }
 
+    [Fact]
+    public void RejectsUnmodeledTrailingBytesInStandardShapeBlock()
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)], TrailingData: [0xA5])]));
+
+        Assert.False(result.Supported);
+        Assert.Equal("bstrishape-unmodeled-trailing-data:Body", result.Diagnostic);
+    }
+
+    [Fact]
+    public void RejectsUnmodeledTrailingBytesAfterDynamicPositionStream()
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [
+                new TestShape(
+                    "DynamicBody",
+                    [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)],
+                    VertexStride: 0,
+                    DynamicVertices: [(0f, 0f, 0f, 0f), (1f, 0f, 0f, 0f), (0f, 1f, 0f, 0f)],
+                    TrailingData: [0xA5])
+            ],
+            blockType: "BSDynamicTriShape",
+            dynamicShapeLayout: true,
+            particleDataSizeOverride: 0));
+
+        Assert.False(result.Supported);
+        Assert.Equal("bstrishape-unmodeled-trailing-data:DynamicBody", result.Diagnostic);
+    }
+
     private static byte[] CreateNif(
         IReadOnlyList<TestShape> shapes,
         uint streamVersion = 100,

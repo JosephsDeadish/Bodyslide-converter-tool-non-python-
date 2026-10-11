@@ -299,6 +299,12 @@ internal static class SkyrimSseNifShapeReader
         {
             throw new InvalidDataException($"bstrishape-data-size-mismatch:{strings[(int)nameIndex]}");
         }
+        if (!isDynamic &&
+            !string.Equals(geometryBlockType, "BSSubIndexTriShape", StringComparison.Ordinal) &&
+            checked(offset + expectedDataSize) != blockEnd)
+        {
+            throw new InvalidDataException($"bstrishape-unmodeled-trailing-data:{strings[(int)nameIndex]}");
+        }
 
         var vertexDataOffset = offset;
         var triangleOffset = checked(offset + vertexBytes);
@@ -338,6 +344,10 @@ internal static class SkyrimSseNifShapeReader
             if (dynamicDataSize > blockEnd - dynamicSizeOffset)
             {
                 throw new InvalidDataException($"bstrishape-dynamic-data-truncated:{strings[(int)nameIndex]}");
+            }
+            if (checked(dynamicSizeOffset + (int)dynamicDataSize) != blockEnd)
+            {
+                throw new InvalidDataException($"bstrishape-unmodeled-trailing-data:{strings[(int)nameIndex]}");
             }
 
             vertexDataOffset = dynamicSizeOffset;
