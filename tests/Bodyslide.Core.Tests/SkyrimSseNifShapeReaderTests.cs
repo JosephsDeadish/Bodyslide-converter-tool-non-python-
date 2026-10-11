@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Bodyslide.Core;
 
 namespace Bodyslide.Core.Tests;
@@ -248,8 +249,10 @@ public sealed class SkyrimSseNifShapeReaderTests
         AssertOnlyShapePositionsChanged(source, transformed, sourceShapes);
     }
 
-    [Fact]
-    public async Task ConvertAsync_SupportedShapeAwareArmorIsSavedAsReadableNif()
+    [Theory]
+    [InlineData("BHUNP", "3BA")]
+    [InlineData("3BA", "BHUNP")]
+    public async Task ConvertAsync_SupportedShapeAwareArmorIsSavedAsReadableNif(string sourceBody, string targetBody)
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var inputDirectory = Path.Combine(workingDirectory, "input", "meshes", "armor");
@@ -266,9 +269,12 @@ public sealed class SkyrimSseNifShapeReaderTests
         try
         {
             var result = await StandaloneConversionModules.CreateDefault().ConvertAsync(
-                new ConversionRequest(inputPath, "3BA", outputDirectory, SourceBodyOverride: "CBBE"));
+                new ConversionRequest(inputPath, targetBody, outputDirectory, SourceBodyOverride: sourceBody));
 
             Assert.True(result.Success);
+            using var quality = JsonDocument.Parse(File.ReadAllText(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.Equal(sourceBody, quality.RootElement.GetProperty("DetectedSourceBody").GetString());
+            Assert.Equal(targetBody, quality.RootElement.GetProperty("TargetBody").GetString());
             var sourceShapes = SkyrimSseNifShapeReader.Read(sourceBytes).Shapes;
             var outputMeshesDirectory = Path.Combine(outputDirectory, "meshes");
             var savedArmorNifs = Directory.GetFiles(outputMeshesDirectory, "*.nif", SearchOption.AllDirectories);
