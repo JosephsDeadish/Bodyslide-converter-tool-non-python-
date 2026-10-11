@@ -1575,9 +1575,9 @@ internal static class BodySlideSourceProjectSupport
     {
         var semantics = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (sliderSet.DescendantsAndSelf().Any(element =>
-                element.Name.Namespace != XNamespace.None ||
+                !string.IsNullOrEmpty(element.Name.NamespaceName) ||
                 element.Attributes().Any(attribute =>
-                    !attribute.IsNamespaceDeclaration && attribute.Name.Namespace != XNamespace.None)))
+                    !attribute.IsNamespaceDeclaration && !string.IsNullOrEmpty(attribute.Name.NamespaceName))))
         {
             semantics.Add("namespaced-osp-settings-not-preserved");
         }
@@ -1585,7 +1585,9 @@ internal static class BodySlideSourceProjectSupport
         var knownSliderSetAttributes = new HashSet<string>(
             ["name", "baseShape", "bsversion"],
             StringComparer.OrdinalIgnoreCase);
-        if (sliderSet.Attributes().Any(attribute => !knownSliderSetAttributes.Contains(attribute.Name.LocalName)))
+        if (sliderSet.Attributes().Any(attribute =>
+                !attribute.IsNamespaceDeclaration &&
+                !knownSliderSetAttributes.Contains(attribute.Name.LocalName)))
         {
             semantics.Add("slider-set-unknown-attributes");
         }
@@ -1596,7 +1598,9 @@ internal static class BodySlideSourceProjectSupport
             var knownSliderAttributes = new HashSet<string>(
                 ["name", "default", "small", "big", "invert", "zap", "uv"],
                 StringComparer.OrdinalIgnoreCase);
-            if (slider.Attributes().Any(attribute => !knownSliderAttributes.Contains(attribute.Name.LocalName)))
+            if (slider.Attributes().Any(attribute =>
+                    !attribute.IsNamespaceDeclaration &&
+                    !knownSliderAttributes.Contains(attribute.Name.LocalName)))
             {
                 semantics.Add("slider-unknown-attributes");
             }
