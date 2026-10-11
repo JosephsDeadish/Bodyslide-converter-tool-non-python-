@@ -389,7 +389,9 @@ BodySlide OSD data; generated TRI files are withheld for the same provenance gap
 Explicitly linked source OSD candidates retain a fingerprint of the associated
 source NIF shape's ordered vertex positions. This is source-only evidence: target
 fingerprints are not yet produced, so it does not verify correspondence or enable
-source morph reuse.
+source morph reuse. OSP `<Data>` record names must also match their enclosing
+slider names after low/high-weight suffix normalization; alias/mismatched links are
+reported as unsupported and cannot establish reusable morph identity.
 Readable BodySlide projects no longer automatically force every pack texture into
 each armor export: their resolved input NIFs participate in shader dependency
 checks, including `ShapeData`/`DataFolder` references. Morph-only OSD files do not
