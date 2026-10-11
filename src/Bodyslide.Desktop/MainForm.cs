@@ -6374,19 +6374,7 @@ public sealed class MainForm : Form
     }
 
     private static bool IsLikelyModManagerEnvironment() =>
-        HasEnvironmentVariable("MO2_INSTANCE") ||
-        HasEnvironmentVariable("USVFS_PARAMETERS") ||
-        HasEnvironmentVariable("USVFS_PROCESS") ||
-        HasEnvironmentVariable("USVFS_PROXY") ||
-        HasEnvironmentVariable("MODORGANIZER_INSTANCE") ||
-        HasEnvironmentVariable("MODORGANIZER_PATH") ||
-        HasEnvironmentVariable("MODORGANIZER_ROOT") ||
-        HasEnvironmentVariable("VORTEX_USERDATA") ||
-        HasEnvironmentVariable("VORTEX_PROFILE_ID") ||
-        HasEnvironmentVariable("VORTEX_STAGING_FOLDER");
-
-    private static bool HasEnvironmentVariable(string name) =>
-        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
+        StandaloneStartupRouting.IsModManagerEnvironmentDetected();
 
     private static string? FindSiblingDesktopExecutable(string executableDirectory)
     {

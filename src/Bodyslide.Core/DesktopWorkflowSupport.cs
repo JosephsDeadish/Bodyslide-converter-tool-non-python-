@@ -4,6 +4,25 @@ namespace Bodyslide.Core;
 
 internal static class ModManagerLaunchArgumentCatalog
 {
+    internal static readonly string[] EnvironmentVariableNames =
+    [
+        "MO2_INSTANCE",
+        "MO2_PROFILE",
+        "MO2_GAME_PATH",
+        "MO2_MODS_PATH",
+        "USVFS_PARAMETERS",
+        "USVFS_PROCESS",
+        "USVFS_PROXY",
+        "MODORGANIZER_INSTANCE",
+        "MODORGANIZER_PATH",
+        "MODORGANIZER_ROOT",
+        "VORTEX_USERDATA",
+        "VORTEX_PROFILE_ID",
+        "VORTEX_STAGING_FOLDER",
+        "VORTEX_INSTANCE_ID",
+        "VORTEX_SESSION"
+    ];
+
     internal static readonly string[] LauncherSwitchNames =
     [
         "mo2-launcher",

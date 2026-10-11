@@ -36,6 +36,12 @@ Quick start:
 4) Keep this package enabled as a separate managed entry. Do not configure the CLI
    executable when you want the graphical app.
 
+SlideSmith recognizes MO2/USVFS context from launcher arguments and available
+MO2/USVFS environment variables, including profile, game, and mods paths. This
+only identifies launch context; it does not prove that USVFS injected correctly
+or that virtual files are visible. Launch the installed desktop executable from
+MO2's executable list and verify the active profile's Data view.
+
 Startup diagnostics are recorded automatically in
 %LOCALAPPDATA%\SlideSmith\startup-launch-diagnostics.log. The log distinguishes
 process entry, window construction, and window display. If no new entry appears,

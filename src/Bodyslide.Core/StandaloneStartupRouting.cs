@@ -177,6 +177,13 @@ public static class StandaloneStartupRouting
     public static bool IsExplicitLauncherSignal(IReadOnlyList<string> args, Func<string, bool> hasEnvironmentVariable) =>
         HasLauncherSignal(args, hasEnvironmentVariable);
 
+    public static bool IsModManagerEnvironmentDetected(Func<string, bool>? hasEnvironmentVariable = null)
+    {
+        hasEnvironmentVariable ??= static name =>
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
+        return ModManagerLaunchArgumentCatalog.EnvironmentVariableNames.Any(hasEnvironmentVariable);
+    }
+
     public static bool IsLikelyModManagerLaunch(
         IReadOnlyList<string> args,
         string? executablePath,
@@ -272,18 +279,7 @@ public static class StandaloneStartupRouting
     }
 
     private static bool IsLikelyModManagerEnvironment(Func<string, bool> hasEnvironmentVariable) =>
-        hasEnvironmentVariable("MO2_INSTANCE") ||
-        hasEnvironmentVariable("USVFS_PARAMETERS") ||
-        hasEnvironmentVariable("USVFS_PROCESS") ||
-        hasEnvironmentVariable("USVFS_PROXY") ||
-        hasEnvironmentVariable("MODORGANIZER_INSTANCE") ||
-        hasEnvironmentVariable("MODORGANIZER_PATH") ||
-        hasEnvironmentVariable("MODORGANIZER_ROOT") ||
-        hasEnvironmentVariable("VORTEX_USERDATA") ||
-        hasEnvironmentVariable("VORTEX_PROFILE_ID") ||
-        hasEnvironmentVariable("VORTEX_STAGING_FOLDER") ||
-        hasEnvironmentVariable("VORTEX_INSTANCE_ID") ||
-        hasEnvironmentVariable("VORTEX_SESSION");
+        IsModManagerEnvironmentDetected(hasEnvironmentVariable);
 
     private static bool IsModManagerSpecificPathOption(string option) =>
         option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||

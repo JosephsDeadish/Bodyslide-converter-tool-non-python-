@@ -4,8 +4,13 @@ public sealed class StandaloneStartupRoutingTests
 {
     [Theory]
     [InlineData("MO2_INSTANCE")]
+    [InlineData("MO2_PROFILE")]
+    [InlineData("MO2_GAME_PATH")]
+    [InlineData("MO2_MODS_PATH")]
     [InlineData("USVFS_PARAMETERS")]
     [InlineData("VORTEX_PROFILE_ID")]
+    [InlineData("VORTEX_INSTANCE_ID")]
+    [InlineData("VORTEX_SESSION")]
     public void ManagerProfileMetadataDoesNotSelectCliWithoutConversionIntent(string environmentVariable)
     {
         var decision = StandaloneStartupRouting.EvaluateDesktopLaunchDecision(
@@ -24,6 +29,19 @@ public sealed class StandaloneStartupRoutingTests
             hasEnvironmentVariable: name => name == environmentVariable);
         Assert.False(conversion.ShouldAttemptDesktopHandoff);
         Assert.True(conversion.ExplicitCliLaunchDetected);
+    }
+
+    [Theory]
+    [InlineData("MO2_INSTANCE")]
+    [InlineData("MO2_PROFILE")]
+    [InlineData("MO2_GAME_PATH")]
+    [InlineData("MO2_MODS_PATH")]
+    [InlineData("USVFS_PARAMETERS")]
+    public void ModManagerEnvironmentDetectionUsesSharedEnvironmentSignals(string environmentVariable)
+    {
+        Assert.True(StandaloneStartupRouting.IsModManagerEnvironmentDetected(
+            name => name == environmentVariable));
+        Assert.False(StandaloneStartupRouting.IsModManagerEnvironmentDetected(_ => false));
     }
 
     [Theory]
