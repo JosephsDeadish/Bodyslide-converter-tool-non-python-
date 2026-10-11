@@ -387,9 +387,10 @@ duplicate shape names, duplicate morph names within a shape after weight-suffix
 normalization, duplicate sparse vertex indexes, malformed UTF-8 shape/morph names,
 and malformed trailing data are rejected. Low- and high-weight variants remain
 distinct, and same-named morphs on separate shapes are valid. The shape-local
-records improve provenance, but do not prove source
-to target shape identity or vertex order, so TRI candidates remain ineligible for
-reuse and generated TRI files remain withheld. FaceGen
+records improve provenance but do not prove source-to-input shape identity or
+vertex order by themselves; exact OSP record/link and supported-shape
+correspondence are still required before a named Body TRI candidate can be
+verified. Generated TRI files remain withheld. FaceGen
 `FRTRI002`/`FRTRI003` payloads
 have no corresponding named BodySlide shape association. OSD sparse records reject
 duplicate vertex indexes. TRI/OSD payloads retain only their represented index span; nearby NIFs are not used
