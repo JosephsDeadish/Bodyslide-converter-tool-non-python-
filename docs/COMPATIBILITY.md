@@ -20,5 +20,5 @@ Add a row only with the highest level actually demonstrated.
 - Shape-aware NIF read/write covers limited Skyrim SE layouts; unsupported layouts must fail closed, and each new layout needs a round-trip test.
 - OSD/named TRI reuse is limited to exact, uniquely linked shape matches; other payloads are ineligible. Extend only with demonstrated shape identity and vertex correspondence.
 - Preserved skin weights do not prove fit on a different body; retargeting and live deformation need separate validation.
-- No permitted real-format fixtures for varied armor types, body profiles, NIF variants, or failure modes yet.
+- No permitted real-format fixtures yet; see `docs/TEST_CORPUS.md` for policy and candidates (unverified).
 - Desktop UX: input/target/risk/output summary, progress/cancellation, accessibility, and preview need refinement.
