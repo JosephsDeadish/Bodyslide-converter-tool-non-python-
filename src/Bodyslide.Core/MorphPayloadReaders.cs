@@ -432,7 +432,16 @@ internal static class TriMorphReader
                 }
 
                 var morphName = StrictUtf8.GetString(bytes[offset..(offset + morphNameLength)]);
-                if (!morphNames.Add(morphName))
+                var normalizedMorphName = morphName.Trim();
+                var isHighWeight = normalizedMorphName.EndsWith("_1", StringComparison.OrdinalIgnoreCase);
+                if (normalizedMorphName.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+                    isHighWeight)
+                {
+                    normalizedMorphName = normalizedMorphName[..^2];
+                }
+
+                var morphKey = $"{normalizedMorphName}\u001f{isHighWeight}";
+                if (!morphNames.Add(morphKey))
                 {
                     return false;
                 }

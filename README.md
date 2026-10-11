@@ -368,9 +368,11 @@ disabled rather than guessing at vertex streams. This is not general NIF support
 and synthetic fixtures do not prove compatibility with real game assets.
 
 Body TRI `PIRT` payloads retain each shape name and its morphs independently;
-duplicate shape names, duplicate morph names within a shape, duplicate sparse
-vertex indexes, malformed UTF-8 shape/morph names, and malformed trailing data
-are rejected. The shape-local records improve provenance, but do not prove source
+duplicate shape names, duplicate morph names within a shape after weight-suffix
+normalization, duplicate sparse vertex indexes, malformed UTF-8 shape/morph names,
+and malformed trailing data are rejected. Low- and high-weight variants remain
+distinct, and same-named morphs on separate shapes are valid. The shape-local
+records improve provenance, but do not prove source
 to target shape identity or vertex order, so TRI candidates remain ineligible for
 reuse and generated TRI files remain withheld. FaceGen
 `FRTRI002`/`FRTRI003` payloads

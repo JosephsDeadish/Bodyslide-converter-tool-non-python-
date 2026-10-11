@@ -182,6 +182,10 @@ public sealed class MorphPayloadSafetyTests
     public void BodyTriRejectsDuplicateMorphNamesWithinAShapeButAllowsThemAcrossShapes()
     {
         Assert.False(TriMorphReader.TryRead(BodyTriWithMorphNames("Torso", "Waist", "waist"), out _));
+        Assert.False(TriMorphReader.TryRead(BodyTriWithMorphNames("Torso", "Waist", "waist_0"), out _));
+
+        Assert.True(TriMorphReader.TryRead(BodyTriWithMorphNames("Torso", "Waist_0", "Waist_1"), out var weightVariants));
+        Assert.Equal(2, Assert.Single(weightVariants!.Shapes).Morphs.Count);
 
         Assert.True(TriMorphReader.TryRead(
             BodyTriWithShapes(("Torso", "Waist", 0, 1), ("Hands", "Waist", 1, 1)),
