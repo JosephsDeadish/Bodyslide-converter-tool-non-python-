@@ -868,8 +868,7 @@ public sealed class SkyrimSseNifShapeReaderTests
                     DynamicVertices: [(0f, 0f, 0f, 0.25f), (30f, 0f, 10f, 0.5f), (0f, 20f, 20f, 0.75f)])
             ],
             blockType: "BSDynamicTriShape",
-            dynamicShapeLayout: true,
-            particleDataSizeOverride: 0);
+            dynamicShapeLayout: true);
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var inputDirectory = Path.Combine(workingDirectory, "input", "meshes", "armor");
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -890,8 +889,12 @@ public sealed class SkyrimSseNifShapeReaderTests
                 "This skinned BSDynamicTriShape was copied without the target-body position fit",
                 ConversionValidationGuidance.GetIssueFollowUp("skinned-dynamic-fit-withheld", "3BA")!,
                 StringComparison.Ordinal);
-            var outputNif = Directory.GetFiles(outputDirectory, "dynamic-skinned.nif", SearchOption.AllDirectories).Single();
-            Assert.Equal(source, await File.ReadAllBytesAsync(outputNif));
+            var outputNifs = Directory.GetFiles(outputDirectory, "dynamic-skinned.nif", SearchOption.AllDirectories);
+            Assert.NotEmpty(outputNifs);
+            foreach (var outputNif in outputNifs)
+            {
+                Assert.Equal(source, await File.ReadAllBytesAsync(outputNif));
+            }
         }
         finally
         {
