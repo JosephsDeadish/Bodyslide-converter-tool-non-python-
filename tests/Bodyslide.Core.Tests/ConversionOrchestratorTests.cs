@@ -30975,7 +30975,11 @@ public sealed class OutputCompletenessTests
                         RetargetMapEvidence: ["fixture correspondence"],
                         SourceShapeName: "SourceBody",
                         TargetShapeName: "TargetBody",
-                        ShapeCorrespondenceEvidence: ["named shape correspondence"]),
+                        ShapeCorrespondenceEvidence: ["named shape correspondence"],
+                        RetargetMapTargetToSource: Enumerable.Range(0, 20)
+                            .Select(index => (IReadOnlyList<SourceMorphRetargetInfluence>)
+                                [new(Math.Min(11, (index * 12) / 20), 1f)])
+                            .ToArray()),
                     null)
             };
 
@@ -31069,127 +31073,44 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
-    public async Task RetargetMorphPayload_UsesNearestSurfaceMappingWhenVertexGeometryIsAvailable()
+    public void RetargetMorphPayload_UsesOnlyAnExplicitWeightedMap()
     {
-        var method = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        var method = typeof(LocalExportService).GetMethod("TryApplyMorphRetargetMap", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
 
-        var createContext = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(createContext);
+        IReadOnlyList<(float X, float Y, float Z)> sourceDeltas =
+            [(1f, 0f, 0f), (2f, 0f, 0f), (3f, 0f, 0f)];
+        IReadOnlyList<IReadOnlyList<SourceMorphRetargetInfluence>> targetToSource =
+        [
+            [new(2, 1f)],
+            [new(0, 1f)]
+        ];
+        var arguments = new object?[] { sourceDeltas, targetToSource, null };
 
-        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmpDir);
-
-        try
-        {
-            var sourcePath = Path.Combine(tmpDir, "source.nif");
-            var targetPath = Path.Combine(tmpDir, "target.nif");
-            await SyntheticNifTestData.WriteAsync(sourcePath,
-            [
-                (0f, 0f, 0f),
-                (10f, 0f, 0f),
-                (20f, 0f, 0f)
-            ]);
-            await SyntheticNifTestData.WriteAsync(targetPath,
-            [
-                (19.9f, 0f, 0f),
-                (0.1f, 0f, 0f)
-            ]);
-
-            var context = createContext!.Invoke(null, new object[]
-            {
-                new[] { sourcePath },
-                new[] { targetPath },
-                new MeshAnalysis("mixed", false, 1),
-                "CBBE"
-            });
-            Assert.NotNull(context);
-
-            var sourceDeltas = new (float X, float Y, float Z)[]
-            {
-                (1f, 0f, 0f),
-                (2f, 0f, 0f),
-                (3f, 0f, 0f)
-            };
-
-            var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
-                method!.Invoke(null, ["Belly", sourceDeltas, 2, context]));
-
-            Assert.InRange(result[0].X, 2.80f, 3.05f);
-            Assert.InRange(result[1].X, 0.95f, 1.05f);
-        }
-        finally
-        {
-            Directory.Delete(tmpDir, recursive: true);
-        }
+        Assert.True((bool)method!.Invoke(null, arguments)!);
+        Assert.Equal(new[] { (3f, 0f, 0f), (1f, 0f, 0f) }, arguments[2]);
     }
 
     [Fact]
-    public async Task RetargetMorphPayload_UsesNormalizedGeometryTransferForReorderedScaledTargets()
+    public void RetargetMorphPayload_PreservesExplicitReorderedMapForLargeSource()
     {
-        var method = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        var method = typeof(LocalExportService).GetMethod("TryApplyMorphRetargetMap", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
 
-        var createContext = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(createContext);
-
-        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmpDir);
-
-        try
-        {
-            var sourcePath = Path.Combine(tmpDir, "source-large.nif");
-            var targetPath = Path.Combine(tmpDir, "target-large.nif");
-            var sourceVertices = Enumerable.Range(0, 2048)
-                .Select(index =>
-                {
-                    var t = index / 2047f;
-                    return (
-                        X: ((index % 9) - 4) * 0.05f,
-                        Y: ((index % 7) - 3) * 0.035f,
-                        Z: t * 4.0f);
-                })
-                .ToList();
-            var targetVertices = sourceVertices
-                .Where((_, index) => index % 2 == 0)
-                .Reverse()
-                .Select(vertex => (
-                    X: (vertex.X * 1.8f) + 2.5f,
-                    Y: (vertex.Y * 0.65f) - 1.25f,
-                    Z: (vertex.Z * 2.2f) + 9f))
-                .ToList();
-
-            await SyntheticNifTestData.WriteAsync(sourcePath, sourceVertices);
-            await SyntheticNifTestData.WriteAsync(targetPath, targetVertices);
-
-            var context = createContext!.Invoke(null, new object[]
-            {
-                new[] { sourcePath },
-                new[] { targetPath },
-                new MeshAnalysis("mixed", false, 1),
-                "CBBE"
-            });
-            Assert.NotNull(context);
-
-            var sourceDeltas = Enumerable.Range(0, sourceVertices.Count)
-                .Select(index => (X: (float)(index + 1), Y: 0f, Z: 0f))
+        IReadOnlyList<(float X, float Y, float Z)> sourceDeltas =
+            Enumerable.Range(0, 2048).Select(index => ((float)(index + 1), 0f, 0f)).ToArray();
+        IReadOnlyList<IReadOnlyList<SourceMorphRetargetInfluence>> targetToSource =
+            Enumerable.Range(0, 1024)
+                .Select(index => (IReadOnlyList<SourceMorphRetargetInfluence>)
+                    [new(2046 - (index * 2), 1f)])
                 .ToArray();
+        var arguments = new object?[] { sourceDeltas, targetToSource, null };
 
-            var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
-                method!.Invoke(null, ["Belly", sourceDeltas, targetVertices.Count, context]));
-
-            Assert.Equal(targetVertices.Count, result.Count);
-            Assert.InRange(result[0].X, 1980f, 2048f);
-            Assert.InRange(result[^1].X, 1f, 80f);
-            Assert.True(result[0].X > result[result.Count / 4].X);
-            Assert.True(result[result.Count / 4].X > result[result.Count / 2].X);
-            Assert.True(result[result.Count / 2].X > result[(result.Count * 3) / 4].X);
-            Assert.True(result[(result.Count * 3) / 4].X > result[^1].X);
-        }
-        finally
-        {
-            Directory.Delete(tmpDir, recursive: true);
-        }
+        Assert.True((bool)method!.Invoke(null, arguments)!);
+        var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(arguments[2]);
+        Assert.Equal(1024, result.Count);
+        Assert.Equal(2047f, result[0].X);
+        Assert.Equal(1f, result[^1].X);
     }
 
     [Fact]
