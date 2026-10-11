@@ -513,6 +513,9 @@ output options, weight-variant mode, and unrecognized set/slider fields. Setting
 that are rebuilt or unsupported are recorded in `SourceAssetSupport.UnsupportedOspSemantics`,
 and `conversion-quality.json` adds `source-osp-semantics-not-preserved` for review.
 Conflicting controls are not copied; malformed control values are reported.
+Namespaced OSP settings are also flagged because the generated project does not
+preserve namespaced elements or attributes, even when their local names resemble
+recognized OSP fields.
 Detection is evidence that a setting was present, not proof the generated project
 preserves its behavior; absence of a category is not a general OSP compatibility claim.
 

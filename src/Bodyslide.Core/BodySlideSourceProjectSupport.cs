@@ -1574,6 +1574,14 @@ internal static class BodySlideSourceProjectSupport
     private static IReadOnlyList<string> CollectUnsupportedOspSemantics(XElement sliderSet)
     {
         var semantics = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (sliderSet.DescendantsAndSelf().Any(element =>
+                element.Name.Namespace != XNamespace.None ||
+                element.Attributes().Any(attribute =>
+                    !attribute.IsNamespaceDeclaration && attribute.Name.Namespace != XNamespace.None)))
+        {
+            semantics.Add("namespaced-osp-settings-not-preserved");
+        }
+
         var knownSliderSetAttributes = new HashSet<string>(
             ["name", "baseShape", "bsversion"],
             StringComparer.OrdinalIgnoreCase);

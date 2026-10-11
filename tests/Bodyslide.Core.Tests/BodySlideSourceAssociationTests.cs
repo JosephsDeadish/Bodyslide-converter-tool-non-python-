@@ -213,7 +213,7 @@ public sealed class BodySlideSourceAssociationTests
                     <SourceFile variant="reference">base.nif</SourceFile>
                     <OutputPath mode="custom">meshes\custom\</OutputPath>
                     <OutputFile gender="female" GenWeights="true" options="custom">jacket</OutputFile>
-                    <Slider name="Fit" default="0.25" small="0.1" big="0.8" invert="true" uv="true">
+                    <Slider xmlns:vendor="urn:vendor" vendor:default="0.9" name="Fit" default="0.25" small="0.1" big="0.8" invert="true" uv="true">
                       <Data target="Torso">shared.osd#Fit</Data>
                       <Low value="5" custom="true" />
                       <High value="95" />
@@ -236,6 +236,7 @@ public sealed class BodySlideSourceAssociationTests
                     "custom-base-shape",
                     "data-folder-rebuilt",
                     "external-data-folder",
+                    "namespaced-osp-settings-not-preserved",
                     "output-options",
                     "output-path-rebuilt",
                     "seam-or-lock-normal-settings",
