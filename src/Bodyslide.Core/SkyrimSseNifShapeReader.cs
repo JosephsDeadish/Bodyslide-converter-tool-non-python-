@@ -95,7 +95,9 @@ internal static class SkyrimSseNifShapeReader
         try
         {
             var shapes = ReadSupportedShapes(bytes);
-            var diagnostic = shapes.Any(static shape => shape.GeometryBlockType == "BSSubIndexTriShape")
+            var diagnostic = shapes.Any(static shape => shape.GeometryBlockType == "BSDynamicTriShape")
+                ? "supported-bsdynamictrishape-dynamic-position-stream"
+                : shapes.Any(static shape => shape.GeometryBlockType == "BSSubIndexTriShape")
                 ? "supported-bssubindextrishape-position-index-only-segments-opaque"
                 : shapes.Any(static shape => shape.IsSkinned)
                 ? "supported-skinned-bstrishape-position-index-only"
@@ -211,7 +213,8 @@ internal static class SkyrimSseNifShapeReader
             var blockEnd = checked(blockOffset + blockSize);
 
             var isSupportedShapeType = string.Equals(typeName, "BSTriShape", StringComparison.Ordinal) ||
-                                       string.Equals(typeName, "BSSubIndexTriShape", StringComparison.Ordinal);
+                                       string.Equals(typeName, "BSSubIndexTriShape", StringComparison.Ordinal) ||
+                                       string.Equals(typeName, "BSDynamicTriShape", StringComparison.Ordinal);
             if (!isSupportedShapeType && IsUnsupportedGeometryType(typeName))
             {
                 throw new InvalidDataException($"unsupported-geometry-block:{typeName}");
@@ -280,7 +283,11 @@ internal static class SkyrimSseNifShapeReader
         var dataSize = ReadUInt32(bytes[..blockEnd], ref offset);
         var vertexStride = checked((int)(descriptor & 0xF) * 4);
         var hasPositions = (descriptor & (1UL << 44)) != 0;
-        if (!hasPositions || vertexStride < 3 * sizeof(float) || vertexCount == 0 || triangleCount == 0)
+        var isDynamic = string.Equals(geometryBlockType, "BSDynamicTriShape", StringComparison.Ordinal);
+        if ((!hasPositions && !isDynamic) ||
+            (hasPositions && vertexStride < 3 * sizeof(float)) ||
+            vertexCount == 0 ||
+            triangleCount == 0)
         {
             throw new InvalidDataException($"unsupported-bstrishape-vertex-layout:{strings[(int)nameIndex]}");
         }
@@ -294,21 +301,6 @@ internal static class SkyrimSseNifShapeReader
         }
 
         var vertexDataOffset = offset;
-        var vertices = new MeshVertex[vertexCount];
-        for (var i = 0; i < vertices.Length; i++)
-        {
-            var vertexOffset = checked(offset + (i * vertexStride));
-            var x = ReadSingleAt(bytes, vertexOffset);
-            var y = ReadSingleAt(bytes, vertexOffset + sizeof(float));
-            var z = ReadSingleAt(bytes, vertexOffset + (2 * sizeof(float)));
-            if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z))
-            {
-                throw new InvalidDataException($"bstrishape-nonfinite-vertex:{strings[(int)nameIndex]}");
-            }
-
-            vertices[i] = new MeshVertex(x, y, z);
-        }
-
         var triangleOffset = checked(offset + vertexBytes);
         var triangleIndexes = new ushort[triangleCount * 3];
         for (var i = 0; i < triangleIndexes.Length; i++)
@@ -320,6 +312,59 @@ internal static class SkyrimSseNifShapeReader
             }
 
             triangleIndexes[i] = index;
+        }
+
+        MeshVertex[] vertices;
+        if (isDynamic)
+        {
+            if (hasPositions)
+            {
+                throw new InvalidDataException($"unsupported-bsdynamictrishape-static-position-stream:{strings[(int)nameIndex]}");
+            }
+
+            var dynamicSizeOffset = checked(triangleOffset + triangleBytes);
+            var dynamicDataSize = ReadUInt32(bytes[..blockEnd], ref dynamicSizeOffset);
+            var expectedDynamicDataSize = checked((uint)vertexCount * 4u * sizeof(float));
+            if (dynamicDataSize != expectedDynamicDataSize ||
+                dynamicDataSize > blockEnd - dynamicSizeOffset)
+            {
+                throw new InvalidDataException($"bstrishape-dynamic-data-size-mismatch:{strings[(int)nameIndex]}");
+            }
+
+            vertexDataOffset = dynamicSizeOffset;
+            vertexStride = 4 * sizeof(float);
+            vertices = new MeshVertex[vertexCount];
+            for (var i = 0; i < vertices.Length; i++)
+            {
+                var vertexOffset = checked(vertexDataOffset + (i * vertexStride));
+                var x = ReadSingleAt(bytes, vertexOffset);
+                var y = ReadSingleAt(bytes, vertexOffset + sizeof(float));
+                var z = ReadSingleAt(bytes, vertexOffset + (2 * sizeof(float)));
+                var w = ReadSingleAt(bytes, vertexOffset + (3 * sizeof(float)));
+                if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z) || !float.IsFinite(w))
+                {
+                    throw new InvalidDataException($"bstrishape-nonfinite-vertex:{strings[(int)nameIndex]}");
+                }
+
+                vertices[i] = new MeshVertex(x, y, z);
+            }
+        }
+        else
+        {
+            vertices = new MeshVertex[vertexCount];
+            for (var i = 0; i < vertices.Length; i++)
+            {
+                var vertexOffset = checked(offset + (i * vertexStride));
+                var x = ReadSingleAt(bytes, vertexOffset);
+                var y = ReadSingleAt(bytes, vertexOffset + sizeof(float));
+                var z = ReadSingleAt(bytes, vertexOffset + (2 * sizeof(float)));
+                if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z))
+                {
+                    throw new InvalidDataException($"bstrishape-nonfinite-vertex:{strings[(int)nameIndex]}");
+                }
+
+                vertices[i] = new MeshVertex(x, y, z);
+            }
         }
 
         return new SkyrimSseNifShape(
@@ -338,6 +383,7 @@ internal static class SkyrimSseNifShapeReader
 
     private static bool IsUnsupportedGeometryType(string typeName) =>
         !string.Equals(typeName, "BSTriShape", StringComparison.Ordinal) &&
+        !string.Equals(typeName, "BSDynamicTriShape", StringComparison.Ordinal) &&
         (typeName.Contains("TriShape", StringComparison.Ordinal) ||
          typeName.Contains("TriStrips", StringComparison.Ordinal) ||
          string.Equals(typeName, "NiMesh", StringComparison.Ordinal) ||

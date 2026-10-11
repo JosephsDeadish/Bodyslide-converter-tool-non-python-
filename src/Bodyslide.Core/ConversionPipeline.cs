@@ -6220,7 +6220,9 @@ internal static class NifGeometrySignatureReader
         if (parsedShapes.Supported)
         {
             var parsedShapeSignature = BuildSignature(parsedShapes.Shapes);
-            var mode = parsedShapes.Shapes.Any(static shape => shape.GeometryBlockType == "BSSubIndexTriShape")
+            var mode = parsedShapes.Shapes.Any(static shape => shape.GeometryBlockType == "BSDynamicTriShape")
+                ? "parsed-sse-bsdynamictrishape-dynamic-position-stream"
+                : parsedShapes.Shapes.Any(static shape => shape.GeometryBlockType == "BSSubIndexTriShape")
                 ? "parsed-sse-bssubindextrishape-position-index-only-segments-opaque"
                 : parsedShapes.Shapes.Any(static shape => shape.IsSkinned)
                 ? "parsed-sse-bstrishape-skinned-position-index-only"
