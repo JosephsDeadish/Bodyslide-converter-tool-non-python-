@@ -494,11 +494,14 @@ public sealed class SkyrimSseNifShapeReaderTests
         Assert.Equal(diagnostic, result.Diagnostic);
     }
 
-    [Fact]
-    public async Task WriterLeavesSkinnedShapeUnchangedUntilSkinSemanticsAreValidated()
+    [Theory]
+    [InlineData("NiSkinInstance")]
+    [InlineData("BSDismemberSkinInstance")]
+    public async Task WriterLeavesSkinnedShapeUnchangedUntilSkinSemanticsAreValidated(string skinInstanceType)
     {
         var source = CreateNif(
-            [new TestShape("SkinnedBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)], SkinInstance: 1)]);
+            [new TestShape("SkinnedBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)], SkinInstance: 1)],
+            skinBlockType: skinInstanceType);
 
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var path = Path.Combine(workingDirectory, "SkinnedBody.nif");
@@ -548,6 +551,8 @@ public sealed class SkyrimSseNifShapeReaderTests
                 "Do not install it as a converted fit",
                 ConversionValidationGuidance.GetIssueFollowUp("skinned-nif-transform-withheld", "3BA")!,
                 StringComparison.Ordinal);
+            var outputNifs = Directory.GetFiles(outputDirectory, "*.nif", SearchOption.AllDirectories);
+            Assert.Contains(outputNifs, outputNif => File.ReadAllBytes(outputNif).SequenceEqual(source));
         }
         finally
         {
