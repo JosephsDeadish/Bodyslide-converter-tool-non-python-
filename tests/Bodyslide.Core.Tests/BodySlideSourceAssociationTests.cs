@@ -793,6 +793,51 @@ public sealed class BodySlideSourceAssociationTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task MatchingLinkedNifDoesNotByItselfVerifyTriMorphCorrespondence()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            var meshDirectory = Path.Combine(root, "meshes", "armor", "traveler");
+            var projectDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+            var shapeDataDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+            Directory.CreateDirectory(meshDirectory);
+            Directory.CreateDirectory(projectDirectory);
+            Directory.CreateDirectory(shapeDataDirectory);
+
+            var mesh = Path.Combine(meshDirectory, "traveler_0.nif");
+            var project = Path.Combine(projectDirectory, "traveler.osp");
+            var referenceNif = SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso");
+            await File.WriteAllBytesAsync(mesh, referenceNif);
+            await File.WriteAllBytesAsync(Path.Combine(shapeDataDirectory, "source.nif"), referenceNif);
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "traveler.tri"),
+                BodyTri(("Torso", "Waist", (ushort)0, (short)2)));
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <SliderSet name="TravelerProject">
+                    <DataFolder>TravelerProject</DataFolder>
+                    <SourceFile>source.nif</SourceFile>
+                    <OutputPath>meshes\armor\traveler\</OutputPath>
+                    <OutputFile>traveler_0.nif</OutputFile>
+                    <Slider name="Waist" />
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            var candidate = Assert.Single(result.ReusableMorphPayloads!["Waist"].Payloads!);
+            Assert.Equal("Torso", candidate.SourceShapeName);
+            Assert.Equal("unresolved", candidate.ShapeIdentityStatus);
+            Assert.Equal("unverified", candidate.VertexOrderStatus);
+            Assert.Null(candidate.TargetShapeName);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     private static byte[] BodyTri(params (string Shape, string Morph, ushort Index, short X)[] shapes)
     {
         using var stream = new MemoryStream();
