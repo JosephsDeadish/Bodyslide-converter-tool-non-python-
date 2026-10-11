@@ -1259,8 +1259,8 @@ internal static class ConversionValidationGuidance
                 "Open target-body-template.slidesmith-body.json, merge it into the target body's existing *.slidesmith-body.json profile, and fill the missing support metadata called out in conversion-quality.json before re-running.",
             "unsupported-nif-layout" =>
                 "Open preview-workbench.html and conversion-quality.json to identify the listed mesh and any geometry-family notes, zoom into the failing piece in the preview, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
-            "skinned-nif-transform-withheld" =>
-                "Open conversion-quality.json and preview-workbench.html to identify the skinned mesh copied without a body-to-body position transform. Do not install it as a converted fit; use a supported unskinned source mesh or wait until skin weights and partition semantics are safely supported.",
+            "skinned-nif-runtime-unverified" =>
+                "Open conversion-quality.json and preview-workbench.html to inspect the skinned mesh. Supported SSE skinned shapes may receive a position-only fit transform while skin weights, partitions, and all other non-position NIF bytes are preserved; validate the result in Outfit Studio and Skyrim before relying on its live deformation.",
             "heuristic-nif-read" =>
                 "Use preview-workbench.html plus conversion-quality.json to identify heuristic-read meshes, then confirm vertex order, skinning, UVs, and partitions in NifSkope before shipping.",
             "incomplete-source-fallback" =>
@@ -5882,7 +5882,7 @@ internal static class NifGeometrySignatureReader
                     ? string.Equals(result.Mode, "heuristic-float", StringComparison.Ordinal)
                         ? ["heuristic-geometry-read", "manual-review-recommended"]
                         : result.Mode.Contains("skinned-position-index-only", StringComparison.Ordinal)
-                        ? ["skin-weight-and-partition-semantics-unverified", "non-position-nif-data-preserved-unmodified", "manual-review-recommended"]
+                    ? ["skin-data-validated-and-preserved-unmodified", "live-skinned-deformation-unverified", "manual-review-recommended"]
                             : ["partial-geometry-recovered", "manual-review-recommended"]
                     : [],
                 metadata,
@@ -25813,7 +25813,9 @@ internal sealed class LocalExportService(
         var parsedGeometry = SkyrimSseNifShapeReader.Read(sourceBytes);
         if (parsedGeometry.Supported && parsedGeometry.Shapes.Count > 0)
         {
-            if (parsedGeometry.Shapes.Any(static shape => shape.IsSkinned))
+            if (parsedGeometry.Shapes.Any(static shape =>
+                    shape.IsSkinned &&
+                    !string.Equals(shape.GeometryBlockType, "BSTriShape", StringComparison.Ordinal)))
             {
                 return sourceBytes;
             }
@@ -28212,17 +28214,17 @@ internal sealed class LocalExportService(
 
         if (nifSupport is { Count: > 0 })
         {
-            var untransformedSkinnedMeshes = nifSupport
+            var skinnedMeshes = nifSupport
                 .Where(static report => report.ParseMode.Contains("skinned-position-index-only", StringComparison.OrdinalIgnoreCase))
                 .Select(static report => Path.GetFileName(report.MeshPath))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
-            if (untransformedSkinnedMeshes.Count > 0)
+            if (skinnedMeshes.Count > 0)
             {
                 issues.Add(new ConversionValidationIssue(
-                    "skinned-nif-transform-withheld",
-                    "high",
-                    $"Skinned NIF geometry was copied without the body-to-body position transform because skin weights and partition semantics are not supported: {string.Join(", ", untransformedSkinnedMeshes.Take(6))}. These meshes are not converted to the requested target fit."));
+                    "skinned-nif-runtime-unverified",
+                    "medium",
+                    $"Supported skinned NIF position streams can be transformed while skin weights, partitions, and other non-position data are preserved unchanged. Live Outfit Studio/Skyrim deformation remains unverified for: {string.Join(", ", skinnedMeshes.Take(6))}."));
             }
 
             var unsupported = nifSupport
