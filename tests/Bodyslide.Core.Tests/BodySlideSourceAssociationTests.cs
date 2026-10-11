@@ -912,7 +912,7 @@ public sealed class BodySlideSourceAssociationTests
             await File.WriteAllBytesAsync(
                 Path.Combine(shapeDataDirectory, "traveler.tri"),
                 BodyTri((triShapeName, "Waist", (ushort)0, (short)2)));
-            await File.WriteAllTextAsync(project, """
+            await File.WriteAllTextAsync(project, $"""
                 <SliderSetInfo>
                   <SliderSet name="TravelerProject">
                     <DataFolder>TravelerProject</DataFolder>
