@@ -13546,11 +13546,11 @@ public sealed class PreviewMetadataTests
             Assert.True(result.Success);
             var content = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview.html"));
 
-            // The subtitle line should include a pose risk summary.
+            // The subtitle line should identify the simulation-based pose risk estimate.
             Assert.True(
-                content.Contains("poses at risk", StringComparison.Ordinal) ||
-                content.Contains("poses OK",      StringComparison.Ordinal),
-                "Preview HTML subtitle should include a pose-risk label.");
+                content.Contains("simulated poses", StringComparison.Ordinal) &&
+                content.Contains("estimated risk", StringComparison.Ordinal),
+                "Preview HTML subtitle should label pose risk as a simulation estimate.");
         }
         finally
         {
