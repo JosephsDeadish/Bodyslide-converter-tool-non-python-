@@ -524,6 +524,8 @@ preserve namespaced elements or attributes, even when their local names resemble
 recognized OSP fields.
 Detection is evidence that a setting was present, not proof the generated project
 preserves its behavior; absence of a category is not a general OSP compatibility claim.
+UV morph flags are explicitly not carried into generated OSPs because the current
+writer does not emit UV morph deltas; affected source settings remain flagged for review.
 
 Remaining issue #8 acceptance work: structural NIF support does not prove all UV/skin/partition/material
 relationships, runtime physics linkage/conflicts, or shape-specific source morph

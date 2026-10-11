@@ -10,6 +10,18 @@ public sealed class SkyrimSseNifShapeReaderTests
             .Select(static name => new TestShape(name, [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)]))
             .ToArray());
 
+    internal static byte[] CreateDynamicNifForShapeTargets(params string[] shapeNames) =>
+        CreateNif(shapeNames
+            .Select(static name => new TestShape(
+                name,
+                [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)],
+                VertexStride: 0,
+                DynamicVertices: [(0f, 0f, 0f, 0.25f), (1f, 0f, 0f, 0.5f), (0f, 1f, 0f, 0.75f)]))
+            .ToArray(),
+            blockType: "BSDynamicTriShape",
+            dynamicShapeLayout: true,
+            particleDataSizeOverride: 0);
+
     [Fact]
     public void ReadsSeparateShapeNamesVerticesAndTriangleIndexes()
     {

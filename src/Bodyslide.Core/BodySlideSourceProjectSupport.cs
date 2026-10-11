@@ -1797,7 +1797,7 @@ internal static class BodySlideSourceProjectSupport
             smallValue,
             bigValue,
             IsTruthy(slider.Attribute("invert")?.Value),
-            IsTruthy(slider.Attribute("uv")?.Value));
+            Uv: false);
     }
 
     private static bool TryReadSimpleSliderRanges(
