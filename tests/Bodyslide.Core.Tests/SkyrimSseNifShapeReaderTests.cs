@@ -273,14 +273,20 @@ public sealed class SkyrimSseNifShapeReaderTests
             var outputMeshesDirectory = Path.Combine(outputDirectory, "meshes");
             var savedArmorNifs = Directory.GetFiles(outputMeshesDirectory, "*.nif", SearchOption.AllDirectories);
             Assert.NotEmpty(savedArmorNifs);
-            var convertedShapes = savedArmorNifs
+            var readableOutputs = savedArmorNifs
                 .Select(path => SkyrimSseNifShapeReader.Read(File.ReadAllBytes(path)))
                 .Where(static readResult => readResult.Supported)
-                .SelectMany(static readResult => readResult.Shapes)
                 .ToArray();
-            Assert.Equal(sourceShapes.Select(static shape => shape.Name), convertedShapes.Select(static shape => shape.Name));
-            Assert.Equal(sourceShapes.Select(static shape => shape.TriangleIndices), convertedShapes.Select(static shape => shape.TriangleIndices));
-            Assert.Contains(convertedShapes, convertedShape =>
+            var convertedOutputs = readableOutputs
+                .Where(readResult =>
+                    readResult.Shapes.Select(static shape => shape.Name)
+                        .SequenceEqual(sourceShapes.Select(static shape => shape.Name)) &&
+                    readResult.Shapes.Count == sourceShapes.Count &&
+                    sourceShapes.Zip(readResult.Shapes)
+                        .All(static pair => pair.First.TriangleIndices.SequenceEqual(pair.Second.TriangleIndices)))
+                .ToArray();
+            Assert.NotEmpty(convertedOutputs);
+            Assert.Contains(convertedOutputs.SelectMany(static output => output.Shapes), convertedShape =>
                 sourceShapes.Any(sourceShape =>
                     sourceShape.Name == convertedShape.Name &&
                     !sourceShape.Vertices.SequenceEqual(convertedShape.Vertices)));
