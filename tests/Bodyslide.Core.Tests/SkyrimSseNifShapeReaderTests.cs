@@ -131,6 +131,20 @@ public sealed class SkyrimSseNifShapeReaderTests
         Assert.Equal("supported-bssubindextrishape-position-index-only-segments-opaque", readResult.Diagnostic);
         var shape = Assert.Single(readResult.Shapes);
         Assert.Equal("BSSubIndexTriShape", shape.GeometryBlockType);
+        var inspectionPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".nif");
+        try
+        {
+            File.WriteAllBytes(inspectionPath, source);
+            var inspection = NifGeometrySignatureReader.Inspect(inspectionPath);
+            Assert.Equal("supported", inspection.Status);
+            Assert.Equal("parsed-sse-bssubindextrishape-position-index-only-segments-opaque", inspection.ParseMode);
+            Assert.Equal("automated-file-inspection-only", inspection.CompatibilityEvidenceScope);
+            Assert.Equal("untested", inspection.ExternalCompatibilityStatus);
+        }
+        finally
+        {
+            File.Delete(inspectionPath);
+        }
 
         var transformed = LocalExportService.TryApplyNifVertexTransform(
             source,
