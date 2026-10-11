@@ -321,6 +321,35 @@ public sealed class BodySlideSourceAssociationTests
     }
 
     [Fact]
+    public async Task LegacyOspSliderSettingsAreAuditedWhenSliderSetWrapperIsAbsent()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var mesh = Path.Combine(root, "jacket_0.nif");
+            var project = Path.Combine(root, "source.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <Slider name="LegacyFit" customCurve="source-specific">
+                    <VendorMapping value="custom" />
+                  </Slider>
+                </SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            Assert.Contains("LegacyFit", result.Sliders);
+            Assert.True(result.SourceAssetSupport!.HasOsp);
+            Assert.Contains("slider-unknown-attributes", result.SourceAssetSupport.UnsupportedOspSemantics);
+            Assert.Contains("slider-unknown-elements", result.SourceAssetSupport.UnsupportedOspSemantics);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task MatchedOspReportsSettingsThatAreNotPreserved()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

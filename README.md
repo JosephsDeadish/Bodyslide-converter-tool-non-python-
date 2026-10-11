@@ -143,6 +143,9 @@ in `SourceAssetSupport.UnsupportedOspSemantics` and produce the medium-severity
 `source-osp-semantics-not-preserved` issue. Invalid control values are also
 reported. These diagnostics identify settings needing review; they do not claim
 the project is otherwise compatible.
+Legacy OSP files without a `<SliderSet>` wrapper receive the same per-slider
+unsupported-setting checks, so unknown attributes or child elements are not
+silently presented as preserved.
 TRI files are a separate in-game morph format, not substitutes for OSD shape
 deltas. The converter intentionally withholds generated TRI files because its
 current morph path cannot prove target-shape identity and vertex-order

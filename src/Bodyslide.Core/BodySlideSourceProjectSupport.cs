@@ -1588,12 +1588,19 @@ internal static class BodySlideSourceProjectSupport
                 .ToArray();
             var unsupportedSemantics = sets
                 .SelectMany(CollectUnsupportedOspSemantics)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Order(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+                .ToList();
             var sliderSets = document.Descendants()
                 .Where(static element => element.Name.LocalName.Equals("SliderSet", StringComparison.OrdinalIgnoreCase))
                 .ToArray();
+            if (sliderSets.Length == 0)
+            {
+                foreach (var slider in document.Descendants().Where(static element =>
+                             element.Name.LocalName.Equals("Slider", StringComparison.OrdinalIgnoreCase)))
+                {
+                    unsupportedSemantics.AddRange(
+                        CollectUnsupportedOspSemantics(new XElement("SliderSet", new XElement(slider))));
+                }
+            }
             var sliderElements = sliderSets.Length > 0
                 ? sets.SelectMany(static set => set.Descendants()
                     .Where(static element => element.Name.LocalName.Equals("Slider", StringComparison.OrdinalIgnoreCase)))
