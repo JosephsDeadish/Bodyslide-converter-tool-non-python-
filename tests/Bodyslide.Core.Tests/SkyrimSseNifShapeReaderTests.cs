@@ -473,6 +473,40 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void FailsClosedOnDuplicateShapeNames()
+    {
+        var tri = new[] { (0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f) };
+        var result = SkyrimSseNifShapeReader.Read(CreateNif([new TestShape("Body", tri), new TestShape("Body", tri)]));
+
+        Assert.False(result.Supported);
+        Assert.Equal("duplicate-shape-name:Body", result.Diagnostic);
+        Assert.Empty(result.Shapes);
+    }
+
+    [Fact]
+    public void FailsClosedOnNonFiniteVertexPositions()
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("Body", [(float.NaN, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])]));
+
+        Assert.False(result.Supported);
+        Assert.Equal("bstrishape-nonfinite-vertex:Body", result.Diagnostic);
+        Assert.Empty(result.Shapes);
+    }
+
+    [Fact]
+    public void FailsClosedOnTruncatedInputWithoutThrowing()
+    {
+        var nif = CreateNif([new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])]);
+        var truncated = nif.AsSpan(0, nif.Length - 20).ToArray();
+
+        var result = SkyrimSseNifShapeReader.Read(truncated);
+
+        Assert.False(result.Supported);
+        Assert.Empty(result.Shapes);
+    }
+
+    [Fact]
     public void RejectsNonSseStreamProfile()
     {
         var nif = CreateNif([new TestShape("Body", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])], streamVersion: 83);
