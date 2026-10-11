@@ -856,6 +856,50 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public async Task SkinnedDynamicConversionReportsThatTargetFitWasWithheld()
+    {
+        var source = CreateNif(
+            [
+                new TestShape(
+                    "DynamicSkinnedBody",
+                    [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)],
+                    SkinInstance: 1,
+                    VertexStride: 0,
+                    DynamicVertices: [(0f, 0f, 0f, 0.25f), (30f, 0f, 10f, 0.5f), (0f, 20f, 20f, 0.75f)])
+            ],
+            blockType: "BSDynamicTriShape",
+            dynamicShapeLayout: true,
+            particleDataSizeOverride: 0);
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input", "meshes", "armor");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(inputDirectory);
+        var inputPath = Path.Combine(inputDirectory, "dynamic-skinned.nif");
+        await File.WriteAllBytesAsync(inputPath, source);
+
+        try
+        {
+            var result = await StandaloneConversionModules.CreateDefault().ConvertAsync(
+                new ConversionRequest(inputPath, "3BA", outputDirectory, SourceBodyOverride: "CBBE"));
+
+            Assert.True(result.Success);
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"skinned-dynamic-fit-withheld\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("these skinned BSDynamicTriShape meshes were left unchanged", qualityJson, StringComparison.Ordinal);
+            Assert.Contains(
+                "This skinned BSDynamicTriShape was copied without the target-body position fit",
+                ConversionValidationGuidance.GetIssueFollowUp("skinned-dynamic-fit-withheld", "3BA")!,
+                StringComparison.Ordinal);
+            var outputNif = Directory.GetFiles(outputDirectory, "dynamic-skinned.nif", SearchOption.AllDirectories).Single();
+            Assert.Equal(source, await File.ReadAllBytesAsync(outputNif));
+        }
+        finally
+        {
+            if (Directory.Exists(workingDirectory)) Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void WriterTransformsSkinnedAndUnskinnedShapesWithoutChangingNonPositionBytes()
     {
         var source = CreateNif(

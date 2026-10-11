@@ -1261,6 +1261,8 @@ internal static class ConversionValidationGuidance
                 "Open preview-workbench.html and conversion-quality.json to identify the listed mesh and any geometry-family notes, zoom into the failing piece in the preview, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
             "skinned-nif-runtime-unverified" =>
                 "Open conversion-quality.json and preview-workbench.html to inspect the skinned mesh. Supported SSE skinned shapes may receive a position-only fit transform while skin weights, partitions, and all other non-position NIF bytes are preserved; this does not assess whether those weights suit the target body. Validate weight suitability and live deformation separately in Outfit Studio and Skyrim before relying on the result.",
+            "skinned-dynamic-fit-withheld" =>
+                "Open the listed mesh from conversion-quality.json in Outfit Studio or NifSkope. This skinned BSDynamicTriShape was copied without the target-body position fit; convert it to a supported skinned BSTriShape/BSSubIndexTriShape layout or perform and verify the fit manually before using the output.",
             "heuristic-nif-read" =>
                 "Use preview-workbench.html plus conversion-quality.json to identify heuristic-read meshes, then confirm vertex order, skinning, UVs, and partitions in NifSkope before shipping.",
             "incomplete-source-fallback" =>
@@ -28224,6 +28226,21 @@ internal sealed class LocalExportService(
                     "skinned-nif-runtime-unverified",
                     "medium",
                     $"Skin weights, bones, partitions, and other non-position data are never rewritten, and their suitability for the target body is not assessed. Position-only transforms are limited to fully parsed BSTriShape layouts; live Outfit Studio/Skyrim deformation remains unverified for: {string.Join(", ", skinnedMeshes.Take(6))}."));
+            }
+
+            var skinnedDynamicMeshes = nifSupport
+                .Where(static report =>
+                    !string.IsNullOrWhiteSpace(report.SkinInstanceType) &&
+                    report.ParseMode.Contains("bsdynamictrishape", StringComparison.OrdinalIgnoreCase))
+                .Select(static report => Path.GetFileName(report.MeshPath))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (skinnedDynamicMeshes.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "skinned-dynamic-fit-withheld",
+                    "high",
+                    $"The position-only fit transform was withheld and these skinned BSDynamicTriShape meshes were left unchanged because this writer does not support that combination: {string.Join(", ", skinnedDynamicMeshes.Take(6))}. Convert them to a supported skinned BSTriShape/BSSubIndexTriShape layout or review and fit them manually before using the target-body output."));
             }
 
             var unsupported = nifSupport
