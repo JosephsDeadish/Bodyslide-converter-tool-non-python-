@@ -562,6 +562,39 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void RejectsNonFiniteSkinDataWeights()
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("SkinnedBody", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)], SkinInstance: 1)],
+            skinDataWeightOverride: float.NaN));
+
+        Assert.False(result.Supported);
+        Assert.Equal("skin-data-vertex-weight-invalid:SkinnedBody", result.Diagnostic);
+    }
+
+    [Fact]
+    public void RejectsSkinPartitionVertexMapOutsideShapeVertexRange()
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("SkinnedBody", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)], SkinInstance: 1)],
+            skinPartitionVertexMapOverride: 3));
+
+        Assert.False(result.Supported);
+        Assert.Equal("skin-partition-vertex-map-out-of-range:SkinnedBody", result.Diagnostic);
+    }
+
+    [Fact]
+    public void RejectsNonFiniteSkinPartitionWeights()
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("SkinnedBody", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)], SkinInstance: 1)],
+            skinPartitionWeightOverride: float.NaN));
+
+        Assert.False(result.Supported);
+        Assert.Equal("skin-partition-weight-invalid:SkinnedBody", result.Diagnostic);
+    }
+
+    [Fact]
     public void ExtractPartitionSlotsUsesParsedDismemberMetadata()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".nif");
@@ -1001,7 +1034,10 @@ public sealed class SkyrimSseNifShapeReaderTests
         int? skinPartitionReferenceOverride = null,
         int? skeletonRootReferenceOverride = null,
         int? boneReferenceOverride = null,
-        bool trailingSkinInstanceByte = false)
+        bool trailingSkinInstanceByte = false,
+        int? skinPartitionVertexMapOverride = null,
+        float? skinDataWeightOverride = null,
+        float? skinPartitionWeightOverride = null)
     {
         var skinInstanceBlockIndex = shapes.Count;
         var skinDataBlockIndex = skinInstanceBlockIndex + 1;
@@ -1034,10 +1070,12 @@ public sealed class SkyrimSseNifShapeReaderTests
                     skeletonRootReferenceOverride,
                     boneReferenceOverride,
                     trailingSkinInstanceByte),
-                CreateNiSkinDataBlock(shapes.First(static shape => shape.SkinInstance >= 0)),
+                CreateNiSkinDataBlock(skinDataWeightOverride),
                 CreateNiSkinPartitionBlock(
                     skinPartitionCount,
-                    shapes.First(static shape => shape.SkinInstance >= 0)),
+                    shapes.First(static shape => shape.SkinInstance >= 0),
+                    skinPartitionVertexMapOverride,
+                    skinPartitionWeightOverride),
                 Array.Empty<byte>(),
                 Array.Empty<byte>()
             }
@@ -1109,7 +1147,7 @@ public sealed class SkyrimSseNifShapeReaderTests
         return stream.ToArray();
     }
 
-    private static byte[] CreateNiSkinDataBlock(TestShape shape)
+    private static byte[] CreateNiSkinDataBlock(float? skinDataWeightOverride)
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
@@ -1119,11 +1157,15 @@ public sealed class SkyrimSseNifShapeReaderTests
         for (var i = 0; i < 3 + 9 + 1 + 3 + 1; i++) writer.Write(0f);
         writer.Write((ushort)1);
         writer.Write((ushort)0);
-        writer.Write(1f);
+        writer.Write(skinDataWeightOverride ?? 1f);
         return stream.ToArray();
     }
 
-    private static byte[] CreateNiSkinPartitionBlock(uint partitionCount, TestShape shape)
+    private static byte[] CreateNiSkinPartitionBlock(
+        uint partitionCount,
+        TestShape shape,
+        int? vertexMapOverride,
+        float? skinPartitionWeightOverride)
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
@@ -1143,12 +1185,12 @@ public sealed class SkyrimSseNifShapeReaderTests
             writer.Write((byte)1);
             for (var vertexIndex = 0; vertexIndex < shape.Vertices.Count; vertexIndex++)
             {
-                writer.Write((ushort)vertexIndex);
+                writer.Write((ushort)(vertexIndex == 0 ? vertexMapOverride ?? vertexIndex : vertexIndex));
             }
             writer.Write((byte)1);
             for (var vertexIndex = 0; vertexIndex < shape.Vertices.Count; vertexIndex++)
             {
-                writer.Write(1f);
+                writer.Write(vertexIndex == 0 ? skinPartitionWeightOverride ?? 1f : 1f);
                 writer.Write(0f);
                 writer.Write(0f);
                 writer.Write(0f);
