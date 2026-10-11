@@ -245,6 +245,35 @@ public sealed class BodySlideSourceAssociationTests
     }
 
     [Fact]
+    public async Task NamespacedOspSettingsAreDiscoveredButExplicitlyReportedAsUnpreserved()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var mesh = Path.Combine(root, "jacket_0.nif");
+            var project = Path.Combine(root, "source.osp");
+            await File.WriteAllTextAsync(mesh, "mesh");
+            await File.WriteAllTextAsync(project, """
+                <osp:SliderSetInfo xmlns:osp="urn:example:bodyslide">
+                  <osp:SliderSet name="Jacket">
+                    <osp:OutputFile>jacket</osp:OutputFile>
+                    <osp:Slider name="NamespacedFit" />
+                  </osp:SliderSet>
+                </osp:SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            Assert.Contains("NamespacedFit", result.Sliders);
+            Assert.True(result.SourceAssetSupport!.HasOsp);
+            Assert.Contains("namespaced-osp-settings-not-preserved", result.SourceAssetSupport.UnsupportedOspSemantics);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task MatchedOspReportsSettingsThatAreNotPreserved()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

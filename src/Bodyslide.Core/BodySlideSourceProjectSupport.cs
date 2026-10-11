@@ -1321,11 +1321,14 @@ internal static class BodySlideSourceProjectSupport
             var document = XDocument.Load(ospPath, LoadOptions.None);
             if (meshFiles is not null)
             {
-                foreach (var set in document.Descendants("SliderSet").Where(set => !MatchesOutput(set, meshFiles)).ToArray())
+                foreach (var set in document.Descendants().Where(static element =>
+                             element.Name.LocalName.Equals("SliderSet", StringComparison.OrdinalIgnoreCase))
+                         .Where(set => !MatchesOutput(set, meshFiles)).ToArray())
                     set.Remove();
             }
             var projectNames = document
-                .Descendants("SliderSet")
+                .Descendants()
+                .Where(static element => element.Name.LocalName.Equals("SliderSet", StringComparison.OrdinalIgnoreCase))
                 .Select(static element => element.Attribute("name")?.Value?.Trim())
                 .Where(static value => !string.IsNullOrWhiteSpace(value))
                 .Select(static value => value!)
@@ -1505,15 +1508,23 @@ internal static class BodySlideSourceProjectSupport
             var sliderControlSettings = new Dictionary<string, OspSliderControlSettings>(StringComparer.OrdinalIgnoreCase);
             var ambiguousSliderControlSettings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            var sets = document.Descendants("SliderSet").Where(set => MatchesOutput(set, meshFiles)).ToArray();
+            var sets = document.Descendants()
+                .Where(static element => element.Name.LocalName.Equals("SliderSet", StringComparison.OrdinalIgnoreCase))
+                .Where(set => MatchesOutput(set, meshFiles))
+                .ToArray();
             var unsupportedSemantics = sets
                 .SelectMany(CollectUnsupportedOspSemantics)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            var sliderElements = document.Descendants("SliderSet").Any()
-                ? sets.SelectMany(static set => set.Descendants("Slider"))
-                : document.Descendants("Slider");
+            var sliderSets = document.Descendants()
+                .Where(static element => element.Name.LocalName.Equals("SliderSet", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var sliderElements = sliderSets.Length > 0
+                ? sets.SelectMany(static set => set.Descendants()
+                    .Where(static element => element.Name.LocalName.Equals("Slider", StringComparison.OrdinalIgnoreCase)))
+                : document.Descendants()
+                    .Where(static element => element.Name.LocalName.Equals("Slider", StringComparison.OrdinalIgnoreCase));
             foreach (var sliderElement in sliderElements)
             {
                 var name = sliderElement.Attribute("name")?.Value?.Trim();
@@ -1555,7 +1566,7 @@ internal static class BodySlideSourceProjectSupport
             return new BodySlideSourceSupport(
                 CollapseCandidates(sliders),
                 CollapseCandidates(zapSliders),
-                HasOsp: !document.Descendants("SliderSet").Any() || sets.Length > 0,
+                HasOsp: sliderSets.Length == 0 || sets.Length > 0,
                 HasTriPayloads: false,
                 HasBsdPayloads: false,
                 HasOsdPayloads: false,
