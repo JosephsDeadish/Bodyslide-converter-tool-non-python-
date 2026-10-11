@@ -314,6 +314,74 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public async Task ConvertAsync_MultiShapeDynamicNifRoundTripsEachShapeAndPreservesFourthComponents()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input", "meshes", "armor");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(inputDirectory);
+        var inputPath = Path.Combine(inputDirectory, "dynamic-armor.nif");
+        var sourceBytes = CreateNif(
+        [
+            new TestShape(
+                "DynamicBody",
+                [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)],
+                VertexStride: 0,
+                DynamicVertices: [(0f, 0f, 0f, 0.25f), (30f, 0f, 10f, 0.5f), (0f, 20f, 20f, 0.75f)]),
+            new TestShape(
+                "DynamicDetail",
+                [(0f, 2f, 1f), (24f, 2f, 9f), (0f, 18f, 18f)],
+                VertexStride: 0,
+                DynamicVertices: [(0f, 2f, 1f, 1f), (24f, 2f, 9f, 1.25f), (0f, 18f, 18f, 1.5f)])
+        ],
+        blockType: "BSDynamicTriShape",
+        dynamicShapeLayout: true);
+        await File.WriteAllBytesAsync(inputPath, sourceBytes);
+
+        try
+        {
+            var result = await StandaloneConversionModules.CreateDefault().ConvertAsync(
+                new ConversionRequest(inputPath, "3BA", outputDirectory, SourceBodyOverride: "BHUNP"));
+
+            Assert.True(result.Success);
+            var sourceShapes = SkyrimSseNifShapeReader.Read(sourceBytes).Shapes;
+            Assert.Equal(2, sourceShapes.Count);
+            var outputNifs = Directory.GetFiles(Path.Combine(outputDirectory, "meshes"), "*.nif", SearchOption.AllDirectories);
+            var convertedOutputBytes = outputNifs
+                .Select(File.ReadAllBytes)
+                .FirstOrDefault(bytes =>
+                {
+                    var read = SkyrimSseNifShapeReader.Read(bytes);
+                    return read.Supported &&
+                           read.Shapes.Select(static shape => shape.Name)
+                               .SequenceEqual(sourceShapes.Select(static shape => shape.Name));
+                });
+            Assert.NotNull(convertedOutputBytes);
+            var convertedShapes = SkyrimSseNifShapeReader.Read(convertedOutputBytes!).Shapes;
+            Assert.Equal(sourceShapes.Select(static shape => shape.TriangleIndices), convertedShapes.Select(static shape => shape.TriangleIndices));
+            for (var shapeIndex = 0; shapeIndex < sourceShapes.Count; shapeIndex++)
+            {
+                var sourceShape = sourceShapes[shapeIndex];
+                var outputShape = convertedShapes[shapeIndex];
+                Assert.NotEqual(sourceShape.Vertices, outputShape.Vertices);
+                var sourceW = Enumerable.Range(0, sourceShapes[shapeIndex].Vertices.Count)
+                    .Select(index => BitConverter.ToSingle(
+                        sourceBytes,
+                        sourceShape.VertexDataOffset + (index * sourceShape.VertexStride) + 12));
+                var outputW = Enumerable.Range(0, outputShape.Vertices.Count)
+                    .Select(index => BitConverter.ToSingle(
+                        convertedOutputBytes!,
+                        outputShape.VertexDataOffset + (index * outputShape.VertexStride) + 12));
+                Assert.Equal(sourceW, outputW);
+            }
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void WriterPreservesRecognizedNifWhenItsLayoutIsUnsupported()
     {
         var source = CreateNif(
