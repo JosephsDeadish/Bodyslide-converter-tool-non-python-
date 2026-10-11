@@ -426,6 +426,57 @@ public sealed class SkyrimSseNifShapeReaderTests
         Assert.Same(source, transformed);
     }
 
+    [Theory]
+    [InlineData("NiTriShape")]
+    [InlineData("NiTriShapeData")]
+    [InlineData("NiTriStrips")]
+    [InlineData("NiTriStripsData")]
+    [InlineData("BSDynamicTriShape")]
+    [InlineData("BSGeometry")]
+    [InlineData("NiMesh")]
+    public void RejectsUnimplementedGeometryFamiliesInsteadOfParsingAsBSTriShape(string blockType)
+    {
+        var nif = CreateNif(
+            [new TestShape("AlternateBody", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)])],
+            blockType: blockType);
+
+        var result = SkyrimSseNifShapeReader.Read(nif);
+
+        Assert.False(result.Supported);
+        Assert.Equal($"unsupported-geometry-block:{blockType}", result.Diagnostic);
+        Assert.Empty(result.Shapes);
+    }
+
+    [Theory]
+    [InlineData("NiTriShape")]
+    [InlineData("NiTriShapeData")]
+    [InlineData("NiTriStrips")]
+    [InlineData("NiTriStripsData")]
+    [InlineData("BSDynamicTriShape")]
+    [InlineData("BSGeometry")]
+    [InlineData("NiMesh")]
+    public void WriterDoesNotHeuristicallyModifyUnimplementedGeometryFamilies(string blockType)
+    {
+        var source = CreateNif(
+            [new TestShape("AlternateBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)])],
+            blockType: blockType);
+
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        Assert.Same(source, transformed);
+    }
+
     [Fact]
     public void RejectsTriangleIndexesOutsideTheirShapeVertexRange()
     {
