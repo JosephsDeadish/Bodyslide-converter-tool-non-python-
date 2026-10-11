@@ -1215,6 +1215,36 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void MixedSupportedAndUnsupportedGeometryFailsClosedWithoutPartialRewrite()
+    {
+        var source = CreateNif(
+            [
+                new TestShape("SupportedBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)]),
+                new TestShape("UnsupportedDetail", [(0f, 1f, 0f), (1f, 0f, 0f), (0f, 0f, 1f)])
+            ],
+            shapeBlockTypes: ["BSTriShape", "NiTriShape"]);
+
+        var readResult = SkyrimSseNifShapeReader.Read(source);
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        Assert.False(readResult.Supported);
+        Assert.Equal("unsupported-geometry-block:NiTriShape", readResult.Diagnostic);
+        Assert.Empty(readResult.Shapes);
+        Assert.Same(source, transformed);
+    }
+
+    [Fact]
     public void RejectsTriangleIndexesOutsideTheirShapeVertexRange()
     {
         var result = SkyrimSseNifShapeReader.Read(CreateNif(
@@ -1271,8 +1301,15 @@ public sealed class SkyrimSseNifShapeReaderTests
         byte? skinPartitionVertexMapFlagOverride = null,
         ushort? skinPartitionVertexCountOverride = null,
         float? skinDataWeightOverride = null,
-        float? skinPartitionWeightOverride = null)
+        float? skinPartitionWeightOverride = null,
+        IReadOnlyList<string>? shapeBlockTypes = null)
     {
+        shapeBlockTypes ??= Enumerable.Repeat(blockType, shapes.Count).ToArray();
+        if (shapeBlockTypes.Count != shapes.Count)
+        {
+            throw new ArgumentException("Each test shape must have one block type.", nameof(shapeBlockTypes));
+        }
+
         var skinInstanceBlockIndex = shapes.Count;
         var skinDataBlockIndex = skinInstanceBlockIndex + 1;
         var skinPartitionBlockIndex = skinInstanceBlockIndex + 2;
@@ -1317,9 +1354,10 @@ public sealed class SkyrimSseNifShapeReaderTests
             }
             : [];
         var blockBytes = shapeBlockBytes.Concat(skinBlocks).ToArray();
-        var blockTypes = hasSkinInstance
-            ? new[] { blockType, skinBlockType, "NiSkinData", "NiSkinPartition", "NiNode" }
-            : [blockType];
+        var blockTypes = shapeBlockTypes
+            .Concat(hasSkinInstance ? [skinBlockType, "NiSkinData", "NiSkinPartition", "NiNode"] : [])
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write(Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
@@ -1330,14 +1368,14 @@ public sealed class SkyrimSseNifShapeReaderTests
         writer.Write(streamVersion);
         writer.Write((uint)blockTypes.Length);
         foreach (var type in blockTypes) WriteSizedString(writer, type);
-        for (var i = 0; i < shapes.Count; i++) writer.Write((ushort)0);
+        foreach (var shapeType in shapeBlockTypes) writer.Write((ushort)Array.IndexOf(blockTypes, shapeType));
         if (hasSkinInstance)
         {
-            writer.Write((ushort)1);
-            writer.Write((ushort)2);
-            writer.Write((ushort)3);
-            writer.Write((ushort)4);
-            writer.Write((ushort)4);
+            writer.Write((ushort)Array.IndexOf(blockTypes, skinBlockType));
+            writer.Write((ushort)Array.IndexOf(blockTypes, "NiSkinData"));
+            writer.Write((ushort)Array.IndexOf(blockTypes, "NiSkinPartition"));
+            writer.Write((ushort)Array.IndexOf(blockTypes, "NiNode"));
+            writer.Write((ushort)Array.IndexOf(blockTypes, "NiNode"));
         }
         foreach (var block in blockBytes) writer.Write((uint)block.Length);
         writer.Write((uint)shapes.Count);
