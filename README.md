@@ -120,10 +120,12 @@ claim:
 Do not treat generated OSP/ShapeData as build-ready based on the automated tests
 alone. For supported Skyrim SE unskinned `BSTriShape` inputs, generation can
 inspect shape names and vertex order and emit per-shape `<Shape>` declarations.
-It currently withholds OSD files and non-zap `<Data>` links because parsed source
-morph payloads do not yet prove association with the intended shape and vertex
-order, and synthetic fallback deltas do not establish authored deformation
-semantics. Conversion quality reports the high-severity
+It currently withholds OSD files and non-zap `<Data>` links: although a narrow
+subset of exact OSP-linked source OSD/named-TRI candidates can be associated with
+an imported input shape, the exporter does not yet serialize those authored
+records into output OSD files. Other candidates remain unverified, and synthetic
+fallback deltas do not establish authored deformation semantics. Conversion
+quality reports the high-severity
 `bodyslide-osd-morphs-withheld` issue and the withheld-record count. The project is
 not build-ready; missing, unreadable, unsupported, or unverified source data must
 not be guessed into a successful OSD build.
@@ -149,20 +151,25 @@ synthetic deltas as usable in-game morphs. Conversion quality reports the
 high-severity `bodyslide-tri-payload-withheld` issue, so this output is not
 reported as ready. BodySlide may generate TRI files during its own validated
 build; inspect and test those files independently before packaging.
-Source TRI/BSD/OSD parsing records candidate payloads, but does not establish
-which NIF shape or vertex order they belong to. Exact reuse requires verified statuses, matching named shapes, non-empty shape
-correspondence evidence, and matching vertex-order fingerprints. Topology retarget
-additionally requires a typed target-to-source weighted map covering every target
-vertex, in-range source indexes, finite positive weights normalized to one, a
-verified map method, at least 0.95 confidence, and non-empty map/correspondence
-evidence. Retargeted deltas are computed from that map rather than inferred by
-index interpolation. `PayloadReuse.RetargetEvidence` records the source/target
-shape names, method, confidence, and evidence used for an accepted retarget. The
-current source discovery path does not produce these maps, so parsed payloads
-remain ineligible for topology retargeting by default. Duplicate normalized morph records in a single OSD file
-are withheld as ambiguous rather than selecting one record during candidate
-collapse. Synthetic OSD fallback remains separately labeled and does not count
-as recovered source morph data.
+Source TRI/BSD/OSD parsing records candidate payloads with provenance. An OSD or
+named Body TRI candidate can be marked source-associated only when an exact OSP
+`Data` link identifies its record and source shape, the source NIF has that shape,
+and exactly one supported imported input shape matches by name, ordered positions,
+and topology. Ambiguous links, unsupported layouts, mismatches, BSD payloads, and
+unnamed FaceGen TRI remain unverified. This source-to-input match is not proof that
+BodySlide accepts the generated project: generated OSD files and non-zap `Data`
+links are still withheld by the exporter, and generated TRI files are withheld.
+Internal payload reuse also requires verified shape/vertex-order evidence and an
+exact compatible vertex count. Topology retarget additionally requires a typed
+target-to-source weighted map covering every target vertex, in-range source
+indexes, finite positive weights normalized to one, a verified map method, at
+least 0.95 confidence, and non-empty map/correspondence evidence. The current
+source discovery path does not produce these maps, so topology retargeting remains
+ineligible. `PayloadReuse.RetargetEvidence` records evidence for any accepted
+retarget. Duplicate normalized morph records in a single OSD file are withheld as
+ambiguous rather than selecting one record during candidate collapse. Synthetic
+OSD fallback remains separately labeled and does not count as recovered source
+morph data.
 
 On a Windows test host:
 
@@ -345,12 +352,13 @@ single-level header, and derivation checks cancellation during processing.
 Morph diagnostics in `morphs.json` and the conversion manifest describe parsed
 source payloads as candidates, recording the source asset filename and explicit
 shape-identity/vertex-order verification states without duplicating per-vertex
-arrays. Explicit OSP `Data` links to the exact OSD record name retain a declared source shape
-only when that exact shape exists in the associated supported source NIF and the
-record's represented index span fits its vertex count; ambiguous or out-of-range
-links are not associated. This source-side association does not establish a match
-to the exported target, and source readers still mark identity unresolved and
-vertex order unverified, so exact vertex-count matches are not enough to reuse a payload. Sparse
+arrays. An explicit OSP `Data` link to an exact OSD record or named Body TRI record
+retains a source shape only when that shape exists in the associated supported
+source NIF and the record's represented index span fits its vertex count.
+Association is marked verified only if exactly one supported imported input shape
+matches the source shape by name, ordered positions, and topology. That evidence
+does not establish a successful BodySlide build or authorize generated OSD output;
+ambiguous or out-of-range links remain unverified. Sparse
 The shape-aware NIF reader currently accepts only little-endian Skyrim SE
 `20.2.0.7` / user-version `12` / stream-version `100` files with named inline
 `BSTriShape`, `BSSubIndexTriShape`, and `BSDynamicTriShape` blocks and supported
@@ -438,16 +446,19 @@ BodySlide TRI files may include an optional UV morph section; its structure is
 validated without treating UV offsets as position displacements. Legacy files
 ending after position morphs remain supported. Body TRI position morphs are
 retained per declared shape with separate vertex counts; duplicate shape names
-are rejected because they make shape association ambiguous. A declared name
-does not by itself verify source-to-target shape identity or vertex order, so
-TRI morphs remain ineligible for reuse until correspondence is established.
+are rejected because they make shape association ambiguous. A declared name alone
+does not verify source-to-input shape identity or vertex order. A named TRI morph
+can be marked verified only through the exact OSP record/link and supported-shape
+correspondence checks described above.
 The current exact-shape verifier accepts only identical ordinal shape names,
 per-index vertex positions, and ordered triangle indexes, and emits a SHA-256
 fingerprint as evidence. Similar names, vertex counts, or topology alone do not
-pass. This strict verifier is groundwork only: source morph discovery does not
-yet establish the required source-to-exported-target pairing, and no new payload
-is made reusable by it. These synthetic-fixture checks are not external
-BodySlide, MO2, or Skyrim compatibility evidence.
+pass. Source discovery uses this strict match to identify exact OSP-linked OSD and
+named Body TRI candidates against imported input shapes; it does not prove a
+BodySlide build or authorize serialization of those candidates into generated
+OSD/TRI files. Generated OSD records and TRI remain withheld. These
+synthetic-fixture checks are not external BodySlide, MO2, or Skyrim compatibility
+evidence.
 
 Completed per-item conversions write `output-size-inventory.json` beside their
 timing reports. This metadata-only inventory separates physical mesh, texture,
@@ -1021,7 +1032,7 @@ Implemented from issue scope:
 
 - **skeleton NIF parsing** — `BasicSkeletonMappingService` now reads any `skeleton*.nif` files from the armor's body reference list and parses their string table to extract actual bone names; the source skeleton label (`xpmsse-vanilla`, `xpmsse-physics`, or `fo4-biped`) is inferred from physics-marker bones (`NPC *Breast*`, `*Butt*`, `*Belly*`, `*Pec*`, `*Lat*`) and Bip01 prefixes, giving accurate bone-mapping reports in `skeleton-compatibility.json` without relying solely on hardcoded lists
 
-- **BodySlide project preflight** — generated `.tri` and OSD payloads are withheld until shape identity, vertex order, and source-morph provenance are verified. Supported unskinned Skyrim SSE `BSTriShape` NIFs may provide named shape declarations, but non-zap OSP data links are absent and readiness is blocked. Source morph reuse, zap target semantics, and other NIF layouts remain unsupported or unverified. A real BodySlide/Outfit Studio build check is still required before generated projects can be treated as verified.
+- **BodySlide project preflight** — generated `.tri` and OSD payloads are withheld. Exact OSP-linked source OSD/named-TRI records can be associated with supported imported shapes, but the exporter does not yet serialize them as generated OSD data links; other source associations and zap target semantics remain unverified. Readiness remains blocked until required source data is available and a real BodySlide/Outfit Studio build has been checked.
 
 - **ARMO ground-model synthesis** — when an ARMO record has rewritten `MOD2`/`MOD3` world model paths but no `MODL` ground mesh subrecord, plugin rewrite now auto-appends `MODL` using the rewritten world model path so dropped-item world meshes stay aligned with converted armor outputs
 
