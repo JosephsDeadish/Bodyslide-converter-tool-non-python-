@@ -390,6 +390,31 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void WriterLeavesMixedSkinnedAndUnskinnedShapesUnchangedAsOneFile()
+    {
+        var source = CreateNif(
+        [
+            new TestShape("UnskinnedBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)]),
+            new TestShape("SkinnedTrim", [(0f, 1f, 0f), (20f, 1f, 8f), (0f, 16f, 16f)], SkinInstance: 1)
+        ]);
+
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        Assert.Same(source, transformed);
+    }
+
+    [Fact]
     public void RejectsUnsupportedDynamicShapeBlocks()
     {
         var nif = CreateNif(
