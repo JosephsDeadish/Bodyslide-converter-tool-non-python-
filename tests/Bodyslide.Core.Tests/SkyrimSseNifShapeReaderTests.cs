@@ -474,12 +474,15 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
-    public void WriterLeavesSkinnedShapeUnchangedUntilSkinSemanticsAreValidated()
+    public async Task WriterLeavesSkinnedShapeUnchangedUntilSkinSemanticsAreValidated()
     {
         var source = CreateNif(
             [new TestShape("SkinnedBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)], SkinInstance: 1)]);
 
-        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".nif");
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(workingDirectory, "SkinnedBody.nif");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
         try
         {
             File.WriteAllBytes(path, source);
@@ -509,6 +512,26 @@ public sealed class SkyrimSseNifShapeReaderTests
             },
             BasicCageGenerationService.CreatePresetCage("mixed"));
         Assert.Same(source, transformed);
+
+        try
+        {
+            File.WriteAllBytes(path, source);
+            var result = await StandaloneConversionModules.CreateDefault().ConvertAsync(
+                new ConversionRequest(path, "3BA", outputDirectory, SourceBodyOverride: "CBBE"));
+
+            Assert.True(result.Success);
+            var qualityJson = File.ReadAllText(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"skinned-nif-transform-withheld\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("not converted to the requested target fit", qualityJson, StringComparison.Ordinal);
+            Assert.Contains(
+                "Do not install it as a converted fit",
+                ConversionValidationGuidance.GetIssueFollowUp("skinned-nif-transform-withheld", "3BA")!,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(workingDirectory)) Directory.Delete(workingDirectory, recursive: true);
+        }
     }
 
     [Fact]

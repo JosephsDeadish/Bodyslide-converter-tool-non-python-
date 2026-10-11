@@ -1257,6 +1257,8 @@ internal static class ConversionValidationGuidance
                 "Open target-body-template.slidesmith-body.json, merge it into the target body's existing *.slidesmith-body.json profile, and fill the missing support metadata called out in conversion-quality.json before re-running.",
             "unsupported-nif-layout" =>
                 "Open preview-workbench.html and conversion-quality.json to identify the listed mesh and any geometry-family notes, zoom into the failing piece in the preview, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
+            "skinned-nif-transform-withheld" =>
+                "Open conversion-quality.json and preview-workbench.html to identify the skinned mesh copied without a body-to-body position transform. Do not install it as a converted fit; use a supported unskinned source mesh or wait until skin weights and partition semantics are safely supported.",
             "heuristic-nif-read" =>
                 "Use preview-workbench.html plus conversion-quality.json to identify heuristic-read meshes, then confirm vertex order, skinning, UVs, and partitions in NifSkope before shipping.",
             "incomplete-source-fallback" =>
@@ -28191,6 +28193,19 @@ internal sealed class LocalExportService(
 
         if (nifSupport is { Count: > 0 })
         {
+            var untransformedSkinnedMeshes = nifSupport
+                .Where(static report => report.ParseMode.Contains("skinned-position-index-only", StringComparison.OrdinalIgnoreCase))
+                .Select(static report => Path.GetFileName(report.MeshPath))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (untransformedSkinnedMeshes.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "skinned-nif-transform-withheld",
+                    "high",
+                    $"Skinned NIF geometry was copied without the body-to-body position transform because skin weights and partition semantics are not supported: {string.Join(", ", untransformedSkinnedMeshes.Take(6))}. These meshes are not converted to the requested target fit."));
+            }
+
             var unsupported = nifSupport
                 .Where(report => report.Status.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
                 .Select(DescribeUnsupportedNifReport)
