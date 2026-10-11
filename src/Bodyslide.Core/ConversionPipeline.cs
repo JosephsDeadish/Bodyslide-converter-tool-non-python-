@@ -25799,13 +25799,14 @@ internal sealed class LocalExportService(
             var parsedTopology = BuildParsedShapeTopologySummary(parsedGeometry.Shapes);
             if (parsedVertexStreams.All(static stream => stream.Offset >= 0 && stream.Count > 0 && stream.Stride >= 3 * sizeof(float)))
             {
-                return TryApplyNifInterleavedFloatVertexTransform(
+                var transformed = TryApplyNifInterleavedFloatVertexTransform(
                     sourceBytes,
                     sourcePath,
                     regionalMorphing,
                     deformationCage,
                     parsedVertexStreams,
                     parsedTopology);
+                return ValidateParsedShapeTransform(sourceBytes, transformed, parsedGeometry.Shapes);
             }
         }
 
@@ -26224,6 +26225,67 @@ internal sealed class LocalExportService(
         }
 
         return transformedAny ? transformed : sourceBytes;
+    }
+
+    private static byte[] ValidateParsedShapeTransform(
+        byte[] sourceBytes,
+        byte[] transformedBytes,
+        IReadOnlyList<SkyrimSseNifShape> sourceShapes)
+    {
+        if (ReferenceEquals(sourceBytes, transformedBytes))
+        {
+            return sourceBytes;
+        }
+
+        if (sourceBytes.Length != transformedBytes.Length)
+        {
+            return sourceBytes;
+        }
+
+        var transformedGeometry = SkyrimSseNifShapeReader.Read(transformedBytes);
+        if (!transformedGeometry.Supported || transformedGeometry.Shapes.Count != sourceShapes.Count)
+        {
+            return sourceBytes;
+        }
+
+        for (var shapeIndex = 0; shapeIndex < sourceShapes.Count; shapeIndex++)
+        {
+            var sourceShape = sourceShapes[shapeIndex];
+            var transformedShape = transformedGeometry.Shapes[shapeIndex];
+            if (!string.Equals(sourceShape.Name, transformedShape.Name, StringComparison.Ordinal) ||
+                sourceShape.IsSkinned != transformedShape.IsSkinned ||
+                sourceShape.VertexStride != transformedShape.VertexStride ||
+                sourceShape.VertexDataOffset != transformedShape.VertexDataOffset ||
+                sourceShape.Vertices.Count != transformedShape.Vertices.Count ||
+                !sourceShape.TriangleIndices.SequenceEqual(transformedShape.TriangleIndices))
+            {
+                return sourceBytes;
+            }
+        }
+
+        var positionRanges = sourceShapes
+            .SelectMany(static shape => Enumerable.Range(0, shape.Vertices.Count)
+                .Select(vertexIndex => (
+                    Start: checked(shape.VertexDataOffset + (vertexIndex * shape.VertexStride)),
+                    Length: 3 * sizeof(float))))
+            .OrderBy(static range => range.Start);
+        var unchangedOffset = 0;
+        foreach (var (start, length) in positionRanges)
+        {
+            if (start < unchangedOffset || start > sourceBytes.Length - length ||
+                !sourceBytes.AsSpan(unchangedOffset, start - unchangedOffset)
+                    .SequenceEqual(transformedBytes.AsSpan(unchangedOffset, start - unchangedOffset)))
+            {
+                return sourceBytes;
+            }
+
+            unchangedOffset = start + length;
+        }
+
+        return sourceBytes.AsSpan(unchangedOffset)
+            .SequenceEqual(transformedBytes.AsSpan(unchangedOffset))
+            ? transformedBytes
+            : sourceBytes;
     }
 
     private static MeshTransferTopologySnapshot? ResolveSharedTopologySnapshotForTransform(byte[] sourceBytes, string? sourcePath)

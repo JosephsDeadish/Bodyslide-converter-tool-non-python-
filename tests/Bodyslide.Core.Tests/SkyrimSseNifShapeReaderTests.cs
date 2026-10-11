@@ -167,6 +167,7 @@ public sealed class SkyrimSseNifShapeReaderTests
         {
             Assert.NotEqual(sourceShapes[shapeIndex].Vertices, transformedShapes[shapeIndex].Vertices);
         }
+        AssertOnlyShapePositionsChanged(source, transformed, sourceShapes);
     }
 
     [Fact]
@@ -590,6 +591,34 @@ public sealed class SkyrimSseNifShapeReaderTests
             writer.Write((ushort)c);
         }
         return stream.ToArray();
+    }
+
+    private static void AssertOnlyShapePositionsChanged(
+        byte[] source,
+        byte[] transformed,
+        IReadOnlyList<SkyrimSseNifShape> shapes)
+    {
+        Assert.Equal(source.Length, transformed.Length);
+        var positionBytes = new bool[source.Length];
+        foreach (var shape in shapes)
+        {
+            for (var vertexIndex = 0; vertexIndex < shape.Vertices.Count; vertexIndex++)
+            {
+                var offset = shape.VertexDataOffset + (vertexIndex * shape.VertexStride);
+                for (var byteIndex = 0; byteIndex < 3 * sizeof(float); byteIndex++)
+                {
+                    positionBytes[offset + byteIndex] = true;
+                }
+            }
+        }
+
+        for (var byteIndex = 0; byteIndex < source.Length; byteIndex++)
+        {
+            if (!positionBytes[byteIndex])
+            {
+                Assert.Equal(source[byteIndex], transformed[byteIndex]);
+            }
+        }
     }
 
     private static void WriteSizedString(BinaryWriter writer, string value)
