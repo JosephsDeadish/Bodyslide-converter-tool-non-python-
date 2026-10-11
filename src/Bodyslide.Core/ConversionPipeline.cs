@@ -6189,6 +6189,21 @@ internal static class NifGeometrySignatureReader
     private static NifMeshMetadata ExtractMetadata(byte[] bytes)
     {
         var boneNames = SkeletonNifBoneParser.ExtractBoneNames(bytes);
+        var parsedShapes = SkyrimSseNifShapeReader.Read(bytes);
+        if (parsedShapes.Supported)
+        {
+            var parsedSkinType = parsedShapes.Shapes
+                .Select(static shape => shape.SkinInstanceType)
+                .FirstOrDefault(static typeName => !string.IsNullOrWhiteSpace(typeName));
+            var parsedPartitionSlots = parsedShapes.Shapes
+                .SelectMany(static shape => shape.BodyPartitions ?? [])
+                .Select(static partition => (int)partition.BodyPart)
+                .Distinct()
+                .Order()
+                .ToArray();
+            return new NifMeshMetadata(parsedSkinType, parsedPartitionSlots, boneNames);
+        }
+
         string? skinInstanceType = null;
 
         if (NifBlockGraphParser.TryParse(bytes, out var graph) && graph is not null)

@@ -17,7 +17,15 @@ internal sealed record SkyrimSseNifShape(
     IReadOnlyList<ushort>? ParticleTriangleIndices = null,
     ulong VertexDescriptor = 0,
     int SkinInstanceBlockIndex = -1,
-    string? SkinInstanceType = null);
+    string? SkinInstanceType = null,
+    int SkinDataBlockIndex = -1,
+    int SkinPartitionBlockIndex = -1,
+    int SkeletonRootBlockIndex = -1,
+    IReadOnlyList<int>? SkinBoneBlockIndices = null,
+    int SkinPartitionCount = 0,
+    IReadOnlyList<SkyrimSseNifBodyPartition>? BodyPartitions = null);
+
+internal sealed record SkyrimSseNifBodyPartition(ushort Flags, ushort BodyPart);
 
 internal sealed record SkyrimSseNifShapeReadResult(
     bool Supported,
@@ -35,7 +43,17 @@ internal static class SkyrimSseNifShapeReader
     private const int MaximumStringCount = 500_000;
     private const int MaximumStringBytes = 1_048_576;
     private const int MaximumExtraDataReferences = 4096;
+    private const int MaximumSkinBoneCount = 4096;
+    private const int MaximumSkinPartitionCount = 4096;
+    private const int MaximumSkinWeightCount = 8 * 1024 * 1024;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    private static readonly HashSet<string> NiNodeTypes = new(StringComparer.Ordinal)
+    {
+        "NiNode", "NiBillboardNode", "NiSwitchNode", "NiSortAdjustNode", "NiRoomGroup", "NiRoom",
+        "NiBSAnimationNode", "NiBSParticleNode", "NiCollisionSwitch", "NiBone", "BSFadeNode",
+        "BSValueNode", "BSOrderedNode", "BSRangeNode", "BSMultiBoundNode", "BSLeafAnimNode",
+        "BSTreeNode"
+    };
 
     public static bool HasSupportedProfile(ReadOnlySpan<byte> bytes)
     {
@@ -210,13 +228,20 @@ internal static class SkyrimSseNifShapeReader
             throw new InvalidDataException("nif-block-table-exceeds-input");
         }
 
+        var blockStarts = new int[blockCount];
+        var blockEnds = new int[blockCount];
+        for (var blockIndex = 0; blockIndex < blockCount; blockIndex++)
+        {
+            blockStarts[blockIndex] = blockOffset;
+            blockOffset = checked(blockOffset + (int)blockSizes[blockIndex]);
+            blockEnds[blockIndex] = blockOffset;
+        }
+
         var shapes = new List<SkyrimSseNifShape>();
         var shapeNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var blockIndex = 0; blockIndex < blockCount; blockIndex++)
         {
             var typeName = blockTypes[blockTypeIndexes[blockIndex]];
-            var blockSize = checked((int)blockSizes[blockIndex]);
-            var blockEnd = checked(blockOffset + blockSize);
 
             var isSupportedShapeType = string.Equals(typeName, "BSTriShape", StringComparison.Ordinal) ||
                                        string.Equals(typeName, "BSSubIndexTriShape", StringComparison.Ordinal) ||
@@ -228,7 +253,16 @@ internal static class SkyrimSseNifShapeReader
 
             if (isSupportedShapeType)
             {
-                var shape = ReadBSTriShape(bytes, blockOffset, blockEnd, strings, blockTypes, blockTypeIndexes, typeName);
+                var shape = ReadBSTriShape(
+                    bytes,
+                    blockStarts[blockIndex],
+                    blockEnds[blockIndex],
+                    strings,
+                    blockTypes,
+                    blockTypeIndexes,
+                    blockStarts,
+                    blockEnds,
+                    typeName);
                 if (!shapeNames.Add(shape.Name))
                 {
                     throw new InvalidDataException($"duplicate-shape-name:{shape.Name}");
@@ -237,7 +271,6 @@ internal static class SkyrimSseNifShapeReader
                 shapes.Add(shape);
             }
 
-            blockOffset = blockEnd;
         }
 
         if (shapes.Count == 0)
@@ -255,6 +288,8 @@ internal static class SkyrimSseNifShapeReader
         IReadOnlyList<string> strings,
         IReadOnlyList<string> blockTypes,
         IReadOnlyList<ushort> blockTypeIndexes,
+        IReadOnlyList<int> blockStarts,
+        IReadOnlyList<int> blockEnds,
         string geometryBlockType)
     {
         var offset = blockStart;
@@ -273,6 +308,11 @@ internal static class SkyrimSseNifShapeReader
         Skip(bytes[..blockEnd], ref offset, NiAvObjectFieldBytes + BoundFieldBytes);
         var skinInstance = ReadInt32(bytes[..blockEnd], ref offset);
         Skip(bytes[..blockEnd], ref offset, 2 * sizeof(int));
+        if (skinInstance < -1)
+        {
+            throw new InvalidDataException($"unsupported-skin-instance-reference:{strings[(int)nameIndex]}");
+        }
+
         var isSkinned = skinInstance != -1;
         string? skinInstanceType = null;
         if (isSkinned &&
@@ -291,6 +331,18 @@ internal static class SkyrimSseNifShapeReader
         var descriptor = ReadUInt64(bytes[..blockEnd], ref offset);
         var triangleCount = ReadUInt16(bytes[..blockEnd], ref offset);
         var vertexCount = ReadUInt16(bytes[..blockEnd], ref offset);
+        var skinData = isSkinned
+            ? ReadSkinInstance(
+                bytes,
+                skinInstance,
+                skinInstanceType!,
+                strings[(int)nameIndex],
+                blockTypes,
+                blockTypeIndexes,
+                blockStarts,
+                blockEnds,
+                vertexCount)
+            : null;
         var dataSize = ReadUInt32(bytes[..blockEnd], ref offset);
         var vertexStride = checked((int)(descriptor & 0xF) * 4);
         var hasPositions = (descriptor & (1UL << 44)) != 0;
@@ -426,8 +478,383 @@ internal static class SkyrimSseNifShapeReader
             particleTriangleIndexes,
             descriptor,
             skinInstance,
-            skinInstanceType);
+            skinInstanceType,
+            skinData?.SkinDataBlockIndex ?? -1,
+            skinData?.SkinPartitionBlockIndex ?? -1,
+            skinData?.SkeletonRootBlockIndex ?? -1,
+            skinData?.BoneBlockIndices ?? [],
+            skinData?.PartitionCount ?? 0,
+            skinData?.BodyPartitions ?? []);
     }
+
+    private static SkinInstanceData ReadSkinInstance(
+        ReadOnlySpan<byte> bytes,
+        int skinInstanceBlockIndex,
+        string skinInstanceType,
+        string shapeName,
+        IReadOnlyList<string> blockTypes,
+        IReadOnlyList<ushort> blockTypeIndexes,
+        IReadOnlyList<int> blockStarts,
+        IReadOnlyList<int> blockEnds,
+        int shapeVertexCount)
+    {
+        var offset = blockStarts[skinInstanceBlockIndex];
+        var blockEnd = blockEnds[skinInstanceBlockIndex];
+        var skinDataBlockIndex = ReadRequiredBlockReference(
+            bytes, ref offset, blockEnd, "NiSkinData", shapeName, blockTypes, blockTypeIndexes);
+        var skinPartitionBlockIndex = ReadRequiredBlockReference(
+            bytes, ref offset, blockEnd, "NiSkinPartition", shapeName, blockTypes, blockTypeIndexes);
+        var skeletonRootBlockIndex = ReadRequiredNodeReference(
+            bytes, ref offset, blockEnd, "skeleton-root", shapeName, blockTypes, blockTypeIndexes);
+
+        var boneCount = ReadCount(bytes[..blockEnd], ref offset, MaximumSkinBoneCount, "skin-bone-count-out-of-range");
+        var boneBlockIndexes = new int[boneCount];
+        for (var boneIndex = 0; boneIndex < boneCount; boneIndex++)
+        {
+            boneBlockIndexes[boneIndex] = ReadRequiredNodeReference(
+                bytes, ref offset, blockEnd, "skin-bone", shapeName, blockTypes, blockTypeIndexes);
+        }
+
+        var bodyPartitions = new List<SkyrimSseNifBodyPartition>();
+        if (string.Equals(skinInstanceType, "BSDismemberSkinInstance", StringComparison.Ordinal))
+        {
+            var bodyPartitionCount = ReadCount(
+                bytes[..blockEnd], ref offset, MaximumSkinPartitionCount, "dismember-partition-count-out-of-range");
+            for (var partitionIndex = 0; partitionIndex < bodyPartitionCount; partitionIndex++)
+            {
+                var flags = ReadUInt16(bytes[..blockEnd], ref offset);
+                var bodyPart = ReadUInt16(bytes[..blockEnd], ref offset);
+                bodyPartitions.Add(new SkyrimSseNifBodyPartition(flags, bodyPart));
+            }
+        }
+
+        if (offset != blockEnd)
+        {
+            throw new InvalidDataException($"skin-instance-unmodeled-trailing-data:{shapeName}");
+        }
+
+        ReadSkinData(
+            bytes,
+            blockStarts[skinDataBlockIndex],
+            blockEnds[skinDataBlockIndex],
+            boneCount,
+            shapeVertexCount,
+            shapeName);
+        var partitionCount = ReadSkinPartition(
+            bytes,
+            blockStarts[skinPartitionBlockIndex],
+            blockEnds[skinPartitionBlockIndex],
+            boneCount,
+            shapeVertexCount,
+            shapeName);
+
+        if (string.Equals(skinInstanceType, "BSDismemberSkinInstance", StringComparison.Ordinal) &&
+            bodyPartitions.Count != partitionCount)
+        {
+            throw new InvalidDataException($"dismember-partition-count-mismatch:{shapeName}");
+        }
+
+        return new SkinInstanceData(
+            skinDataBlockIndex,
+            skinPartitionBlockIndex,
+            skeletonRootBlockIndex,
+            boneBlockIndexes,
+            partitionCount,
+            bodyPartitions);
+    }
+
+    private static void ReadSkinData(
+        ReadOnlySpan<byte> bytes,
+        int blockStart,
+        int blockEnd,
+        int expectedBoneCount,
+        int shapeVertexCount,
+        string shapeName)
+    {
+        var offset = blockStart;
+        ReadFiniteSingles(bytes[..blockEnd], ref offset, 13, "skin-data-transform", shapeName);
+        var boneCount = ReadCount(bytes[..blockEnd], ref offset, MaximumSkinBoneCount, "skin-data-bone-count-out-of-range");
+        if (boneCount != expectedBoneCount)
+        {
+            throw new InvalidDataException($"skin-data-bone-count-mismatch:{shapeName}");
+        }
+
+        var hasVertexWeights = ReadBoolean(bytes[..blockEnd], ref offset, "skin-data-vertex-weights-flag", shapeName);
+        var totalWeightCount = 0;
+        for (var boneIndex = 0; boneIndex < boneCount; boneIndex++)
+        {
+            ReadFiniteSingles(bytes[..blockEnd], ref offset, 13, "skin-bone-transform", shapeName);
+            var boundX = ReadSingle(bytes[..blockEnd], ref offset);
+            var boundY = ReadSingle(bytes[..blockEnd], ref offset);
+            var boundZ = ReadSingle(bytes[..blockEnd], ref offset);
+            var boundRadius = ReadSingle(bytes[..blockEnd], ref offset);
+            if (!float.IsFinite(boundX) || !float.IsFinite(boundY) || !float.IsFinite(boundZ) ||
+                !float.IsFinite(boundRadius) || boundRadius < 0)
+            {
+                throw new InvalidDataException($"skin-bone-bound-invalid:{shapeName}");
+            }
+
+            var vertexWeightCount = ReadUInt16(bytes[..blockEnd], ref offset);
+            totalWeightCount = checked(totalWeightCount + vertexWeightCount);
+            if (totalWeightCount > MaximumSkinWeightCount)
+            {
+                throw new InvalidDataException($"skin-data-weight-count-out-of-range:{shapeName}");
+            }
+            if (!hasVertexWeights && vertexWeightCount != 0)
+            {
+                throw new InvalidDataException($"skin-data-weights-missing:{shapeName}");
+            }
+
+            var seenVertices = new HashSet<ushort>();
+            for (var weightIndex = 0; hasVertexWeights && weightIndex < vertexWeightCount; weightIndex++)
+            {
+                var vertexIndex = ReadUInt16(bytes[..blockEnd], ref offset);
+                var weight = ReadSingle(bytes[..blockEnd], ref offset);
+                if (vertexIndex >= shapeVertexCount || !seenVertices.Add(vertexIndex) ||
+                    !float.IsFinite(weight) || weight < 0 || weight > 1)
+                {
+                    throw new InvalidDataException($"skin-data-vertex-weight-invalid:{shapeName}");
+                }
+            }
+        }
+
+        if (offset != blockEnd)
+        {
+            throw new InvalidDataException($"skin-data-unmodeled-trailing-data:{shapeName}");
+        }
+    }
+
+    private static int ReadSkinPartition(
+        ReadOnlySpan<byte> bytes,
+        int blockStart,
+        int blockEnd,
+        int skinBoneCount,
+        int shapeVertexCount,
+        string shapeName)
+    {
+        var offset = blockStart;
+        var partitionCount = ReadCount(
+            bytes[..blockEnd], ref offset, MaximumSkinPartitionCount, "skin-partition-count-out-of-range");
+        var vertexDataSize = ReadCount(bytes[..blockEnd], ref offset, 64 * 1024 * 1024, "skin-partition-vertex-data-size-out-of-range");
+        var vertexSize = ReadUInt32(bytes[..blockEnd], ref offset);
+        var vertexDescriptor = ReadUInt64(bytes[..blockEnd], ref offset);
+        var descriptorStride = checked((uint)(vertexDescriptor & 0xF) * 4u);
+        if ((vertexDataSize > 0 && (vertexSize == 0 || vertexSize != descriptorStride || vertexDataSize % vertexSize != 0)) ||
+            (vertexDataSize == 0 && vertexSize != 0 && descriptorStride != vertexSize))
+        {
+            throw new InvalidDataException($"skin-partition-vertex-layout-invalid:{shapeName}");
+        }
+        Skip(bytes[..blockEnd], ref offset, vertexDataSize);
+
+        var totalWeightCount = 0;
+        var totalPartitionVertexCount = 0;
+        var totalPartitionTriangleCount = 0;
+        var totalStripCount = 0;
+        for (var partitionIndex = 0; partitionIndex < partitionCount; partitionIndex++)
+        {
+            var vertexCount = ReadUInt16(bytes[..blockEnd], ref offset);
+            var triangleCount = ReadUInt16(bytes[..blockEnd], ref offset);
+            var boneCount = ReadUInt16(bytes[..blockEnd], ref offset);
+            var stripCount = ReadUInt16(bytes[..blockEnd], ref offset);
+            var weightsPerVertex = ReadUInt16(bytes[..blockEnd], ref offset);
+            if (boneCount > skinBoneCount || (vertexCount > 0 && weightsPerVertex == 0))
+            {
+                throw new InvalidDataException($"skin-partition-count-invalid:{shapeName}");
+            }
+            totalPartitionVertexCount = checked(totalPartitionVertexCount + vertexCount);
+            totalPartitionTriangleCount = checked(totalPartitionTriangleCount + triangleCount);
+            totalStripCount = checked(totalStripCount + stripCount);
+            if (totalPartitionVertexCount > MaximumSkinWeightCount ||
+                totalPartitionTriangleCount > MaximumSkinWeightCount ||
+                totalStripCount > MaximumSkinWeightCount)
+            {
+                throw new InvalidDataException($"skin-partition-array-count-out-of-range:{shapeName}");
+            }
+
+            for (var i = 0; i < boneCount; i++)
+            {
+                if (ReadUInt16(bytes[..blockEnd], ref offset) >= skinBoneCount)
+                {
+                    throw new InvalidDataException($"skin-partition-bone-index-out-of-range:{shapeName}");
+                }
+            }
+
+            var hasVertexMap = ReadBoolean(bytes[..blockEnd], ref offset, "skin-partition-vertex-map-flag", shapeName);
+            for (var i = 0; hasVertexMap && i < vertexCount; i++)
+            {
+                if (ReadUInt16(bytes[..blockEnd], ref offset) >= shapeVertexCount)
+                {
+                    throw new InvalidDataException($"skin-partition-vertex-map-out-of-range:{shapeName}");
+                }
+            }
+
+            var hasVertexWeights = ReadBoolean(bytes[..blockEnd], ref offset, "skin-partition-vertex-weights-flag", shapeName);
+            var weightCount = checked((int)vertexCount * weightsPerVertex);
+            if (hasVertexWeights)
+            {
+                totalWeightCount = checked(totalWeightCount + weightCount);
+                if (totalWeightCount > MaximumSkinWeightCount)
+                {
+                    throw new InvalidDataException($"skin-partition-weight-count-out-of-range:{shapeName}");
+                }
+            }
+
+            for (var i = 0; hasVertexWeights && i < weightCount; i++)
+            {
+                var weight = ReadSingle(bytes[..blockEnd], ref offset);
+                if (!float.IsFinite(weight) || weight < 0 || weight > 1)
+                {
+                    throw new InvalidDataException($"skin-partition-weight-invalid:{shapeName}");
+                }
+            }
+
+            var stripLengths = new ushort[stripCount];
+            for (var i = 0; i < stripLengths.Length; i++)
+            {
+                stripLengths[i] = ReadUInt16(bytes[..blockEnd], ref offset);
+            }
+
+            if (stripCount == 0)
+            {
+                ReadPartitionTriangles(bytes[..blockEnd], ref offset, triangleCount, vertexCount, shapeName);
+            }
+            else
+            {
+                var calculatedTriangleCount = 0;
+                foreach (var stripLength in stripLengths)
+                {
+                    calculatedTriangleCount = checked(calculatedTriangleCount + Math.Max(0, stripLength - 2));
+                    for (var i = 0; i < stripLength; i++)
+                    {
+                        if (ReadUInt16(bytes[..blockEnd], ref offset) >= vertexCount)
+                        {
+                            throw new InvalidDataException($"skin-partition-strip-index-out-of-range:{shapeName}");
+                        }
+                    }
+                }
+
+                if (calculatedTriangleCount != triangleCount)
+                {
+                    throw new InvalidDataException($"skin-partition-strip-triangle-count-mismatch:{shapeName}");
+                }
+            }
+
+            var hasBoneIndices = ReadBoolean(bytes[..blockEnd], ref offset, "skin-partition-bone-indices-flag", shapeName);
+            for (var i = 0; hasBoneIndices && i < weightCount; i++)
+            {
+                if (boneCount == 0 || ReadByte(bytes[..blockEnd], ref offset) >= boneCount)
+                {
+                    throw new InvalidDataException($"skin-partition-bone-index-out-of-range:{shapeName}");
+                }
+            }
+
+            _ = ReadByte(bytes[..blockEnd], ref offset);
+            _ = ReadBoolean(bytes[..blockEnd], ref offset, "skin-partition-global-vertex-buffer-flag", shapeName);
+            _ = ReadUInt64(bytes[..blockEnd], ref offset);
+            ReadPartitionTriangles(bytes[..blockEnd], ref offset, triangleCount, shapeVertexCount, shapeName);
+        }
+
+        if (offset != blockEnd)
+        {
+            throw new InvalidDataException($"skin-partition-unmodeled-trailing-data:{shapeName}");
+        }
+
+        return partitionCount;
+    }
+
+    private static void ReadPartitionTriangles(
+        ReadOnlySpan<byte> bytes,
+        ref int offset,
+        int triangleCount,
+        int vertexCount,
+        string shapeName)
+    {
+        for (var triangleIndex = 0; triangleIndex < triangleCount; triangleIndex++)
+        {
+            for (var vertex = 0; vertex < 3; vertex++)
+            {
+                if (ReadUInt16(bytes, ref offset) >= vertexCount)
+                {
+                    throw new InvalidDataException($"skin-partition-triangle-index-out-of-range:{shapeName}");
+                }
+            }
+        }
+    }
+
+    private static void ReadFiniteSingles(
+        ReadOnlySpan<byte> bytes,
+        ref int offset,
+        int count,
+        string fieldName,
+        string shapeName)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            if (!float.IsFinite(ReadSingle(bytes, ref offset)))
+            {
+                throw new InvalidDataException($"{fieldName}-nonfinite:{shapeName}");
+            }
+        }
+    }
+
+    private static bool ReadBoolean(ReadOnlySpan<byte> bytes, ref int offset, string fieldName, string shapeName)
+    {
+        var value = ReadByte(bytes, ref offset);
+        if (value > 1)
+        {
+            throw new InvalidDataException($"{fieldName}-invalid:{shapeName}");
+        }
+
+        return value != 0;
+    }
+
+    private static int ReadRequiredBlockReference(
+        ReadOnlySpan<byte> bytes,
+        ref int offset,
+        int blockEnd,
+        string expectedType,
+        string shapeName,
+        IReadOnlyList<string> blockTypes,
+        IReadOnlyList<ushort> blockTypeIndexes)
+    {
+        var blockIndex = ReadInt32(bytes[..blockEnd], ref offset);
+        if (blockIndex < 0 ||
+            blockIndex >= blockTypeIndexes.Count ||
+            blockTypes[blockTypeIndexes[blockIndex]] != expectedType)
+        {
+            throw new InvalidDataException($"skin-reference-invalid:{shapeName}:{expectedType}");
+        }
+
+        return blockIndex;
+    }
+
+    private static int ReadRequiredNodeReference(
+        ReadOnlySpan<byte> bytes,
+        ref int offset,
+        int blockEnd,
+        string fieldName,
+        string shapeName,
+        IReadOnlyList<string> blockTypes,
+        IReadOnlyList<ushort> blockTypeIndexes)
+    {
+        var blockIndex = ReadInt32(bytes[..blockEnd], ref offset);
+        if (blockIndex < 0 ||
+            blockIndex >= blockTypeIndexes.Count ||
+            !NiNodeTypes.Contains(blockTypes[blockTypeIndexes[blockIndex]]))
+        {
+            throw new InvalidDataException($"skin-reference-invalid:{shapeName}:{fieldName}");
+        }
+
+        return blockIndex;
+    }
+
+    private sealed record SkinInstanceData(
+        int SkinDataBlockIndex,
+        int SkinPartitionBlockIndex,
+        int SkeletonRootBlockIndex,
+        IReadOnlyList<int> BoneBlockIndices,
+        int PartitionCount,
+        IReadOnlyList<SkyrimSseNifBodyPartition> BodyPartitions);
 
     private static MeshVertex[] ReadHalfVector3Array(
         ReadOnlySpan<byte> bytes,
@@ -509,6 +936,9 @@ internal static class SkyrimSseNifShapeReader
 
     private static int ReadInt32(ReadOnlySpan<byte> bytes, ref int offset) =>
         unchecked((int)ReadUInt32(bytes, ref offset));
+
+    private static float ReadSingle(ReadOnlySpan<byte> bytes, ref int offset) =>
+        BitConverter.Int32BitsToSingle(unchecked((int)ReadUInt32(bytes, ref offset)));
 
     private static ulong ReadUInt64(ReadOnlySpan<byte> bytes, ref int offset)
     {

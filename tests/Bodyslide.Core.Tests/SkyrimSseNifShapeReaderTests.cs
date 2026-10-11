@@ -478,7 +478,140 @@ public sealed class SkyrimSseNifShapeReaderTests
         var shape = Assert.Single(result.Shapes);
         Assert.Equal(1, shape.SkinInstanceBlockIndex);
         Assert.Equal("BSDismemberSkinInstance", shape.SkinInstanceType);
+        Assert.Equal(2, shape.SkinDataBlockIndex);
+        Assert.Equal(3, shape.SkinPartitionBlockIndex);
+        Assert.Equal(4, shape.SkeletonRootBlockIndex);
+        Assert.Equal(new[] { 5 }, shape.SkinBoneBlockIndices);
+        Assert.Equal(1, shape.SkinPartitionCount);
+        Assert.Equal([new SkyrimSseNifBodyPartition(257, 32)], shape.BodyPartitions);
         Assert.Contains("position-index-only", result.Diagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReadsMultipleDismemberPartitionEntriesAndExposesTheirBodyParts()
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [
+                new TestShape(
+                    "PartitionedBody",
+                    [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)],
+                    SkinInstance: 1,
+                    BodyPartitions: [(257, 32), (1, 33)])
+            ],
+            skinBlockType: "BSDismemberSkinInstance"));
+
+        Assert.True(result.Supported, result.Diagnostic);
+        var shape = Assert.Single(result.Shapes);
+        Assert.Equal(2, shape.SkinPartitionCount);
+        Assert.Equal(
+            [new SkyrimSseNifBodyPartition(257, 32), new SkyrimSseNifBodyPartition(1, 33)],
+            shape.BodyPartitions);
+    }
+
+    [Fact]
+    public void RejectsDismemberPartitionCountThatDoesNotMatchSkinPartitionBlock()
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [
+                new TestShape(
+                    "PartitionedBody",
+                    [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)],
+                    SkinInstance: 1,
+                    BodyPartitions: [(257, 32), (1, 33)])
+            ],
+            skinBlockType: "BSDismemberSkinInstance",
+            skinPartitionCountOverride: 1));
+
+        Assert.False(result.Supported);
+        Assert.Equal("dismember-partition-count-mismatch:PartitionedBody", result.Diagnostic);
+        Assert.Empty(result.Shapes);
+    }
+
+    [Theory]
+    [InlineData(0, null, null, null, "skin-reference-invalid:SkinnedBody:NiSkinData")]
+    [InlineData(null, 0, null, null, "skin-reference-invalid:SkinnedBody:NiSkinPartition")]
+    [InlineData(null, null, 0, null, "skin-reference-invalid:SkinnedBody:skeleton-root")]
+    [InlineData(null, null, null, 0, "skin-reference-invalid:SkinnedBody:skin-bone")]
+    public void RejectsSkinInstanceReferencesThatDoNotResolveToSchemaTypes(
+        int? skinDataReference,
+        int? skinPartitionReference,
+        int? skeletonRootReference,
+        int? boneReference,
+        string diagnostic)
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("SkinnedBody", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)], SkinInstance: 1)],
+            skinDataReferenceOverride: skinDataReference,
+            skinPartitionReferenceOverride: skinPartitionReference,
+            skeletonRootReferenceOverride: skeletonRootReference,
+            boneReferenceOverride: boneReference));
+
+        Assert.False(result.Supported);
+        Assert.Equal(diagnostic, result.Diagnostic);
+    }
+
+    [Fact]
+    public void RejectsUnmodeledSkinInstancePayloadBytes()
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("SkinnedBody", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)], SkinInstance: 1)],
+            trailingSkinInstanceByte: true));
+
+        Assert.False(result.Supported);
+        Assert.Equal("skin-instance-unmodeled-trailing-data:SkinnedBody", result.Diagnostic);
+    }
+
+    [Fact]
+    public void ExtractPartitionSlotsUsesParsedDismemberMetadata()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".nif");
+        try
+        {
+            File.WriteAllBytes(path, CreateNif(
+                [
+                    new TestShape(
+                        "PartitionedBody",
+                        [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)],
+                        SkinInstance: 1,
+                        BodyPartitions: [(257, 32), (1, 33)])
+                ],
+                skinBlockType: "BSDismemberSkinInstance"));
+
+            Assert.Equal([32, 33], NifGeometrySignatureReader.ExtractPartitionSlots(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void SyntheticPermittedSkinFixtureRoundTripsWithoutRewritingUnverifiedSkinData()
+    {
+        var source = CreateNif(
+        [
+            new TestShape(
+                "RoundTripSkinnedBody",
+                [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)],
+                SkinInstance: 1,
+                BodyPartitions: [(257, 32), (1, 33)])
+        ],
+        skinBlockType: "BSDismemberSkinInstance");
+        var initial = SkyrimSseNifShapeReader.Read(source);
+        Assert.True(initial.Supported, initial.Diagnostic);
+
+        var output = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.2d },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+        var roundTripped = SkyrimSseNifShapeReader.Read(output);
+
+        Assert.Same(source, output);
+        Assert.True(roundTripped.Supported, roundTripped.Diagnostic);
+        Assert.Equal(initial.Shapes[0].BodyPartitions, roundTripped.Shapes[0].BodyPartitions);
+        Assert.Equal(initial.Shapes[0].SkinBoneBlockIndices, roundTripped.Shapes[0].SkinBoneBlockIndices);
+        Assert.Equal(source, output);
     }
 
     [Theory]
@@ -566,7 +699,7 @@ public sealed class SkyrimSseNifShapeReaderTests
         var source = CreateNif(
         [
             new TestShape("UnskinnedBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)]),
-            new TestShape("SkinnedTrim", [(0f, 1f, 0f), (20f, 1f, 8f), (0f, 16f, 16f)], SkinInstance: 1)
+            new TestShape("SkinnedTrim", [(0f, 1f, 0f), (20f, 1f, 8f), (0f, 16f, 16f)], SkinInstance: 2)
         ]);
 
         var transformed = LocalExportService.TryApplyNifVertexTransform(
@@ -862,8 +995,19 @@ public sealed class SkyrimSseNifShapeReaderTests
         string skinBlockType = "NiSkinInstance",
         bool dynamicShapeLayout = false,
         uint? dynamicDataSizeOverride = null,
-        uint? particleDataSizeOverride = null)
+        uint? particleDataSizeOverride = null,
+        uint? skinPartitionCountOverride = null,
+        int? skinDataReferenceOverride = null,
+        int? skinPartitionReferenceOverride = null,
+        int? skeletonRootReferenceOverride = null,
+        int? boneReferenceOverride = null,
+        bool trailingSkinInstanceByte = false)
     {
+        var skinInstanceBlockIndex = shapes.Count;
+        var skinDataBlockIndex = skinInstanceBlockIndex + 1;
+        var skinPartitionBlockIndex = skinInstanceBlockIndex + 2;
+        var skeletonRootBlockIndex = skinInstanceBlockIndex + 3;
+        var skinBoneBlockIndex = skinInstanceBlockIndex + 4;
         var shapeBlockBytes = shapes
             .Select((shape, index) => CreateShapeBlock(
                 shape with { NameIndex = index },
@@ -872,11 +1016,35 @@ public sealed class SkyrimSseNifShapeReaderTests
                 particleDataSizeOverride))
             .ToArray();
         var hasSkinInstance = shapes.Any(static shape => shape.SkinInstance >= 0);
-        var blockBytes = hasSkinInstance
-            ? shapeBlockBytes.Append(Array.Empty<byte>()).ToArray()
-            : shapeBlockBytes;
+        var bodyPartitions = shapes.FirstOrDefault(static shape => shape.SkinInstance >= 0)?.BodyPartitions
+            ?? [(257, 32)];
+        var skinPartitionCount = skinPartitionCountOverride ?? (uint)bodyPartitions.Count;
+        var skinBlocks = hasSkinInstance
+            ? new[]
+            {
+                CreateSkinInstanceBlock(
+                    skinBlockType,
+                    skinDataBlockIndex,
+                    skinPartitionBlockIndex,
+                    skeletonRootBlockIndex,
+                    skinBoneBlockIndex,
+                    skinBlockType == "BSDismemberSkinInstance" ? bodyPartitions : [],
+                    skinDataReferenceOverride,
+                    skinPartitionReferenceOverride,
+                    skeletonRootReferenceOverride,
+                    boneReferenceOverride,
+                    trailingSkinInstanceByte),
+                CreateNiSkinDataBlock(shapes.First(static shape => shape.SkinInstance >= 0)),
+                CreateNiSkinPartitionBlock(
+                    skinPartitionCount,
+                    shapes.First(static shape => shape.SkinInstance >= 0)),
+                Array.Empty<byte>(),
+                Array.Empty<byte>()
+            }
+            : [];
+        var blockBytes = shapeBlockBytes.Concat(skinBlocks).ToArray();
         var blockTypes = hasSkinInstance
-            ? new[] { blockType, skinBlockType }
+            ? new[] { blockType, skinBlockType, "NiSkinData", "NiSkinPartition", "NiNode" }
             : [blockType];
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
@@ -889,7 +1057,14 @@ public sealed class SkyrimSseNifShapeReaderTests
         writer.Write((uint)blockTypes.Length);
         foreach (var type in blockTypes) WriteSizedString(writer, type);
         for (var i = 0; i < shapes.Count; i++) writer.Write((ushort)0);
-        if (hasSkinInstance) writer.Write((ushort)1);
+        if (hasSkinInstance)
+        {
+            writer.Write((ushort)1);
+            writer.Write((ushort)2);
+            writer.Write((ushort)3);
+            writer.Write((ushort)4);
+            writer.Write((ushort)4);
+        }
         foreach (var block in blockBytes) writer.Write((uint)block.Length);
         writer.Write((uint)shapes.Count);
         writer.Write((uint)shapes.Max(shape => Encoding.UTF8.GetByteCount(shape.Name)));
@@ -898,6 +1073,107 @@ public sealed class SkyrimSseNifShapeReaderTests
         foreach (var block in blockBytes) writer.Write(block);
         writer.Write(1u);
         writer.Write(0u);
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateSkinInstanceBlock(
+        string skinBlockType,
+        int skinDataBlockIndex,
+        int skinPartitionBlockIndex,
+        int skeletonRootBlockIndex,
+        int skinBoneBlockIndex,
+        IReadOnlyList<(ushort Flags, ushort BodyPart)> bodyPartitions,
+        int? skinDataReferenceOverride,
+        int? skinPartitionReferenceOverride,
+        int? skeletonRootReferenceOverride,
+        int? boneReferenceOverride,
+        bool trailingByte)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+        writer.Write(skinDataReferenceOverride ?? skinDataBlockIndex);
+        writer.Write(skinPartitionReferenceOverride ?? skinPartitionBlockIndex);
+        writer.Write(skeletonRootReferenceOverride ?? skeletonRootBlockIndex);
+        writer.Write(1u);
+        writer.Write(boneReferenceOverride ?? skinBoneBlockIndex);
+        if (skinBlockType == "BSDismemberSkinInstance")
+        {
+            writer.Write((uint)bodyPartitions.Count);
+            foreach (var (flags, bodyPart) in bodyPartitions)
+            {
+                writer.Write(flags);
+                writer.Write(bodyPart);
+            }
+        }
+        if (trailingByte) writer.Write((byte)0xA5);
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateNiSkinDataBlock(TestShape shape)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+        for (var i = 0; i < 3 + 9 + 1; i++) writer.Write(0f);
+        writer.Write(1u);
+        writer.Write((byte)1);
+        for (var i = 0; i < 3 + 9 + 1 + 3 + 1; i++) writer.Write(0f);
+        writer.Write((ushort)1);
+        writer.Write((ushort)0);
+        writer.Write(1f);
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateNiSkinPartitionBlock(uint partitionCount, TestShape shape)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+        writer.Write(partitionCount);
+        writer.Write(0u);
+        writer.Write(0u);
+        writer.Write(0UL);
+        for (var i = 0; i < checked((int)partitionCount); i++)
+        {
+            var triangles = shape.Triangles ?? [shape.Triangle ?? (0, 1, 2)];
+            writer.Write((ushort)shape.Vertices.Count);
+            writer.Write((ushort)triangles.Count);
+            writer.Write((ushort)1);
+            writer.Write((ushort)0);
+            writer.Write((ushort)4);
+            writer.Write((ushort)0);
+            writer.Write((byte)1);
+            for (var vertexIndex = 0; vertexIndex < shape.Vertices.Count; vertexIndex++)
+            {
+                writer.Write((ushort)vertexIndex);
+            }
+            writer.Write((byte)1);
+            for (var vertexIndex = 0; vertexIndex < shape.Vertices.Count; vertexIndex++)
+            {
+                writer.Write(1f);
+                writer.Write(0f);
+                writer.Write(0f);
+                writer.Write(0f);
+            }
+            foreach (var (a, b, c) in triangles)
+            {
+                writer.Write((ushort)a);
+                writer.Write((ushort)b);
+                writer.Write((ushort)c);
+            }
+            writer.Write((byte)1);
+            for (var vertexIndex = 0; vertexIndex < shape.Vertices.Count * 4; vertexIndex++)
+            {
+                writer.Write((byte)0);
+            }
+            writer.Write((byte)0);
+            writer.Write((byte)0);
+            writer.Write(0UL);
+            foreach (var (a, b, c) in triangles)
+            {
+                writer.Write((ushort)a);
+                writer.Write((ushort)b);
+                writer.Write((ushort)c);
+            }
+        }
         return stream.ToArray();
     }
 
@@ -1039,7 +1315,8 @@ public sealed class SkyrimSseNifShapeReaderTests
         IReadOnlyList<(float X, float Y, float Z, float W)>? DynamicVertices = null,
         IReadOnlyList<(int A, int B, int C)>? ParticleTriangles = null,
         IReadOnlyList<(ushort X, ushort Y, ushort Z)>? ParticleVertexHalfBits = null,
-        IReadOnlyList<(ushort X, ushort Y, ushort Z)>? ParticleNormalHalfBits = null)
+        IReadOnlyList<(ushort X, ushort Y, ushort Z)>? ParticleNormalHalfBits = null,
+        IReadOnlyList<(ushort Flags, ushort BodyPart)>? BodyPartitions = null)
     {
         public int NameIndex { get; init; }
     }
