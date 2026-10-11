@@ -584,6 +584,18 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void RejectsMissingVertexMapWhenPartitionDoesNotCoverWholeShape()
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("SkinnedBody", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)], SkinInstance: 1)],
+            skinPartitionVertexMapFlagOverride: 0,
+            skinPartitionVertexCountOverride: 2));
+
+        Assert.False(result.Supported);
+        Assert.Equal("skin-partition-vertex-map-missing:SkinnedBody", result.Diagnostic);
+    }
+
+    [Fact]
     public void RejectsNonFiniteSkinPartitionWeights()
     {
         var result = SkyrimSseNifShapeReader.Read(CreateNif(
@@ -1036,6 +1048,8 @@ public sealed class SkyrimSseNifShapeReaderTests
         int? boneReferenceOverride = null,
         bool trailingSkinInstanceByte = false,
         int? skinPartitionVertexMapOverride = null,
+        byte? skinPartitionVertexMapFlagOverride = null,
+        ushort? skinPartitionVertexCountOverride = null,
         float? skinDataWeightOverride = null,
         float? skinPartitionWeightOverride = null)
     {
@@ -1075,6 +1089,8 @@ public sealed class SkyrimSseNifShapeReaderTests
                     skinPartitionCount,
                     shapes.First(static shape => shape.SkinInstance >= 0),
                     skinPartitionVertexMapOverride,
+                    skinPartitionVertexMapFlagOverride,
+                    skinPartitionVertexCountOverride,
                     skinPartitionWeightOverride),
                 Array.Empty<byte>(),
                 Array.Empty<byte>()
@@ -1165,6 +1181,8 @@ public sealed class SkyrimSseNifShapeReaderTests
         uint partitionCount,
         TestShape shape,
         int? vertexMapOverride,
+        byte? vertexMapFlagOverride,
+        ushort? vertexCountOverride,
         float? skinPartitionWeightOverride)
     {
         using var stream = new MemoryStream();
@@ -1176,19 +1194,20 @@ public sealed class SkyrimSseNifShapeReaderTests
         for (var i = 0; i < checked((int)partitionCount); i++)
         {
             var triangles = shape.Triangles ?? [shape.Triangle ?? (0, 1, 2)];
-            writer.Write((ushort)shape.Vertices.Count);
+            var partitionVertexCount = vertexCountOverride ?? (ushort)shape.Vertices.Count;
+            writer.Write(partitionVertexCount);
             writer.Write((ushort)triangles.Count);
             writer.Write((ushort)1);
             writer.Write((ushort)0);
             writer.Write((ushort)4);
             writer.Write((ushort)0);
-            writer.Write((byte)1);
-            for (var vertexIndex = 0; vertexIndex < shape.Vertices.Count; vertexIndex++)
+            writer.Write(vertexMapFlagOverride ?? (byte)1);
+            for (var vertexIndex = 0; vertexMapFlagOverride != 0 && vertexIndex < partitionVertexCount; vertexIndex++)
             {
                 writer.Write((ushort)(vertexIndex == 0 ? vertexMapOverride ?? vertexIndex : vertexIndex));
             }
             writer.Write((byte)1);
-            for (var vertexIndex = 0; vertexIndex < shape.Vertices.Count; vertexIndex++)
+            for (var vertexIndex = 0; vertexIndex < partitionVertexCount; vertexIndex++)
             {
                 writer.Write(vertexIndex == 0 ? skinPartitionWeightOverride ?? 1f : 1f);
                 writer.Write(0f);
@@ -1202,7 +1221,7 @@ public sealed class SkyrimSseNifShapeReaderTests
                 writer.Write((ushort)c);
             }
             writer.Write((byte)1);
-            for (var vertexIndex = 0; vertexIndex < shape.Vertices.Count * 4; vertexIndex++)
+            for (var vertexIndex = 0; vertexIndex < partitionVertexCount * 4; vertexIndex++)
             {
                 writer.Write((byte)0);
             }

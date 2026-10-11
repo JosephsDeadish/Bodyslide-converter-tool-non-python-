@@ -680,6 +680,11 @@ internal static class SkyrimSseNifShapeReader
             }
 
             var hasVertexMap = ReadBoolean(bytes[..blockEnd], ref offset, "skin-partition-vertex-map-flag", shapeName);
+            if (!hasVertexMap && vertexCount != shapeVertexCount)
+            {
+                throw new InvalidDataException($"skin-partition-vertex-map-missing:{shapeName}");
+            }
+
             for (var i = 0; hasVertexMap && i < vertexCount; i++)
             {
                 if (ReadUInt16(bytes[..blockEnd], ref offset) >= shapeVertexCount)
