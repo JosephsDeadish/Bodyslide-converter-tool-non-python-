@@ -834,8 +834,13 @@ public sealed class SkyrimSseNifShapeReaderTests
             var qualityJson = File.ReadAllText(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.Contains("\"Code\": \"skinned-nif-runtime-unverified\"", qualityJson, StringComparison.Ordinal);
             Assert.Contains("Skin weights, bones, partitions, and other non-position data are never rewritten", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("their suitability for the target body is not assessed", qualityJson, StringComparison.Ordinal);
             Assert.Contains(
-                "validate the result in Outfit Studio and Skyrim",
+                "does not assess whether those weights suit the target body",
+                ConversionValidationGuidance.GetIssueFollowUp("skinned-nif-runtime-unverified", "3BA")!,
+                StringComparison.Ordinal);
+            Assert.Contains(
+                "Validate weight suitability and live deformation separately",
                 ConversionValidationGuidance.GetIssueFollowUp("skinned-nif-runtime-unverified", "3BA")!,
                 StringComparison.Ordinal);
             var outputBytes = Directory.GetFiles(outputDirectory, "*.nif", SearchOption.AllDirectories)

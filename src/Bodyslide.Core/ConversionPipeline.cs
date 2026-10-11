@@ -1260,7 +1260,7 @@ internal static class ConversionValidationGuidance
             "unsupported-nif-layout" =>
                 "Open preview-workbench.html and conversion-quality.json to identify the listed mesh and any geometry-family notes, zoom into the failing piece in the preview, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
             "skinned-nif-runtime-unverified" =>
-                "Open conversion-quality.json and preview-workbench.html to inspect the skinned mesh. Supported SSE skinned shapes may receive a position-only fit transform while skin weights, partitions, and all other non-position NIF bytes are preserved; validate the result in Outfit Studio and Skyrim before relying on its live deformation.",
+                "Open conversion-quality.json and preview-workbench.html to inspect the skinned mesh. Supported SSE skinned shapes may receive a position-only fit transform while skin weights, partitions, and all other non-position NIF bytes are preserved; this does not assess whether those weights suit the target body. Validate weight suitability and live deformation separately in Outfit Studio and Skyrim before relying on the result.",
             "heuristic-nif-read" =>
                 "Use preview-workbench.html plus conversion-quality.json to identify heuristic-read meshes, then confirm vertex order, skinning, UVs, and partitions in NifSkope before shipping.",
             "incomplete-source-fallback" =>
@@ -28223,7 +28223,7 @@ internal sealed class LocalExportService(
                 issues.Add(new ConversionValidationIssue(
                     "skinned-nif-runtime-unverified",
                     "medium",
-                    $"Skin weights, bones, partitions, and other non-position data are never rewritten. Position-only transforms are limited to fully parsed BSTriShape layouts; live Outfit Studio/Skyrim deformation remains unverified for: {string.Join(", ", skinnedMeshes.Take(6))}."));
+                    $"Skin weights, bones, partitions, and other non-position data are never rewritten, and their suitability for the target body is not assessed. Position-only transforms are limited to fully parsed BSTriShape layouts; live Outfit Studio/Skyrim deformation remains unverified for: {string.Join(", ", skinnedMeshes.Take(6))}."));
             }
 
             var unsupported = nifSupport
