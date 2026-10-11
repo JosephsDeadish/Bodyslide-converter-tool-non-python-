@@ -14,7 +14,10 @@ internal sealed record SkyrimSseNifShape(
     string GeometryBlockType = "BSTriShape",
     IReadOnlyList<MeshVertex>? ParticleVertices = null,
     IReadOnlyList<MeshVertex>? ParticleNormals = null,
-    IReadOnlyList<ushort>? ParticleTriangleIndices = null);
+    IReadOnlyList<ushort>? ParticleTriangleIndices = null,
+    ulong VertexDescriptor = 0,
+    int SkinInstanceBlockIndex = -1,
+    string? SkinInstanceType = null);
 
 internal sealed record SkyrimSseNifShapeReadResult(
     bool Supported,
@@ -271,6 +274,7 @@ internal static class SkyrimSseNifShapeReader
         var skinInstance = ReadInt32(bytes[..blockEnd], ref offset);
         Skip(bytes[..blockEnd], ref offset, 2 * sizeof(int));
         var isSkinned = skinInstance != -1;
+        string? skinInstanceType = null;
         if (isSkinned &&
             (skinInstance < 0 ||
              skinInstance >= blockTypeIndexes.Count ||
@@ -278,6 +282,10 @@ internal static class SkyrimSseNifShapeReader
              !IsSupportedSkinInstanceType(blockTypes[blockTypeIndexes[skinInstance]])))
         {
             throw new InvalidDataException($"unsupported-skin-instance-reference:{strings[(int)nameIndex]}");
+        }
+        if (isSkinned)
+        {
+            skinInstanceType = blockTypes[blockTypeIndexes[skinInstance]];
         }
 
         var descriptor = ReadUInt64(bytes[..blockEnd], ref offset);
@@ -415,7 +423,10 @@ internal static class SkyrimSseNifShapeReader
             geometryBlockType,
             particleVertices,
             particleNormals,
-            particleTriangleIndexes);
+            particleTriangleIndexes,
+            descriptor,
+            skinInstance,
+            skinInstanceType);
     }
 
     private static MeshVertex[] ReadHalfVector3Array(

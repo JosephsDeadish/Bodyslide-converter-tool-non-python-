@@ -439,8 +439,25 @@ public sealed class SkyrimSseNifShapeReaderTests
         Assert.Equal("supported-skinned-bstrishape-position-index-only", result.Diagnostic);
         var shape = Assert.Single(result.Shapes);
         Assert.True(shape.IsSkinned);
+        Assert.Equal(1, shape.SkinInstanceBlockIndex);
+        Assert.Equal("NiSkinInstance", shape.SkinInstanceType);
+        Assert.NotEqual(0UL, shape.VertexDescriptor);
         Assert.Equal(new MeshVertex(1f, 0f, 0f), shape.Vertices[1]);
         Assert.Equal(new ushort[] { 0, 1, 2 }, shape.TriangleIndices);
+    }
+
+    [Fact]
+    public void ReadsBethesdaDismemberSkinInstanceReferenceWithoutClaimingPartitionSupport()
+    {
+        var result = SkyrimSseNifShapeReader.Read(CreateNif(
+            [new TestShape("DismemberBody", [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)], SkinInstance: 1)],
+            skinBlockType: "BSDismemberSkinInstance"));
+
+        Assert.True(result.Supported, result.Diagnostic);
+        var shape = Assert.Single(result.Shapes);
+        Assert.Equal(1, shape.SkinInstanceBlockIndex);
+        Assert.Equal("BSDismemberSkinInstance", shape.SkinInstanceType);
+        Assert.Contains("position-index-only", result.Diagnostic, StringComparison.Ordinal);
     }
 
     [Theory]
