@@ -648,7 +648,14 @@ public sealed class SkyrimSseNifShapeReaderTests
         var output = LocalExportService.TryApplyNifVertexTransform(
             source,
             null,
-            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.2d },
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
             BasicCageGenerationService.CreatePresetCage("mixed"));
         var roundTripped = SkyrimSseNifShapeReader.Read(output);
 
@@ -676,7 +683,7 @@ public sealed class SkyrimSseNifShapeReaderTests
     [Theory]
     [InlineData("NiSkinInstance")]
     [InlineData("BSDismemberSkinInstance")]
-    public async Task WriterTransformsValidatedSkinnedShapeAndPreservesAllNonPositionData(string skinInstanceType)
+    public void WriterTransformsValidatedSkinnedShapeAndPreservesAllNonPositionData(string skinInstanceType)
     {
         var source = CreateNif(
             [
@@ -707,10 +714,27 @@ public sealed class SkyrimSseNifShapeReaderTests
         var transformedShape = Assert.Single(SkyrimSseNifShapeReader.Read(transformed).Shapes);
         Assert.NotEqual(shape.Vertices, transformedShape.Vertices);
         Assert.Equal(shape.TriangleIndices, transformedShape.TriangleIndices);
+        Assert.Equal(shape.ParticleVertices, transformedShape.ParticleVertices);
+        Assert.Equal(shape.ParticleNormals, transformedShape.ParticleNormals);
+        Assert.Equal(shape.ParticleTriangleIndices, transformedShape.ParticleTriangleIndices);
         Assert.Equal(shape.BodyPartitions, transformedShape.BodyPartitions);
         Assert.Equal(shape.SkinBoneBlockIndices, transformedShape.SkinBoneBlockIndices);
         AssertOnlyShapePositionsChanged(source, transformed, [shape]);
+    }
 
+    [Fact]
+    public async Task SkinnedConversionReportsRuntimeValidationRequirement()
+    {
+        var source = CreateNif(
+            [
+                new TestShape(
+                    "SkinnedBody",
+                    [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)],
+                    SkinInstance: 1,
+                    BodyPartitions: [(257, 32), (1, 33)])
+            ],
+            skinBlockType: "BSDismemberSkinInstance");
+        var sourceShape = Assert.Single(SkyrimSseNifShapeReader.Read(source).Shapes);
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var path = Path.Combine(workingDirectory, "SkinnedBody.nif");
         var outputDirectory = Path.Combine(workingDirectory, "output");
@@ -741,7 +765,7 @@ public sealed class SkyrimSseNifShapeReaderTests
             Assert.True(result.Success);
             var qualityJson = File.ReadAllText(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.Contains("\"Code\": \"skinned-nif-runtime-unverified\"", qualityJson, StringComparison.Ordinal);
-            Assert.Contains("skin weights, partitions, and other non-position data are preserved unchanged", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("Skin weights, bones, partitions, and other non-position data are never rewritten", qualityJson, StringComparison.Ordinal);
             Assert.Contains(
                 "validate the result in Outfit Studio and Skyrim",
                 ConversionValidationGuidance.GetIssueFollowUp("skinned-nif-runtime-unverified", "3BA")!,
@@ -750,7 +774,7 @@ public sealed class SkyrimSseNifShapeReaderTests
                 .Select(File.ReadAllBytes)
                 .FirstOrDefault(bytes => !bytes.SequenceEqual(source));
             Assert.NotNull(outputBytes);
-            AssertOnlyShapePositionsChanged(source, outputBytes!, [shape]);
+            AssertOnlyShapePositionsChanged(source, outputBytes!, [sourceShape]);
         }
         finally
         {

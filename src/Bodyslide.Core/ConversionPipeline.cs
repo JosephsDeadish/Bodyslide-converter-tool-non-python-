@@ -5882,7 +5882,7 @@ internal static class NifGeometrySignatureReader
                     ? string.Equals(result.Mode, "heuristic-float", StringComparison.Ordinal)
                         ? ["heuristic-geometry-read", "manual-review-recommended"]
                         : result.Mode.Contains("skinned-position-index-only", StringComparison.Ordinal)
-                    ? ["skin-data-validated-and-preserved-unmodified", "live-skinned-deformation-unverified", "manual-review-recommended"]
+                    ? ["skin-data-validated-and-preserved-unmodified", "non-position-nif-data-preserved-unmodified", "live-skinned-deformation-unverified", "manual-review-recommended"]
                             : ["partial-geometry-recovered", "manual-review-recommended"]
                     : [],
                 metadata,
@@ -28215,7 +28215,7 @@ internal sealed class LocalExportService(
         if (nifSupport is { Count: > 0 })
         {
             var skinnedMeshes = nifSupport
-                .Where(static report => report.ParseMode.Contains("skinned-position-index-only", StringComparison.OrdinalIgnoreCase))
+                .Where(static report => !string.IsNullOrWhiteSpace(report.SkinInstanceType))
                 .Select(static report => Path.GetFileName(report.MeshPath))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -28224,7 +28224,7 @@ internal sealed class LocalExportService(
                 issues.Add(new ConversionValidationIssue(
                     "skinned-nif-runtime-unverified",
                     "medium",
-                    $"Supported skinned NIF position streams can be transformed while skin weights, partitions, and other non-position data are preserved unchanged. Live Outfit Studio/Skyrim deformation remains unverified for: {string.Join(", ", skinnedMeshes.Take(6))}."));
+                    $"Skin weights, bones, partitions, and other non-position data are never rewritten. Position-only transforms are limited to fully parsed BSTriShape layouts; live Outfit Studio/Skyrim deformation remains unverified for: {string.Join(", ", skinnedMeshes.Take(6))}."));
             }
 
             var unsupported = nifSupport
