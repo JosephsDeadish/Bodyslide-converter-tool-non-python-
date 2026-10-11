@@ -23304,8 +23304,8 @@ public sealed class PoseSimulationAndPreviewTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(
                 Path.Combine(workingDirectory, "testarmor.nif"), "CBBE", outputDirectory));
 
-            Assert.True(result.Steps.Any(s => s.StartsWith("pose-simulation:", StringComparison.Ordinal)),
-                "Steps should contain a pose-simulation entry.");
+            Assert.True(result.Steps.Any(s => s.StartsWith("pose-simulation:simulated=", StringComparison.Ordinal)),
+                "Steps should identify pose counts as simulations, not external tests.");
         }
         finally
         {

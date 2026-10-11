@@ -8220,16 +8220,14 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"voxel-push-applied:regions={voxelResult.AffectedRegions.Count}");
             }
 
-            // Pose simulation — tests the converted mesh against 8 animation poses using the
-            // animation-driven geometry solver when NIF vertex data is available, falling back
-            // to the heuristic amplifier approach otherwise.
+            // Pose simulation estimates risk across 8 poses; it is not a game/runtime test.
             var poseSimulation = await ProfileStageAsync(
                 "pose-simulation",
                 () => poseSimulator.SimulateWithMeshDataAsync(
                     converted, normalized.Request.TargetBody, armor.MeshFiles, cancellationToken));
             steps.Add(poseSimulation.TotalPosesAtRisk > 0
-                ? $"pose-simulation:tested={poseSimulation.TestedPoses.Count},at-risk-poses={poseSimulation.TotalPosesAtRisk},high-risk={string.Join('+', poseSimulation.HighRiskRegions)}"
-                : $"pose-simulation:tested={poseSimulation.TestedPoses.Count},no-clipping-risk");
+                ? $"pose-simulation:simulated={poseSimulation.TestedPoses.Count},at-risk-poses={poseSimulation.TotalPosesAtRisk},high-risk={string.Join('+', poseSimulation.HighRiskRegions)}"
+                : $"pose-simulation:simulated={poseSimulation.TestedPoses.Count},no-estimated-clipping-risk");
 
             ReportStage("Building physics and BodySlide data", 17);
             var physicsProfile = ResolvePhysicsProfile(normalized.Request, armor, normalized.Preset);
@@ -46355,12 +46353,12 @@ internal sealed class LocalExportService(
         }
         else
         {
-            posePanelHtml.AppendLine("""      <div class="panel" style="margin-top:16px"><p style="color:#6bcb77">✓ No clipping risk across all tested poses.</p></div>""");
+            posePanelHtml.AppendLine("""      <div class="panel" style="margin-top:16px"><p style="color:#6bcb77">✓ No clipping risk estimated by pose simulation.</p></div>""");
         }
 
         var poseRiskLabel = poseSimulation.TotalPosesAtRisk > 0
-            ? $"⚠ {poseSimulation.TotalPosesAtRisk}/{poseSimulation.TestedPoses.Count} poses at risk"
-            : $"✓ {poseSimulation.TestedPoses.Count} poses OK";
+            ? $"⚠ {poseSimulation.TotalPosesAtRisk}/{poseSimulation.TestedPoses.Count} simulated poses at estimated risk"
+            : $"✓ {poseSimulation.TestedPoses.Count} simulated poses without estimated risk";
 
         // High-risk regions badge.
         var highRiskBadge = poseSimulation.HighRiskRegions.Count > 0
