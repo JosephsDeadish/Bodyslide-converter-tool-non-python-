@@ -84,12 +84,15 @@ jobs:
           Copy-Item artifacts/win-x64-manager/* $desktopBundle -Recurse -Force
           Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
           Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
+          Copy-Item LICENSE.txt $bundleRoot
+          Copy-Item LICENSE.txt artifacts
           $bundleMetadata = [ordered]@{
             portableDesktop = "SlideSmith.exe"
             desktop = "desktop/SlideSmith.exe"
             installedDesktop = "SlideSmith/SlideSmith.exe"
             cli = "cli/SlideSmith-CLI.exe"
             readme = "README.txt"
+            license = "LICENSE.txt"
             fomodModuleConfig = "fomod/ModuleConfig.xml"
             fomodInfo = "fomod/info.xml"
             modOrganizerMetadata = "meta.ini"
@@ -124,6 +127,12 @@ jobs:
           if (!(Test-Path (Join-Path $extractPath "README.txt"))) {
             throw "Missing README.txt in bundle zip."
           }
+          if (!(Test-Path (Join-Path $extractPath "LICENSE.txt"))) {
+            throw "Missing LICENSE.txt in bundle zip."
+          }
+          if ((Get-FileHash (Join-Path $extractPath "LICENSE.txt") -Algorithm SHA256).Hash -ne (Get-FileHash LICENSE.txt -Algorithm SHA256).Hash) {
+            throw "Windows bundle LICENSE.txt differs from the repository license."
+          }
           if (!(Test-Path (Join-Path $extractPath "meta/slidesmith-bundle.json"))) {
             throw "Missing meta/slidesmith-bundle.json in bundle zip."
           }
@@ -148,6 +157,7 @@ jobs:
             'folder[@source="meta" and @destination="SlideSmith/meta"]',
             'file[@source="cli/SlideSmith-CLI.exe" and @destination="SlideSmith/SlideSmith-CLI.exe"]',
             'file[@source="README.txt" and @destination="SlideSmith/README.txt"]',
+            'file[@source="LICENSE.txt" and @destination="SlideSmith/LICENSE.txt"]',
             'file[@source="meta.ini" and @destination="SlideSmith/meta.ini"]'
           )
           foreach ($mapping in $requiredMappings) {
@@ -180,3 +190,4 @@ jobs:
             artifacts/SlideSmith-Desktop-Portable.exe
             artifacts/win-x64-cli/SlideSmith-CLI.exe
             artifacts/slidesmith-win-x64-bundle.zip
+            artifacts/LICENSE.txt

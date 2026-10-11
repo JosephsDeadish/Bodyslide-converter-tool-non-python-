@@ -6,6 +6,7 @@ This bundle is intended for SkyrimSE Mod Organizer 2 / Vortex managed installs.
 Where is the app?
 - For a quick standalone launch, extract the archive and run SlideSmith.exe at
   the archive's top level.
+- The bundle includes LICENSE.txt with the license terms for the application.
 - For MO2/Vortex, install the bundle and configure the multi-file desktop app
   from the installed mod folder as described below. Keep its adjacent files.
 

@@ -10,6 +10,7 @@
     <folder source="meta" destination="SlideSmith/meta" priority="0" />
     <file source="cli/SlideSmith-CLI.exe" destination="SlideSmith/SlideSmith-CLI.exe" priority="0" />
     <file source="README.txt" destination="SlideSmith/README.txt" priority="0" />
+    <file source="LICENSE.txt" destination="SlideSmith/LICENSE.txt" priority="0" />
     <file source="meta.ini" destination="SlideSmith/meta.ini" priority="0" />
   </requiredInstallFiles>
 </config>
