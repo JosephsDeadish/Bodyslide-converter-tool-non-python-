@@ -44,6 +44,9 @@ public sealed class SkyrimSseNifShapeReaderTests
         Assert.Equal("BodyPartB", result.Shapes[1].Name);
         Assert.Equal(new MeshVertex(-1f, -2f, -3f), result.Shapes[1].Vertices[0]);
         Assert.Equal(16, result.Shapes[1].VertexStride);
+        Assert.Equal(3, result.Shapes[0].ParticleVertices!.Count);
+        Assert.Equal(3, result.Shapes[0].ParticleNormals!.Count);
+        Assert.Equal(new ushort[] { 0, 1, 2 }, result.Shapes[0].ParticleTriangleIndices);
     }
 
     [Fact]
@@ -500,8 +503,7 @@ public sealed class SkyrimSseNifShapeReaderTests
                     DynamicVertices: [(0f, 0f, 0f, 0.25f), (30f, 0f, 10f, 0.5f), (0f, 20f, 20f, 0.75f)])
             ],
             blockType: "BSDynamicTriShape",
-            dynamicShapeLayout: true,
-            particleDataSizeOverride: 0);
+            dynamicShapeLayout: true);
         var result = SkyrimSseNifShapeReader.Read(nif);
 
         Assert.True(result.Supported, result.Diagnostic);
@@ -511,6 +513,8 @@ public sealed class SkyrimSseNifShapeReaderTests
         Assert.Equal("BSDynamicTriShape", shape.GeometryBlockType);
         Assert.Equal(16, shape.VertexStride);
         Assert.Equal(new MeshVertex(30f, 0f, 10f), shape.Vertices[1]);
+        Assert.Equal(3, shape.ParticleVertices!.Count);
+        Assert.Equal(new ushort[] { 0, 1, 2 }, shape.ParticleTriangleIndices);
 
         var inspectionPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".nif");
         try
@@ -559,8 +563,7 @@ public sealed class SkyrimSseNifShapeReaderTests
             ],
             blockType: "BSDynamicTriShape",
             dynamicShapeLayout: true,
-            dynamicDataSizeOverride: 47,
-            particleDataSizeOverride: 0);
+            dynamicDataSizeOverride: 47);
 
         var result = SkyrimSseNifShapeReader.Read(source);
         Assert.False(result.Supported);
@@ -581,8 +584,7 @@ public sealed class SkyrimSseNifShapeReaderTests
             ],
             blockType: "BSDynamicTriShape",
             dynamicShapeLayout: true,
-            dynamicDataSizeOverride: 48,
-            particleDataSizeOverride: 0);
+            dynamicDataSizeOverride: 48);
 
         var result = SkyrimSseNifShapeReader.Read(source);
         Assert.False(result.Supported);
@@ -590,7 +592,7 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
-    public void RejectsDynamicShapeParticlePayloadUntilItsLayoutIsSupported()
+    public void RejectsIncorrectParticleDataSizeFromSchemaDefinedLayout()
     {
         var source = CreateNif(
             [
@@ -606,7 +608,37 @@ public sealed class SkyrimSseNifShapeReaderTests
 
         var result = SkyrimSseNifShapeReader.Read(source);
         Assert.False(result.Supported);
-        Assert.Equal("unsupported-bsdynamictrishape-particle-data:DynamicBody", result.Diagnostic);
+        Assert.Equal("bstrishape-particle-data-size-mismatch:DynamicBody", result.Diagnostic);
+    }
+
+    [Fact]
+    public void RejectsOutOfRangeParticleTriangleIndexes()
+    {
+        var source = CreateNif(
+            [new TestShape(
+                "Body",
+                [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)],
+                ParticleTriangles: [(0, 1, 3)])]);
+
+        var result = SkyrimSseNifShapeReader.Read(source);
+
+        Assert.False(result.Supported);
+        Assert.Equal("bstrishape-particle-triangle-index-out-of-range:Body", result.Diagnostic);
+    }
+
+    [Fact]
+    public void RejectsNonFiniteHalfPrecisionParticleData()
+    {
+        var source = CreateNif(
+            [new TestShape(
+                "Body",
+                [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)],
+                ParticleVertexHalfBits: [(0x7e00, 0, 0), (0, 0, 0), (0, 0, 0)])]);
+
+        var result = SkyrimSseNifShapeReader.Read(source);
+
+        Assert.False(result.Supported);
+        Assert.Equal("bstrishape-nonfinite-particle-vertex:Body", result.Diagnostic);
     }
 
     [Fact]
@@ -723,8 +755,7 @@ public sealed class SkyrimSseNifShapeReaderTests
                     TrailingData: [0xA5])
             ],
             blockType: "BSDynamicTriShape",
-            dynamicShapeLayout: true,
-            particleDataSizeOverride: 0));
+            dynamicShapeLayout: true));
 
         Assert.False(result.Supported);
         Assert.Equal("bstrishape-unmodeled-trailing-data:DynamicBody", result.Diagnostic);
@@ -828,10 +859,19 @@ public sealed class SkyrimSseNifShapeReaderTests
             writer.Write((ushort)b);
             writer.Write((ushort)c);
         }
+        var expectedParticleDataSize = checked((uint)shape.Vertices.Count * 6u + (uint)triangles.Count * 3u);
+        writer.Write(particleDataSizeOverride ?? expectedParticleDataSize);
+        WriteParticleVectors(writer, shape.ParticleVertexHalfBits, shape.Vertices.Count);
+        WriteParticleVectors(writer, shape.ParticleNormalHalfBits, shape.Vertices.Count);
+        foreach (var (a, b, c) in shape.ParticleTriangles ?? triangles)
+        {
+            writer.Write((ushort)a);
+            writer.Write((ushort)b);
+            writer.Write((ushort)c);
+        }
         if (dynamicShapeLayout)
         {
             var dynamicVertices = shape.DynamicVertices ?? [];
-            writer.Write(particleDataSizeOverride ?? 0);
             writer.Write(dynamicDataSizeOverride ?? checked((uint)(dynamicVertices.Count * 4 * sizeof(float))));
             foreach (var (x, y, z, w) in dynamicVertices)
             {
@@ -843,6 +883,20 @@ public sealed class SkyrimSseNifShapeReaderTests
         }
         if (shape.TrailingData is not null) writer.Write(shape.TrailingData);
         return stream.ToArray();
+    }
+
+    private static void WriteParticleVectors(
+        BinaryWriter writer,
+        IReadOnlyList<(ushort X, ushort Y, ushort Z)>? vectors,
+        int expectedCount)
+    {
+        for (var i = 0; i < expectedCount; i++)
+        {
+            var (x, y, z) = vectors is not null && i < vectors.Count ? vectors[i] : default;
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
     }
 
     private static void AssertOnlyShapePositionsChanged(
@@ -888,7 +942,10 @@ public sealed class SkyrimSseNifShapeReaderTests
         int VertexStride = 16,
         IReadOnlyList<(int A, int B, int C)>? Triangles = null,
         byte[]? TrailingData = null,
-        IReadOnlyList<(float X, float Y, float Z, float W)>? DynamicVertices = null)
+        IReadOnlyList<(float X, float Y, float Z, float W)>? DynamicVertices = null,
+        IReadOnlyList<(int A, int B, int C)>? ParticleTriangles = null,
+        IReadOnlyList<(ushort X, ushort Y, ushort Z)>? ParticleVertexHalfBits = null,
+        IReadOnlyList<(ushort X, ushort Y, ushort Z)>? ParticleNormalHalfBits = null)
     {
         public int NameIndex { get; init; }
     }

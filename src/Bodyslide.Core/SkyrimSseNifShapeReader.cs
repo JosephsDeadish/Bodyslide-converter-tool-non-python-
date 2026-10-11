@@ -11,7 +11,10 @@ internal sealed record SkyrimSseNifShape(
     int VertexStride,
     int VertexDataOffset = -1,
     bool IsSkinned = false,
-    string GeometryBlockType = "BSTriShape");
+    string GeometryBlockType = "BSTriShape",
+    IReadOnlyList<MeshVertex>? ParticleVertices = null,
+    IReadOnlyList<MeshVertex>? ParticleNormals = null,
+    IReadOnlyList<ushort>? ParticleTriangleIndices = null);
 
 internal sealed record SkyrimSseNifShapeReadResult(
     bool Supported,
@@ -299,13 +302,6 @@ internal static class SkyrimSseNifShapeReader
         {
             throw new InvalidDataException($"bstrishape-data-size-mismatch:{strings[(int)nameIndex]}");
         }
-        if (!isDynamic &&
-            !string.Equals(geometryBlockType, "BSSubIndexTriShape", StringComparison.Ordinal) &&
-            checked(offset + expectedDataSize) != blockEnd)
-        {
-            throw new InvalidDataException($"bstrishape-unmodeled-trailing-data:{strings[(int)nameIndex]}");
-        }
-
         var vertexDataOffset = offset;
         var triangleOffset = checked(offset + vertexBytes);
         var triangleIndexes = new ushort[triangleCount * 3];
@@ -320,6 +316,35 @@ internal static class SkyrimSseNifShapeReader
             triangleIndexes[i] = index;
         }
 
+        var particleDataOffset = checked(triangleOffset + triangleBytes);
+        var particleDataSize = ReadUInt32(bytes[..blockEnd], ref particleDataOffset);
+        var expectedParticleDataSize = checked((uint)vertexCount * 6u + (uint)triangleCount * 3u);
+        if (particleDataSize != expectedParticleDataSize)
+        {
+            throw new InvalidDataException($"bstrishape-particle-data-size-mismatch:{strings[(int)nameIndex]}");
+        }
+
+        var particleVertices = ReadHalfVector3Array(bytes[..blockEnd], ref particleDataOffset, vertexCount, "particle-vertex", strings[(int)nameIndex]);
+        var particleNormals = ReadHalfVector3Array(bytes[..blockEnd], ref particleDataOffset, vertexCount, "particle-normal", strings[(int)nameIndex]);
+        var particleTriangleIndexes = new ushort[triangleCount * 3];
+        for (var i = 0; i < particleTriangleIndexes.Length; i++)
+        {
+            var index = ReadUInt16(bytes[..blockEnd], ref particleDataOffset);
+            if (index >= vertexCount)
+            {
+                throw new InvalidDataException($"bstrishape-particle-triangle-index-out-of-range:{strings[(int)nameIndex]}");
+            }
+
+            particleTriangleIndexes[i] = index;
+        }
+
+        if (!isDynamic &&
+            !string.Equals(geometryBlockType, "BSSubIndexTriShape", StringComparison.Ordinal) &&
+            particleDataOffset != blockEnd)
+        {
+            throw new InvalidDataException($"bstrishape-unmodeled-trailing-data:{strings[(int)nameIndex]}");
+        }
+
         MeshVertex[] vertices;
         if (isDynamic)
         {
@@ -328,13 +353,7 @@ internal static class SkyrimSseNifShapeReader
                 throw new InvalidDataException($"unsupported-bsdynamictrishape-static-position-stream:{strings[(int)nameIndex]}");
             }
 
-            var dynamicSizeOffset = checked(triangleOffset + triangleBytes);
-            var particleDataSize = ReadUInt32(bytes[..blockEnd], ref dynamicSizeOffset);
-            if (particleDataSize != 0)
-            {
-                throw new InvalidDataException($"unsupported-bsdynamictrishape-particle-data:{strings[(int)nameIndex]}");
-            }
-
+            var dynamicSizeOffset = particleDataOffset;
             var dynamicDataSize = ReadUInt32(bytes[..blockEnd], ref dynamicSizeOffset);
             var expectedDynamicDataSize = checked((uint)vertexCount * 4u * sizeof(float));
             if (dynamicDataSize != expectedDynamicDataSize)
@@ -393,7 +412,34 @@ internal static class SkyrimSseNifShapeReader
             vertexStride,
             vertexDataOffset,
             isSkinned,
-            geometryBlockType);
+            geometryBlockType,
+            particleVertices,
+            particleNormals,
+            particleTriangleIndexes);
+    }
+
+    private static MeshVertex[] ReadHalfVector3Array(
+        ReadOnlySpan<byte> bytes,
+        ref int offset,
+        int count,
+        string field,
+        string shapeName)
+    {
+        var vectors = new MeshVertex[count];
+        for (var i = 0; i < vectors.Length; i++)
+        {
+            var x = BitConverter.UInt16BitsToHalf(ReadUInt16(bytes, ref offset));
+            var y = BitConverter.UInt16BitsToHalf(ReadUInt16(bytes, ref offset));
+            var z = BitConverter.UInt16BitsToHalf(ReadUInt16(bytes, ref offset));
+            if (!Half.IsFinite(x) || !Half.IsFinite(y) || !Half.IsFinite(z))
+            {
+                throw new InvalidDataException($"bstrishape-nonfinite-{field}:{shapeName}");
+            }
+
+            vectors[i] = new MeshVertex((float)x, (float)y, (float)z);
+        }
+
+        return vectors;
     }
 
     private static bool IsSupportedSkinInstanceType(string typeName) =>
