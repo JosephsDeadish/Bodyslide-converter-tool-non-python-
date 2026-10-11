@@ -19,8 +19,7 @@ public sealed class SkyrimSseNifShapeReaderTests
                 DynamicVertices: [(0f, 0f, 0f, 0.25f), (1f, 0f, 0f, 0.5f), (0f, 1f, 0f, 0.75f)]))
             .ToArray(),
             blockType: "BSDynamicTriShape",
-            dynamicShapeLayout: true,
-            particleDataSizeOverride: 0);
+            dynamicShapeLayout: true);
 
     [Fact]
     public void ReadsSeparateShapeNamesVerticesAndTriangleIndexes()
@@ -178,7 +177,10 @@ public sealed class SkyrimSseNifShapeReaderTests
         Assert.NotEqual(shape.Vertices, transformedShape.Vertices);
         Assert.Equal(shape.TriangleIndices, transformedShape.TriangleIndices);
         var opaqueOffset = shape.VertexDataOffset + shape.Vertices.Count * shape.VertexStride +
-                           shape.TriangleIndices.Count * sizeof(ushort);
+                           shape.TriangleIndices.Count * sizeof(ushort) +
+                           sizeof(uint) +
+                           (shape.ParticleVertices!.Count + shape.ParticleNormals!.Count) * 3 * sizeof(ushort) +
+                           shape.ParticleTriangleIndices!.Count * sizeof(ushort);
         Assert.Equal(opaqueSegmentPayload, source.AsSpan(opaqueOffset, opaqueSegmentPayload.Length).ToArray());
         Assert.Equal(opaqueSegmentPayload, transformed.AsSpan(opaqueOffset, opaqueSegmentPayload.Length).ToArray());
         AssertOnlyShapePositionsChanged(source, transformed, [shape]);
