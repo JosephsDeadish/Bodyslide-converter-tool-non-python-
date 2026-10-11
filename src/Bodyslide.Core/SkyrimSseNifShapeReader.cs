@@ -10,7 +10,8 @@ internal sealed record SkyrimSseNifShape(
     IReadOnlyList<ushort> TriangleIndices,
     int VertexStride,
     int VertexDataOffset = -1,
-    bool IsSkinned = false);
+    bool IsSkinned = false,
+    string GeometryBlockType = "BSTriShape");
 
 internal sealed record SkyrimSseNifShapeReadResult(
     bool Supported,
@@ -94,7 +95,9 @@ internal static class SkyrimSseNifShapeReader
         try
         {
             var shapes = ReadSupportedShapes(bytes);
-            var diagnostic = shapes.Any(static shape => shape.IsSkinned)
+            var diagnostic = shapes.Any(static shape => shape.GeometryBlockType == "BSSubIndexTriShape")
+                ? "supported-bssubindextrishape-position-index-only-segments-opaque"
+                : shapes.Any(static shape => shape.IsSkinned)
                 ? "supported-skinned-bstrishape-position-index-only"
                 : "supported-unskinned-bstrishape";
             return new SkyrimSseNifShapeReadResult(true, diagnostic, shapes);
@@ -207,14 +210,16 @@ internal static class SkyrimSseNifShapeReader
             var blockSize = checked((int)blockSizes[blockIndex]);
             var blockEnd = checked(blockOffset + blockSize);
 
-            if (IsUnsupportedGeometryType(typeName))
+            var isSupportedShapeType = string.Equals(typeName, "BSTriShape", StringComparison.Ordinal) ||
+                                       string.Equals(typeName, "BSSubIndexTriShape", StringComparison.Ordinal);
+            if (!isSupportedShapeType && IsUnsupportedGeometryType(typeName))
             {
                 throw new InvalidDataException($"unsupported-geometry-block:{typeName}");
             }
 
-            if (string.Equals(typeName, "BSTriShape", StringComparison.Ordinal))
+            if (isSupportedShapeType)
             {
-                var shape = ReadBSTriShape(bytes, blockOffset, blockEnd, strings, blockTypes, blockTypeIndexes);
+                var shape = ReadBSTriShape(bytes, blockOffset, blockEnd, strings, blockTypes, blockTypeIndexes, typeName);
                 if (!shapeNames.Add(shape.Name))
                 {
                     throw new InvalidDataException($"duplicate-shape-name:{shape.Name}");
@@ -240,7 +245,8 @@ internal static class SkyrimSseNifShapeReader
         int blockEnd,
         IReadOnlyList<string> strings,
         IReadOnlyList<string> blockTypes,
-        IReadOnlyList<ushort> blockTypeIndexes)
+        IReadOnlyList<ushort> blockTypeIndexes,
+        string geometryBlockType)
     {
         var offset = blockStart;
         var nameIndex = ReadUInt32(bytes[..blockEnd], ref offset);
@@ -322,7 +328,8 @@ internal static class SkyrimSseNifShapeReader
             triangleIndexes,
             vertexStride,
             vertexDataOffset,
-            isSkinned);
+            isSkinned,
+            geometryBlockType);
     }
 
     private static bool IsSupportedSkinInstanceType(string typeName) =>
@@ -452,7 +459,8 @@ internal static class SkyrimSseNifShapeCorrespondence
             return false;
         }
 
-        if (source.Vertices.Count == 0 ||
+        if (!string.Equals(source.GeometryBlockType, target.GeometryBlockType, StringComparison.Ordinal) ||
+            source.Vertices.Count == 0 ||
             source.Vertices.Count != target.Vertices.Count ||
             !HasExactVertexOrder(source.Vertices, target.Vertices) ||
             source.TriangleIndices.Count != target.TriangleIndices.Count ||
@@ -490,11 +498,15 @@ internal static class SkyrimSseNifShapeCorrespondence
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         Span<byte> value = stackalloc byte[sizeof(uint)];
-        hash.AppendData("SlideSmith.ExactShapeCorrespondence.v1\0"u8);
+        hash.AppendData("SlideSmith.ExactShapeCorrespondence.v2\0"u8);
         var shapeName = Encoding.UTF8.GetBytes(shape.Name);
         BinaryPrimitives.WriteInt32LittleEndian(value, shapeName.Length);
         hash.AppendData(value);
         hash.AppendData(shapeName);
+        var geometryBlockType = Encoding.UTF8.GetBytes(shape.GeometryBlockType);
+        BinaryPrimitives.WriteInt32LittleEndian(value, geometryBlockType.Length);
+        hash.AppendData(value);
+        hash.AppendData(geometryBlockType);
         BinaryPrimitives.WriteInt32LittleEndian(value, shape.Vertices.Count);
         hash.AppendData(value);
         foreach (var vertex in shape.Vertices)

@@ -6220,7 +6220,9 @@ internal static class NifGeometrySignatureReader
         if (parsedShapes.Supported)
         {
             var parsedShapeSignature = BuildSignature(parsedShapes.Shapes);
-            var mode = parsedShapes.Shapes.Any(static shape => shape.IsSkinned)
+            var mode = parsedShapes.Shapes.Any(static shape => shape.GeometryBlockType == "BSSubIndexTriShape")
+                ? "parsed-sse-bssubindextrishape-position-index-only-segments-opaque"
+                : parsedShapes.Shapes.Any(static shape => shape.IsSkinned)
                 ? "parsed-sse-bstrishape-skinned-position-index-only"
                 : "parsed-sse-bstrishape";
             return parsedShapeSignature is null
@@ -26253,6 +26255,7 @@ internal sealed class LocalExportService(
             var sourceShape = sourceShapes[shapeIndex];
             var transformedShape = transformedGeometry.Shapes[shapeIndex];
             if (!string.Equals(sourceShape.Name, transformedShape.Name, StringComparison.Ordinal) ||
+                !string.Equals(sourceShape.GeometryBlockType, transformedShape.GeometryBlockType, StringComparison.Ordinal) ||
                 sourceShape.IsSkinned != transformedShape.IsSkinned ||
                 sourceShape.VertexStride != transformedShape.VertexStride ||
                 sourceShape.VertexDataOffset != transformedShape.VertexDataOffset ||

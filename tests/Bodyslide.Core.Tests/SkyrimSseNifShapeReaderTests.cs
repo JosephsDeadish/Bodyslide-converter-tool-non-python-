@@ -114,6 +114,53 @@ public sealed class SkyrimSseNifShapeReaderTests
     }
 
     [Fact]
+    public void ReadsAndTransformsSubIndexTriShapeWhilePreservingOpaqueExtensionBytes()
+    {
+        var opaqueSegmentPayload = new byte[] { 0x5A, 0x19, 0xA3, 0x7C, 0x42, 0xD1 };
+        var source = CreateNif(
+        [
+            new TestShape(
+                "SegmentedBody",
+                [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)],
+                TrailingData: opaqueSegmentPayload)
+        ],
+        blockType: "BSSubIndexTriShape");
+        var readResult = SkyrimSseNifShapeReader.Read(source);
+
+        Assert.True(readResult.Supported, readResult.Diagnostic);
+        Assert.Equal("supported-bssubindextrishape-position-index-only-segments-opaque", readResult.Diagnostic);
+        var shape = Assert.Single(readResult.Shapes);
+        Assert.Equal("BSSubIndexTriShape", shape.GeometryBlockType);
+
+        var transformed = LocalExportService.TryApplyNifVertexTransform(
+            source,
+            null,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.32d,
+                ["breasts"] = 1.28d,
+                ["waist"] = 0.84d,
+                ["belly"] = 1.18d,
+                ["thighs"] = 1.22d
+            },
+            BasicCageGenerationService.CreatePresetCage("mixed"));
+
+        var transformedShape = Assert.Single(SkyrimSseNifShapeReader.Read(transformed).Shapes);
+        Assert.NotEqual(shape.Vertices, transformedShape.Vertices);
+        Assert.Equal(shape.TriangleIndices, transformedShape.TriangleIndices);
+        var opaqueOffset = shape.VertexDataOffset + shape.Vertices.Count * shape.VertexStride +
+                           shape.TriangleIndices.Count * sizeof(ushort);
+        Assert.Equal(opaqueSegmentPayload, source.AsSpan(opaqueOffset, opaqueSegmentPayload.Length).ToArray());
+        Assert.Equal(opaqueSegmentPayload, transformed.AsSpan(opaqueOffset, opaqueSegmentPayload.Length).ToArray());
+        AssertOnlyShapePositionsChanged(source, transformed, [shape]);
+        Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(
+            shape,
+            SkyrimSseNifShapeReader.Read(CreateNif(
+                [new TestShape("SegmentedBody", [(0f, 0f, 0f), (30f, 0f, 10f), (0f, 20f, 20f)])])).Shapes[0],
+            out _));
+    }
+
+    [Fact]
     public void WriterUsesParsedVertexStreamForSupportedSingleShapeNif()
     {
         var source = CreateNif(
@@ -590,6 +637,7 @@ public sealed class SkyrimSseNifShapeReaderTests
             writer.Write((ushort)b);
             writer.Write((ushort)c);
         }
+        if (shape.TrailingData is not null) writer.Write(shape.TrailingData);
         return stream.ToArray();
     }
 
@@ -634,7 +682,8 @@ public sealed class SkyrimSseNifShapeReaderTests
         int SkinInstance = -1,
         (int, int, int)? Triangle = null,
         int VertexStride = 16,
-        IReadOnlyList<(int A, int B, int C)>? Triangles = null)
+        IReadOnlyList<(int A, int B, int C)>? Triangles = null,
+        byte[]? TrailingData = null)
     {
         public int NameIndex { get; init; }
     }
