@@ -159,6 +159,31 @@ public sealed class MorphPayloadSafetyTests
     }
 
     [Fact]
+    public void BodyTriRejectsDuplicateVertexIndexesWithinOneMorph()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8);
+        writer.Write("PIRT"u8);
+        writer.Write((ushort)1);
+        writer.Write((byte)5);
+        writer.Write("Shape"u8);
+        writer.Write((ushort)1);
+        writer.Write((byte)5);
+        writer.Write("Waist"u8);
+        writer.Write(1f);
+        writer.Write((ushort)2);
+        foreach (var index in new ushort[] { 3, 3 })
+        {
+            writer.Write(index);
+            writer.Write((short)1);
+            writer.Write((short)0);
+            writer.Write((short)0);
+        }
+
+        Assert.False(TriMorphReader.TryRead(stream.ToArray(), out _));
+    }
+
+    [Fact]
     public void BodyTriRejectsMalformedUtf8NamesInOptionalUvSection()
     {
         var malformedShapeName = BodyTriWithUv(false, true);
