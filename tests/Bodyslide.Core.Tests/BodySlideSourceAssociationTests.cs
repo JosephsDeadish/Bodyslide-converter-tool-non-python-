@@ -141,6 +141,53 @@ public sealed class BodySlideSourceAssociationTests
         finally { Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task OsdRecordNameMustMatchItsDeclaredOspSliderBeforeReuse()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(root, "meshes", "armor", "traveler");
+        var projectDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(root, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+        try
+        {
+            var mesh = Path.Combine(meshDirectory, "traveler_0.nif");
+            var project = Path.Combine(projectDirectory, "traveler.osp");
+            var nif = SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Torso");
+            await File.WriteAllBytesAsync(mesh, nif);
+            await File.WriteAllBytesAsync(Path.Combine(shapeDataDirectory, "base.nif"), nif);
+            await File.WriteAllBytesAsync(
+                Path.Combine(shapeDataDirectory, "shared.osd"),
+                OsdMorph("PayloadMorph"));
+            await File.WriteAllTextAsync(project, """
+                <SliderSetInfo>
+                  <SliderSet name="TravelerProject">
+                    <DataFolder>TravelerProject</DataFolder>
+                    <SourceFile>base.nif</SourceFile>
+                    <OutputPath>meshes\armor\traveler\</OutputPath>
+                    <OutputFile>traveler_0.nif</OutputFile>
+                    <Slider name="Waist"><Data target="Torso">shared.osd#PayloadMorph</Data></Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var result = await BodySlideSourceProjectSupport.ResolveAsync(
+                new ImportedArmor(mesh, [mesh], [], [], [project]), "CBBE", CancellationToken.None);
+
+            var candidate = Assert.Single(result.ReusableMorphPayloads!["PayloadMorph"].Payloads!);
+            Assert.Equal("PayloadMorph", candidate.SourceMorphRecordName);
+            Assert.Equal("unresolved", candidate.ShapeIdentityStatus);
+            Assert.Equal("unverified", candidate.VertexOrderStatus);
+            Assert.Null(candidate.TargetShapeName);
+            Assert.Contains(
+                "source-morph-record-slider-name-mismatch",
+                result.SourceAssetSupport!.UnsupportedOspSemantics);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Theory]
     [InlineData("Torso", true)]
     [InlineData("OtherShape", false)]

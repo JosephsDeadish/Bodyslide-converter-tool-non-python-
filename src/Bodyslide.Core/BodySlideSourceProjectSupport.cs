@@ -82,6 +82,7 @@ internal static class BodySlideSourceProjectSupport
 
     private sealed record OspOsdShapeTarget(
         string Name,
+        string SliderName,
         int VertexCount,
         string SourceNifPath,
         string VertexOrderFingerprint,
@@ -357,6 +358,14 @@ internal static class BodySlideSourceProjectSupport
                                 }
 
                                 var shapeTarget = shapeTargets.Single();
+                                if (!string.Equals(
+                                        NormalizeSliderFileName(candidate.ReusablePayload.SourceMorphRecordName),
+                                        NormalizeSliderFileName(shapeTarget.SliderName),
+                                        StringComparison.OrdinalIgnoreCase))
+                                {
+                                    return candidate;
+                                }
+
                                 if (string.IsNullOrWhiteSpace(shapeTarget.MatchedMeshShapeName) ||
                                     string.IsNullOrWhiteSpace(shapeTarget.MatchedMeshVertexOrderFingerprint) ||
                                     string.IsNullOrWhiteSpace(shapeTarget.CorrespondenceEvidence))
@@ -671,6 +680,7 @@ internal static class BodySlideSourceProjectSupport
                             var exactMatch = exactMatches.Count == 1 ? exactMatches[0] : default;
                             shapeTargets.Add(new OspOsdShapeTarget(
                                 sourceShape.Name,
+                                ((string?)slider.Attribute("name"))?.Trim() ?? string.Empty,
                                 sourceShape.Vertices.Count,
                                 Path.GetFullPath(sourcePath),
                                 SkyrimSseNifShapeCorrespondence.ComputeVertexOrderFingerprint(sourceShape),
@@ -1620,6 +1630,24 @@ internal static class BodySlideSourceProjectSupport
                     element.Name.LocalName.Equals("Data", StringComparison.OrdinalIgnoreCase)))
             {
                 semantics.Add("source-slider-data-links");
+                var sliderName = NormalizeSliderFileName((string?)slider.Attribute("name"));
+                if (slider.Elements().Where(static element =>
+                            element.Name.LocalName.Equals("Data", StringComparison.OrdinalIgnoreCase))
+                        .Any(data =>
+                        {
+                            var reference = data.Value.Trim().Replace('\\', '/');
+                            var separator = reference.LastIndexOf('#');
+                            return separator <= 0 ||
+                                   separator == reference.Length - 1 ||
+                                   string.IsNullOrWhiteSpace(sliderName) ||
+                                   !string.Equals(
+                                       NormalizeSliderFileName(reference[(separator + 1)..]),
+                                       sliderName,
+                                       StringComparison.OrdinalIgnoreCase);
+                        }))
+                {
+                    semantics.Add("source-morph-record-slider-name-mismatch");
+                }
             }
 
             var sliderRangeElements = slider.Elements().Where(static element =>
