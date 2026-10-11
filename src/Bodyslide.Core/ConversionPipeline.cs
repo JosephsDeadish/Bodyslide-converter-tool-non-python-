@@ -25799,14 +25799,14 @@ internal sealed class LocalExportService(
             var parsedTopology = BuildParsedShapeTopologySummary(parsedGeometry.Shapes);
             if (parsedVertexStreams.All(static stream => stream.Offset >= 0 && stream.Count > 0 && stream.Stride >= 3 * sizeof(float)))
             {
-                var transformed = TryApplyNifInterleavedFloatVertexTransform(
+                var parsedTransformedBytes = TryApplyNifInterleavedFloatVertexTransform(
                     sourceBytes,
                     sourcePath,
                     regionalMorphing,
                     deformationCage,
                     parsedVertexStreams,
                     parsedTopology);
-                return ValidateParsedShapeTransform(sourceBytes, transformed, parsedGeometry.Shapes);
+                return ValidateParsedShapeTransform(sourceBytes, parsedTransformedBytes, parsedGeometry.Shapes);
             }
         }
 
