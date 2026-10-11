@@ -323,12 +323,21 @@ internal static class SkyrimSseNifShapeReader
             }
 
             var dynamicSizeOffset = checked(triangleOffset + triangleBytes);
+            var particleDataSize = ReadUInt32(bytes[..blockEnd], ref dynamicSizeOffset);
+            if (particleDataSize != 0)
+            {
+                throw new InvalidDataException($"unsupported-bsdynamictrishape-particle-data:{strings[(int)nameIndex]}");
+            }
+
             var dynamicDataSize = ReadUInt32(bytes[..blockEnd], ref dynamicSizeOffset);
             var expectedDynamicDataSize = checked((uint)vertexCount * 4u * sizeof(float));
-            if (dynamicDataSize != expectedDynamicDataSize ||
-                dynamicDataSize > blockEnd - dynamicSizeOffset)
+            if (dynamicDataSize != expectedDynamicDataSize)
             {
                 throw new InvalidDataException($"bstrishape-dynamic-data-size-mismatch:{strings[(int)nameIndex]}");
+            }
+            if (dynamicDataSize > blockEnd - dynamicSizeOffset)
+            {
+                throw new InvalidDataException($"bstrishape-dynamic-data-truncated:{strings[(int)nameIndex]}");
             }
 
             vertexDataOffset = dynamicSizeOffset;

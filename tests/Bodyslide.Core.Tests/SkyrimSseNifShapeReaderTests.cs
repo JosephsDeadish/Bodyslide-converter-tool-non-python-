@@ -488,7 +488,8 @@ public sealed class SkyrimSseNifShapeReaderTests
                     DynamicVertices: [(0f, 0f, 0f, 0.25f), (30f, 0f, 10f, 0.5f), (0f, 20f, 20f, 0.75f)])
             ],
             blockType: "BSDynamicTriShape",
-            dynamicShapeLayout: true);
+            dynamicShapeLayout: true,
+            particleDataSizeOverride: 0);
         var result = SkyrimSseNifShapeReader.Read(nif);
 
         Assert.True(result.Supported, result.Diagnostic);
@@ -546,7 +547,8 @@ public sealed class SkyrimSseNifShapeReaderTests
             ],
             blockType: "BSDynamicTriShape",
             dynamicShapeLayout: true,
-            dynamicDataSizeOverride: 47);
+            dynamicDataSizeOverride: 47,
+            particleDataSizeOverride: 0);
 
         var result = SkyrimSseNifShapeReader.Read(source);
         Assert.False(result.Supported);
@@ -566,11 +568,33 @@ public sealed class SkyrimSseNifShapeReaderTests
                     DynamicVertices: [(0f, 0f, 0f, 0f), (1f, 0f, 0f, 0f)])
             ],
             blockType: "BSDynamicTriShape",
-            dynamicShapeLayout: true);
+            dynamicShapeLayout: true,
+            dynamicDataSizeOverride: 48,
+            particleDataSizeOverride: 0);
 
         var result = SkyrimSseNifShapeReader.Read(source);
         Assert.False(result.Supported);
-        Assert.Equal("bstrishape-dynamic-data-size-mismatch:DynamicBody", result.Diagnostic);
+        Assert.Equal("bstrishape-dynamic-data-truncated:DynamicBody", result.Diagnostic);
+    }
+
+    [Fact]
+    public void RejectsDynamicShapeParticlePayloadUntilItsLayoutIsSupported()
+    {
+        var source = CreateNif(
+            [
+                new TestShape(
+                    "DynamicBody",
+                    [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)],
+                    VertexStride: 0,
+                    DynamicVertices: [(0f, 0f, 0f, 0f), (1f, 0f, 0f, 0f), (0f, 1f, 0f, 0f)])
+            ],
+            blockType: "BSDynamicTriShape",
+            dynamicShapeLayout: true,
+            particleDataSizeOverride: 1);
+
+        var result = SkyrimSseNifShapeReader.Read(source);
+        Assert.False(result.Supported);
+        Assert.Equal("unsupported-bsdynamictrishape-particle-data:DynamicBody", result.Diagnostic);
     }
 
     [Fact]
@@ -586,7 +610,8 @@ public sealed class SkyrimSseNifShapeReaderTests
                     DynamicVertices: [(0f, 0f, 0f, 0.25f), (30f, 0f, 10f, 0.5f), (0f, 20f, 20f, 0.75f)])
             ],
             blockType: "BSDynamicTriShape",
-            dynamicShapeLayout: true);
+            dynamicShapeLayout: true,
+            particleDataSizeOverride: 0);
 
         var transformed = LocalExportService.TryApplyNifVertexTransform(
             source,
@@ -669,13 +694,15 @@ public sealed class SkyrimSseNifShapeReaderTests
         string blockType = "BSTriShape",
         string skinBlockType = "NiSkinInstance",
         bool dynamicShapeLayout = false,
-        uint? dynamicDataSizeOverride = null)
+        uint? dynamicDataSizeOverride = null,
+        uint? particleDataSizeOverride = null)
     {
         var shapeBlockBytes = shapes
             .Select((shape, index) => CreateShapeBlock(
                 shape with { NameIndex = index },
                 dynamicShapeLayout,
-                dynamicDataSizeOverride))
+                dynamicDataSizeOverride,
+                particleDataSizeOverride))
             .ToArray();
         var hasSkinInstance = shapes.Any(static shape => shape.SkinInstance >= 0);
         var blockBytes = hasSkinInstance
@@ -707,7 +734,11 @@ public sealed class SkyrimSseNifShapeReaderTests
         return stream.ToArray();
     }
 
-    private static byte[] CreateShapeBlock(TestShape shape, bool dynamicShapeLayout, uint? dynamicDataSizeOverride)
+    private static byte[] CreateShapeBlock(
+        TestShape shape,
+        bool dynamicShapeLayout,
+        uint? dynamicDataSizeOverride,
+        uint? particleDataSizeOverride)
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
@@ -730,13 +761,23 @@ public sealed class SkyrimSseNifShapeReaderTests
         writer.Write((uint)(shape.Vertices.Count * shape.VertexStride + triangles.Count * 3 * sizeof(ushort)));
         for (var vertexIndex = 0; vertexIndex < shape.Vertices.Count; vertexIndex++)
         {
-            var (x, y, z) = shape.Vertices[vertexIndex];
-            writer.Write(x);
-            writer.Write(y);
-            writer.Write(z);
-            for (var attributeByte = 12; attributeByte < shape.VertexStride; attributeByte++)
+            if (dynamicShapeLayout)
             {
-                writer.Write((byte)(0xA0 + vertexIndex + attributeByte));
+                for (var attributeByte = 0; attributeByte < shape.VertexStride; attributeByte++)
+                {
+                    writer.Write((byte)(0xA0 + vertexIndex + attributeByte));
+                }
+            }
+            else
+            {
+                var (x, y, z) = shape.Vertices[vertexIndex];
+                writer.Write(x);
+                writer.Write(y);
+                writer.Write(z);
+                for (var attributeByte = 12; attributeByte < shape.VertexStride; attributeByte++)
+                {
+                    writer.Write((byte)(0xA0 + vertexIndex + attributeByte));
+                }
             }
         }
         foreach (var (a, b, c) in triangles)
@@ -748,6 +789,7 @@ public sealed class SkyrimSseNifShapeReaderTests
         if (dynamicShapeLayout)
         {
             var dynamicVertices = shape.DynamicVertices ?? [];
+            writer.Write(particleDataSizeOverride ?? 0);
             writer.Write(dynamicDataSizeOverride ?? checked((uint)(dynamicVertices.Count * 4 * sizeof(float))));
             foreach (var (x, y, z, w) in dynamicVertices)
             {
