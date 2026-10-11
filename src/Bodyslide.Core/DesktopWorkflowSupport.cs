@@ -13,6 +13,7 @@ internal static class ModManagerLaunchArgumentCatalog
         "USVFS_PARAMETERS",
         "USVFS_PROCESS",
         "USVFS_PROXY",
+        "SLIDESMITH_MOD_MANAGER_LAUNCH",
         "MODORGANIZER_INSTANCE",
         "MODORGANIZER_PATH",
         "MODORGANIZER_ROOT",

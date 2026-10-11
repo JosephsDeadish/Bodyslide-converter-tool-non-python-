@@ -74,6 +74,12 @@ validation rollup. `Fixtures/RealUserFailingPackIntake` contains only intake
 instructions, not an actual real-user reproduction. This coverage is not an
 “any armor” guarantee; real load orders and in-game deformation still need proof.
 
+When MO2/USVFS or Vortex launch context is detected, default conversion output is
+placed under `%LOCALAPPDATA%\SlideSmith\output` instead of beside a virtualized
+source. This avoids modifying the source mod; select a separate enabled output mod
+or folder explicitly when generated files should appear in the manager's virtual
+Data tree. Launching with a manager flag alone does not verify VFS visibility.
+
 `advanced-review-required` and `experimental-manual-cleanup` remain intentional
 safety gates. Unverified custom rigs, topology changes and external game/UI
 checks must not be relabeled automatic merely to improve readiness counts.

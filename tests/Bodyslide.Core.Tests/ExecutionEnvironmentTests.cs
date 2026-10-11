@@ -63,10 +63,22 @@ public sealed class ExecutionEnvironmentTests
     {
         var processPath = Path.Combine(Path.GetTempPath(), "slidesmith-process", "SlideSmith.exe");
 
-        var outputRoot = ExecutionEnvironment.GetDefaultOutputRoot(processPath, appContextBaseDirectory: null, currentDirectory: null);
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRoot(
+            processPath, appContextBaseDirectory: null, currentDirectory: null, modManagerContextDetected: false);
 
         Assert.Equal(
             Path.Combine(Path.GetDirectoryName(Path.GetFullPath(processPath))!, "output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRoot_UsesUserDataWhenLaunchedByModManager()
+    {
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRoot(
+            modManagerContextDetected: true);
+
+        Assert.Equal(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SlideSmith", "output"),
             outputRoot);
     }
 
@@ -80,6 +92,20 @@ public sealed class ExecutionEnvironmentTests
         Assert.Equal(
             Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputPath))!, "SlideSmith-output"),
             outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_DoesNotWriteBesideModManagerSource()
+    {
+        var inputPath = Path.Combine(Path.GetTempPath(), "MO2", "mods", "Armor", "meshes", "armor.nif");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(
+            inputPath, modManagerContextDetected: true);
+
+        Assert.Equal(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SlideSmith", "output"),
+            outputRoot);
+        Assert.DoesNotContain(Path.GetDirectoryName(Path.GetFullPath(inputPath))!, outputRoot, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

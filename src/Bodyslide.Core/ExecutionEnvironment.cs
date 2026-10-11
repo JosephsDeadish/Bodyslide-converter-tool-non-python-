@@ -39,8 +39,18 @@ public static class ExecutionEnvironment
     public static string GetDefaultOutputRoot(
         string? processPath = null,
         string? appContextBaseDirectory = null,
-        string? currentDirectory = null)
+        string? currentDirectory = null,
+        bool? modManagerContextDetected = null)
     {
+        if (modManagerContextDetected ?? StandaloneStartupRouting.IsModManagerEnvironmentDetected())
+        {
+            var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrWhiteSpace(localApplicationData))
+            {
+                return Path.Combine(localApplicationData, "SlideSmith", "output");
+            }
+        }
+
         return Path.Combine(
             GetExecutionRoot(processPath, appContextBaseDirectory, currentDirectory),
             "output");
@@ -50,8 +60,18 @@ public static class ExecutionEnvironment
         string? inputPath,
         string? processPath = null,
         string? appContextBaseDirectory = null,
-        string? currentDirectory = null)
+        string? currentDirectory = null,
+        bool? modManagerContextDetected = null)
     {
+        if (modManagerContextDetected ?? StandaloneStartupRouting.IsModManagerEnvironmentDetected())
+        {
+            return GetDefaultOutputRoot(
+                processPath,
+                appContextBaseDirectory,
+                currentDirectory,
+                modManagerContextDetected: true);
+        }
+
         var inputRoot = TryGetInputAdjacentOutputRoot(inputPath);
         return !string.IsNullOrWhiteSpace(inputRoot)
             ? inputRoot

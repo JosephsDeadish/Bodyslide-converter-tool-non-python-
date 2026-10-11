@@ -30,6 +30,10 @@ internal static class Program
             WriteStartupDiagnostics(
                 _startupDiagnosticsPath,
                 $"desktop-startup: launcher={launchOptions.FromModOrganizerLauncher}, startup-output={launchOptions.StartupOutputDirectory ?? "(none)"}, startup-input={launchOptions.StartupInputPath ?? "(none)"}");
+            if (launchOptions.FromModOrganizerLauncher)
+            {
+                Environment.SetEnvironmentVariable("SLIDESMITH_MOD_MANAGER_LAUNCH", "1");
+            }
             ApplicationConfiguration.Initialize();
             using var form = new MainForm(launchOptions);
             WriteStartupDiagnostics(_startupDiagnosticsPath, "desktop-startup: window constructed");

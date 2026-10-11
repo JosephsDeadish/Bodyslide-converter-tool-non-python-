@@ -10,6 +10,10 @@ Environment.CurrentDirectory = ExecutionEnvironment.GetStartupWorkingDirectory(
 
 var shouldPauseOnExit = ShouldPauseOnExit(args);
 var strictLauncherMode = IsStrictLauncherModeEnabled(args);
+if (args.Any(StandaloneStartupRouting.IsModManagerLauncherArgument))
+{
+    Environment.SetEnvironmentVariable("SLIDESMITH_MOD_MANAGER_LAUNCH", "1");
+}
 var startupDiagnosticsPath = ResolveStartupDiagnosticsPath(args);
 WriteStartupDiagnostics(
     startupDiagnosticsPath,

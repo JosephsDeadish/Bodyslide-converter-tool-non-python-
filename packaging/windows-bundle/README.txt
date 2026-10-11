@@ -41,6 +41,10 @@ MO2/USVFS environment variables, including profile, game, and mods paths. This
 only identifies launch context; it does not prove that USVFS injected correctly
 or that virtual files are visible. Launch the installed desktop executable from
 MO2's executable list and verify the active profile's Data view.
+When MO2/USVFS or Vortex context is detected, default output is kept outside the
+virtualized source mod at %LOCALAPPDATA%\SlideSmith\output. Choose a separate
+enabled MO2 output mod or folder explicitly if generated files should appear in
+the virtual Data tree; do not use the source mod as the output destination.
 
 Startup diagnostics are recorded automatically in
 %LOCALAPPDATA%\SlideSmith\startup-launch-diagnostics.log. The log distinguishes
