@@ -521,8 +521,11 @@ Linked OSP discovery now selects matching output projects before resolving their
 DataFolders and morph payloads, with project-scoped cache keys. OSD association
 requires the exact OSP-linked record name and target shape in a uniquely resolved
 supported source NIF; duplicate sparse indexes and conflicting OSP settings fail
-closed. This establishes only source-side ownership and does not prove source to
-target vertex correspondence. Original multi-project support assets remain preserved.
+closed. That establishes source-side ownership only. For Body TRI, reuse is marked
+verified only when the exact OSP-linked record and shape name match and the supported
+source shape has one exact ordered-geometry-and-topology match in the input meshes.
+Unmatched or ambiguous cases remain unverified. Original multi-project support
+assets remain preserved.
 Matched source OSPs preserve finite slider `default`/`small`/`big` values, the
 `invert` flag, and slider-level zap classification when each matched slider has
 unambiguous control settings. Remaining audited settings include UV flags, source
@@ -541,12 +544,14 @@ UV morph flags are explicitly not carried into generated OSPs because the curren
 writer does not emit UV morph deltas; affected source settings remain flagged for review.
 
 Remaining issue #8 acceptance work: structural NIF support does not prove all UV/skin/partition/material
-relationships, runtime physics linkage/conflicts, or shape-specific source morph
-association. Empty texture lists do not prove textures are unnecessary. A permitted
-sample is also needed to verify shape-specific OSP slider data links and exported
-morph formats against an actual BodySlide build; the input/output path corrections
-alone do not establish usable sliders or correct mesh deformation. Original
-BHUNP/CBBE project input errors may instead reflect missing or disabled providers.
+relationships or runtime physics linkage/conflicts. The exact Body TRI association
+gate covers only supported layouts with a unique exact geometry/topology match; it
+does not establish broad source-morph compatibility. Empty texture lists do not prove
+textures are unnecessary. A permitted sample is still needed to verify linked OSP
+slider data and exported morph formats against an actual BodySlide build; the
+input/output path corrections alone do not establish usable sliders or correct mesh
+deformation. Original BHUNP/CBBE project input errors may instead reflect missing or
+disabled providers.
 Provide the affected source OSP and complete linked ShapeData, generated OSP/NIF/
 OSD/TRI files, BodySlide version/build log, MO2 provider/overwrite information,
 source/output byte inventories and current batch timings. A permitted
