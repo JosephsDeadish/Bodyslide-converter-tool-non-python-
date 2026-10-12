@@ -1785,6 +1785,7 @@ public sealed class MainForm : Form
         ApplyTheme(_currentTheme);
         UpdateResponsiveLayout();
         UpdateMainSplitLayout();
+        Shown += (_, _) => UpdateSetupWidth();
         AppendLog("Ready. Choose armor/clothing input, confirm the source and destination bodies, then click Start conversion.");
         SizeChanged += (_, _) =>
         {
@@ -2219,6 +2220,63 @@ public sealed class MainForm : Form
         var width = Math.Max(1, _mainSplitContainer.Panel1.ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
         _topLayoutPanel.MaximumSize = new Size(width, 0);
         _topLayoutPanel.Width = width;
+        FitWrappedLabels(_topLayoutPanel);
+    }
+
+    // Wraps descriptive labels to the width of their table cell so long text is never clipped
+    // by a fixed maximum width or a narrow label column.
+    private void FitWrappedLabels(Control root)
+    {
+        if (root.IsDisposed)
+        {
+            return;
+        }
+
+        foreach (Control child in root.Controls)
+        {
+            if (child is Label { AutoSize: true, AutoEllipsis: false } label && label.Parent is not null)
+            {
+                var available = GetAvailableCellWidth(label);
+                if (available > 0)
+                {
+                    var target = new Size(Math.Max(ScaleLayoutValue(120), available), 0);
+                    if (label.MaximumSize != target)
+                    {
+                        label.MaximumSize = target;
+                    }
+                }
+            }
+
+            if (child.HasChildren)
+            {
+                FitWrappedLabels(child);
+            }
+        }
+    }
+
+    private static int GetAvailableCellWidth(Label label)
+    {
+        var margin = label.Margin.Horizontal;
+        if (label.Parent is TableLayoutPanel table)
+        {
+            var position = table.GetPositionFromControl(label);
+            var widths = table.GetColumnWidths();
+            if (position.Column < 0 || position.Column >= widths.Length)
+            {
+                return 0;
+            }
+
+            var span = Math.Max(1, table.GetColumnSpan(label));
+            var total = 0;
+            for (var column = position.Column; column < Math.Min(widths.Length, position.Column + span); column++)
+            {
+                total += widths[column];
+            }
+
+            return total - margin;
+        }
+
+        return label.Parent!.ClientSize.Width - label.Parent.Padding.Horizontal - margin;
     }
 
     private int ScaleLayoutValue(int value) => (int)Math.Round(value * DeviceDpi / 96f);
