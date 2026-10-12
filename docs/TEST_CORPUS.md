@@ -34,3 +34,7 @@ Each case should record expected outcome (converted / fail-closed with diagnosti
 - Armor meshes derived from vanilla Skyrim or from body mods (CBBE, 3BA, HIMBO) generally cannot be relicensed or redistributed in a public repo, even if the armor author grants reuse. Bethesda's assets remain Bethesda's, and body-mod permissions are separate. This likely affects all four candidates above, so `Cleared` needs written confirmation that covers the base-body and vanilla-derived content.
 - No known open-licensed (CC0 / CC BY-SA) Skyrim SE armor NIFs built on original, non-derived geometry were found.
 - Practical route: (1) keep `Local-only` real mods out of the repo, driven by a configurable path with tests that skip when absent; (2) author original, non-derived NIFs (own geometry, own skeleton data) as redistributable fixtures; (3) ask authors in writing for permission covering exact files.
+
+## Local-only runner
+
+`LocalCorpusNifTests` scans `*.nif` under the folder in `SLIDESMITH_LOCAL_CORPUS` (no-op when unset). Each file must be read or rejected with a diagnostic; unexpected exceptions fail the test. Summary counts print as `[local-corpus] ...`. Nothing from that folder is committed.
