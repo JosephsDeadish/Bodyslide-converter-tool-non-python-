@@ -28,3 +28,9 @@ Permission to download or use a mod is not permission to redistribute its meshes
 - Failure cases: corrupt, truncated, unsupported-layout files (can be authored by us as synthetic fixtures).
 
 Each case should record expected outcome (converted / fail-closed with diagnostic) and the evidence level from `docs/COMPATIBILITY.md`.
+
+## Research note (unverified web summary; confirm with authors)
+
+- Armor meshes derived from vanilla Skyrim or from body mods (CBBE, 3BA, HIMBO) generally cannot be relicensed or redistributed in a public repo, even if the armor author grants reuse. Bethesda's assets remain Bethesda's, and body-mod permissions are separate. This likely affects all four candidates above, so `Cleared` needs written confirmation that covers the base-body and vanilla-derived content.
+- No known open-licensed (CC0 / CC BY-SA) Skyrim SE armor NIFs built on original, non-derived geometry were found.
+- Practical route: (1) keep `Local-only` real mods out of the repo, driven by a configurable path with tests that skip when absent; (2) author original, non-derived NIFs (own geometry, own skeleton data) as redistributable fixtures; (3) ask authors in writing for permission covering exact files.
