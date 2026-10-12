@@ -2402,7 +2402,8 @@ public sealed record PartialLinkedArmorFamilyFailure(
 internal sealed record ConvertedNifWriteResult(
     IReadOnlyList<string> WrittenPaths,
     IReadOnlyDictionary<string, string> WrittenPathBySourceMesh,
-    int SynthesizedCount);
+    int SynthesizedCount,
+    IReadOnlyList<string>? StretchWarnings = null);
 
 /// <summary>
 /// Outcome of generating a minimal Bethesda override patch ESP that lists the original
@@ -22810,7 +22811,7 @@ internal sealed class LocalExportService(
                 clipping.HasClipping,
                 voxelResult.HasPenetrations,
                 poseSimulation.TotalPosesAtRisk);
-        qualityWarnings = [.. qualityWarnings, .. BuildNifSupportWarnings(sourceNifSupport, "source"), .. BuildNifSupportWarnings(convertedNifSupport, "converted")];
+        qualityWarnings = [.. qualityWarnings, .. BuildNifSupportWarnings(sourceNifSupport, "source"), .. BuildNifSupportWarnings(convertedNifSupport, "converted"), .. (nifWriteResult.StretchWarnings ?? [])];
         var pluginPatchWarnings = sourcePluginIdentities.Warnings.ToList();
         var patchVerificationPaths = new List<string>();
         var patchMasterValidationExpectations = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
@@ -23819,6 +23820,7 @@ internal sealed class LocalExportService(
         var written = new List<string>();
         var writtenBySourceMesh = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var synthesizedCount = 0;
+        var stretchWarnings = new List<string>();
         var usedOutputPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // NIFs are placed under meshes/slidesmith/<body>/ so that Skyrim's loose-file
@@ -23846,8 +23848,8 @@ internal sealed class LocalExportService(
 
                     Directory.CreateDirectory(Path.GetDirectoryName(lowDest)!);
                     Directory.CreateDirectory(Path.GetDirectoryName(highDest)!);
-                    await CopyNifAsync(pair.LowWeightMesh, lowDest, mesh, cancellationToken);
-                    await CopyNifAsync(pair.HighWeightMesh, highDest, mesh, cancellationToken);
+                    await CopyNifAsync(pair.LowWeightMesh, lowDest, mesh, cancellationToken, stretchWarnings);
+                    await CopyNifAsync(pair.HighWeightMesh, highDest, mesh, cancellationToken, stretchWarnings);
                     written.Add(lowDest);
                     written.Add(highDest);
                     writtenBySourceMesh[pair.LowWeightMesh] = lowDest;
@@ -23869,7 +23871,7 @@ internal sealed class LocalExportService(
                     // Write the existing half with regular morphs.
                     Directory.CreateDirectory(Path.GetDirectoryName(destSource)!);
                     Directory.CreateDirectory(Path.GetDirectoryName(destSynth)!);
-                    await CopyNifAsync(sourceMesh, destSource, mesh, cancellationToken);
+                    await CopyNifAsync(sourceMesh, destSource, mesh, cancellationToken, stretchWarnings);
 
                     // Write the synthesised half with weight-scaled morphs.
                     var synthMesh = mesh with
@@ -23877,7 +23879,7 @@ internal sealed class LocalExportService(
                         RegionalMorphing = ScaleMorphsForWeightVariant(mesh.RegionalMorphing, isSourceLow),
                         Strategy         = mesh.Strategy + "+synth-" + (isSourceLow ? "1" : "0")
                     };
-                    await CopyNifAsync(sourceMesh, destSynth, synthMesh, cancellationToken);
+                    await CopyNifAsync(sourceMesh, destSynth, synthMesh, cancellationToken, stretchWarnings);
 
                     pairedFiles.Add(sourceMesh);
                     written.Add(destSource);
@@ -23896,12 +23898,12 @@ internal sealed class LocalExportService(
             var dest = GetConvertedNifDestinationPath(
                 nifDirectory, meshFile, usedOutputPaths, ResolveBodySlideOutputPath(armor, meshFile));
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-            await CopyNifAsync(meshFile, dest, mesh, cancellationToken);
+            await CopyNifAsync(meshFile, dest, mesh, cancellationToken, stretchWarnings);
             written.Add(dest);
             writtenBySourceMesh[meshFile] = dest;
         }
 
-        return new ConvertedNifWriteResult(written, writtenBySourceMesh, synthesizedCount);
+        return new ConvertedNifWriteResult(written, writtenBySourceMesh, synthesizedCount, stretchWarnings);
     }
 
     internal static string GetConvertedNifDestinationPath(
@@ -24647,7 +24649,7 @@ internal sealed class LocalExportService(
         return null;
     }
 
-    private static async Task CopyNifAsync(string sourcePath, string destPath, ConvertedMesh mesh, CancellationToken cancellationToken)
+    private static async Task CopyNifAsync(string sourcePath, string destPath, ConvertedMesh mesh, CancellationToken cancellationToken, List<string>? stretchWarnings = null)
     {
         if (!File.Exists(sourcePath))
         {
@@ -24666,6 +24668,7 @@ internal sealed class LocalExportService(
             foreach (var warning in SkyrimSseNifFitDiagnostics.DescribeStretchRisks(sourceBytes, outputBytes))
             {
                 await Console.Error.WriteLineAsync($"[SlideSmith] Warning: {warning}: {sourcePath}");
+                stretchWarnings?.Add($"nif-stretch-risk:{Path.GetFileName(sourcePath)}:{warning}");
             }
         }
     }
