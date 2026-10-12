@@ -9029,6 +9029,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 resultsWithPaths = await ConvertMeshSetAsync(processableMeshFiles, variant.Request, sourceDirectory, rootOutput, processableMeshFiles.Count, progress, cancellationToken);
             using var packaging = measurements.Measure("packaging");
             await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, rootOutput, cancellationToken);
+            if (resultsWithPaths.Count > 1)
+            {
+                TuckAwayBatchTemplateFiles(resultsWithPaths.Select(static r => r.Result.OutputDirectory));
+            }
             if (request.OutputZip)
             {
                 CreateCombinedBatchZip(rootOutput);
@@ -9286,6 +9290,38 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             names.Add(meshFile, name);
         }
         return names;
+    }
+
+    private static readonly string[] BatchTemplateFileNames =
+    [
+        "runtime-observation-bundle.template.json",
+        "target-body-template.slidesmith-body.json",
+        "detected-source-body-template.slidesmith-body.json",
+        "runtime-validation-plan.json",
+        "runtime-validation-harness.json",
+        "proof-harness-bundle.json",
+        "windows-ui-e2e-automation.json",
+        "desktop-workflow-automation.json",
+        "live-game-execution.json",
+        "conversion-matrix-proof.json",
+        "conversion-pipeline-profile.json",
+    ];
+
+    // Per-piece template/harness files are only useful for single conversions; in a pack they
+    // clutter every piece folder, so group them under one "_extras" subfolder per piece.
+    private static void TuckAwayBatchTemplateFiles(IEnumerable<string> pieceOutputDirectories)
+    {
+        foreach (var directory in pieceOutputDirectories.Where(Directory.Exists))
+        {
+            var extras = Path.Combine(directory, "_extras");
+            foreach (var name in BatchTemplateFileNames)
+            {
+                var source = Path.Combine(directory, name);
+                if (!File.Exists(source)) continue;
+                Directory.CreateDirectory(extras);
+                File.Move(source, Path.Combine(extras, name), overwrite: true);
+            }
+        }
     }
 
     internal static string CreateCombinedBatchZip(string rootOutput, Action? finalizeTimings = null)
