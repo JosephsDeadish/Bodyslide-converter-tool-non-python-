@@ -1032,6 +1032,31 @@ internal static class SkyrimSseNifShapeCorrespondence
         return true;
     }
 
+    /// <summary>
+    /// Weaker than <see cref="TryVerifyExactOrderedMatch"/>: same geometry block type, vertex count and
+    /// triangle index list, with positions allowed to differ. Not wired into morph reuse; callers must
+    /// label results with this evidence level and never present them as exact matches.
+    /// </summary>
+    public static bool TryVerifyTopologyOnlyMatch(
+        SkyrimSseNifShape source,
+        SkyrimSseNifShape target,
+        out string evidence)
+    {
+        evidence = string.Empty;
+        if (!string.Equals(source.GeometryBlockType, target.GeometryBlockType, StringComparison.Ordinal) ||
+            source.Vertices.Count == 0 ||
+            source.Vertices.Count != target.Vertices.Count ||
+            source.TriangleIndices.Count == 0 ||
+            !source.TriangleIndices.SequenceEqual(target.TriangleIndices))
+        {
+            return false;
+        }
+
+        var nameMatch = string.Equals(source.Name, target.Name, StringComparison.Ordinal);
+        evidence = $"topology-only-match:vertices={source.Vertices.Count}:triangle-indexes={source.TriangleIndices.Count}:name-match={nameMatch}";
+        return true;
+    }
+
     private static bool HasExactVertexOrder(
         IReadOnlyList<MeshVertex> source,
         IReadOnlyList<MeshVertex> target)

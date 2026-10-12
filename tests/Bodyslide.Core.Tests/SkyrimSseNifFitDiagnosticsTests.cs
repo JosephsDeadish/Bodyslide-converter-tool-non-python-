@@ -37,4 +37,19 @@ public sealed class SkyrimSseNifFitDiagnosticsTests
         Assert.Empty(SkyrimSseNifFitDiagnostics.DescribeStretchRisks(nif, nif));
         Assert.Empty(SkyrimSseNifFitDiagnostics.DescribeStretchRisks([1, 2, 3], nif));
     }
+
+    [Fact]
+    public void TopologyOnlyMatchAcceptsMovedVerticesButRejectsTopologyChanges()
+    {
+        var source = Shape((0, 0, 0), (1, 0, 0), (0, 1, 0));
+        var moved = Shape((0, 0, 0), (2, 0, 0), (0, 2, 0));
+        var different = new SkyrimSseNifShape("Body", moved.Vertices, [0, 2, 1], 16);
+        var fewer = Shape((0, 0, 0), (1, 0, 0));
+
+        Assert.True(SkyrimSseNifShapeCorrespondence.TryVerifyTopologyOnlyMatch(source, moved, out var evidence));
+        Assert.StartsWith("topology-only-match:", evidence);
+        Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyExactOrderedMatch(source, moved, out _));
+        Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyTopologyOnlyMatch(source, different, out _));
+        Assert.False(SkyrimSseNifShapeCorrespondence.TryVerifyTopologyOnlyMatch(source, fewer, out _));
+    }
 }
