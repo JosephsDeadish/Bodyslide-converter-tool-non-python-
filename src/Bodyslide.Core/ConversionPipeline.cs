@@ -1259,6 +1259,8 @@ internal static class ConversionValidationGuidance
                 "Open target-body-template.slidesmith-body.json, merge it into the target body's existing *.slidesmith-body.json profile, and fill the missing support metadata called out in conversion-quality.json before re-running.",
             "unsupported-nif-layout" =>
                 "Open preview-workbench.html and conversion-quality.json to identify the listed mesh and any geometry-family notes, zoom into the failing piece in the preview, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
+            "nif-stretch-risk" =>
+                "Open preview-workbench.html and inspect the listed shapes for stretched or squashed areas; if they look wrong, re-run with milder slider or regional-morph settings, or refit those pieces in Outfit Studio before release.",
             "skinned-nif-runtime-unverified" =>
                 "Open conversion-quality.json and preview-workbench.html to inspect the skinned mesh. Supported SSE skinned shapes may receive a position-only fit transform while skin weights, partitions, and all other non-position NIF bytes are preserved; this does not assess whether those weights suit the target body. Validate weight suitability and live deformation separately in Outfit Studio and Skyrim before relying on the result.",
             "skinned-dynamic-fit-withheld" =>
@@ -28203,6 +28205,17 @@ internal sealed class LocalExportService(
                 "extreme-topology-adaptation",
                 "medium",
                 $"{payloadReuse.ExtremelyAdaptedVariantCount} reused morph variant(s) required extreme topology adaptation and should be reviewed for split parts, holes, straps, or layered-piece drift{detail}."));
+        }
+
+        var stretchWarnings = qualityWarnings
+            .Where(static warning => warning.StartsWith("nif-stretch-risk:", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (stretchWarnings.Count > 0)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "nif-stretch-risk",
+                "medium",
+                $"{stretchWarnings.Count} shape(s) show edge stretch or compression after the position transform. Geometry only: this does not assess skin weights. ({string.Join("; ", stretchWarnings.Take(4).Select(static w => w["nif-stretch-risk:".Length..]))})"));
         }
 
         if (topologyMismatchRisk)

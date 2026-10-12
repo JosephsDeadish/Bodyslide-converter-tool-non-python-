@@ -57,6 +57,19 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void BuildFollowUpActions_ExplainsNifStretchRisk()
+    {
+        var summary = new ConversionValidationSummary(
+            "REVIEW", 70, 0, 1, 0,
+            [new ConversionValidationIssue("nif-stretch-risk", "medium", "Stretch.")]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "CBBE");
+
+        Assert.Single(actions);
+        Assert.Contains("stretched or squashed", actions[0], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void BuildFollowUpActions_DeduplicatesSharedPluginMasterChainGuidance()
     {
         var summary = new ConversionValidationSummary(
