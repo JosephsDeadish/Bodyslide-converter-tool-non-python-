@@ -24661,6 +24661,13 @@ internal sealed class LocalExportService(
         var sourceBytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken);
         var outputBytes = TryApplyNifVertexTransform(sourceBytes, sourcePath, mesh.RegionalMorphing, mesh.DeformationCage);
         await File.WriteAllBytesAsync(destPath, outputBytes, cancellationToken);
+        if (!ReferenceEquals(outputBytes, sourceBytes))
+        {
+            foreach (var warning in SkyrimSseNifFitDiagnostics.DescribeStretchRisks(sourceBytes, outputBytes))
+            {
+                await Console.Error.WriteLineAsync($"[SlideSmith] Warning: {warning}: {sourcePath}");
+            }
+        }
     }
 
     private sealed record TopologyTransformRegion(

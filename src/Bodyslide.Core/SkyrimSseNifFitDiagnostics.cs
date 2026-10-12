@@ -63,6 +63,36 @@ internal static class SkyrimSseNifFitDiagnostics
         return new SkyrimSseNifStretchReport(before.Name, edges, max, min, true, max > maxEdgeRatio || min < minEdgeRatio);
     }
 
+    public static IReadOnlyList<string> DescribeStretchRisks(byte[] beforeBytes, byte[] afterBytes)
+    {
+        var before = SkyrimSseNifShapeReader.Read(beforeBytes);
+        var after = SkyrimSseNifShapeReader.Read(afterBytes);
+        if (!before.Supported || !after.Supported)
+        {
+            return [];
+        }
+
+        var afterByName = after.Shapes.ToDictionary(static s => s.Name, StringComparer.Ordinal);
+        var risks = new List<string>();
+        foreach (var shape in before.Shapes)
+        {
+            if (!afterByName.TryGetValue(shape.Name, out var other))
+            {
+                continue;
+            }
+
+            var report = AnalyzeStretch(shape, other);
+            if (report.StretchRisk)
+            {
+                risks.Add(report.Comparable
+                    ? $"shape '{shape.Name}' edge stretch risk (min ratio {report.MinEdgeRatio:0.00}, max ratio {report.MaxEdgeRatio:0.00})"
+                    : $"shape '{shape.Name}' topology changed after transform");
+            }
+        }
+
+        return risks;
+    }
+
     private static double Distance(MeshVertex a, MeshVertex b)
     {
         double dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;

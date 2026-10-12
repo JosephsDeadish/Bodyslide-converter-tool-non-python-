@@ -28,4 +28,13 @@ public sealed class SkyrimSseNifFitDiagnosticsTests
         Assert.False(report.Comparable);
         Assert.True(report.StretchRisk);
     }
+
+    [Fact]
+    public void DescribeStretchRisksIsEmptyForIdenticalAndUnsupportedBytes()
+    {
+        var nif = SkyrimSseNifShapeReaderTests.CreateNifForShapeTargets("Body");
+
+        Assert.Empty(SkyrimSseNifFitDiagnostics.DescribeStretchRisks(nif, nif));
+        Assert.Empty(SkyrimSseNifFitDiagnostics.DescribeStretchRisks([1, 2, 3], nif));
+    }
 }
