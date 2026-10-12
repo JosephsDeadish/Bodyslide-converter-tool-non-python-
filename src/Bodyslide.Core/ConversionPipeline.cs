@@ -46,6 +46,7 @@ internal sealed class BatchPluginExportContext : IDisposable
 {
     private readonly SemaphoreSlim gate = new(1, 1);
     internal Dictionary<string, string> RewriteMappings { get; } = new(StringComparer.OrdinalIgnoreCase);
+    internal ConcurrentBag<ScratchPluginArmorEntry> ScratchPluginEntries { get; } = [];
     internal IReadOnlyList<string> PluginFiles { get; init; } = [];
     internal IReadOnlyList<string> MeshFiles { get; init; } = [];
     internal LocalExportService.SupportAssetDiscoveryResult? SupportAssets { get; init; }
@@ -9237,6 +9238,22 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 progress?.Report(new BatchProgressUpdate(done, total, currentLabel, result.Success));
             });
 
+        if (!batchPluginExportContext.ScratchPluginEntries.IsEmpty)
+        {
+            var packName = Path.GetFileName(
+                Path.GetFullPath(sourceDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrWhiteSpace(packName)) packName = "Pack";
+            var combined = new BasicScratchPluginGeneratorService().GenerateCombined(
+                packName,
+                batchPluginExportContext.ScratchPluginEntries.ToList(),
+                batchPluginExportContext.ScratchPluginEntries.SelectMany(static e => e.MasterFileHints).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+            if (combined is var (combinedBytes, combinedFileName))
+            {
+                Directory.CreateDirectory(rootOutput);
+                await File.WriteAllBytesAsync(Path.Combine(rootOutput, combinedFileName), combinedBytes, cancellationToken);
+            }
+        }
+
         return meshFiles
             .Select(path => resultBag.First(r => string.Equals(r.MeshFile, path,
                 OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
@@ -10962,6 +10979,14 @@ internal sealed class BasicGroundMeshGeneratorService : IGroundMeshGeneratorServ
 /// that points to the converted NIF files.  Generated when the source mod folder does not include
 /// an existing plugin to patch, enabling the converted meshes to be installed as a standalone mod.
 /// </summary>
+internal sealed record ScratchPluginArmorEntry(
+    string ArmorName,
+    IReadOnlyList<string> ConvertedNifRelativePaths,
+    IReadOnlyList<int> BipedSlots,
+    string? GroundMeshRelativePath,
+    string? MeshType,
+    IReadOnlyList<string> MasterFileHints);
+
 internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGeneratorService
 {
     // FormIDs: TES4 = 0x000, ARMO = 0x801, ARMA = 0x802
@@ -11014,6 +11039,71 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         string? groundMeshRelativePath,
         string? meshType = null,
         IReadOnlyList<string>? masterFileHints = null)
+    {
+        var pair = BuildArmorRecordPair(
+            armorName, convertedNifRelativePaths, bipedSlots, groundMeshRelativePath, meshType,
+            ArmaFormId, ArmoFormId);
+        if (pair is null) return null;
+
+        using var ms = new MemoryStream();
+        var masterFiles = BuildScratchMasterFileList(masterFileHints);
+        WriteRecord(ms, "TES4", BuildStandaloneTes4Data(numRecords: 2, masterFiles), formId: 0, flags: EslFlag);
+        WriteGrup(ms, "ARMA", [pair.Value.Arma]);
+        WriteGrup(ms, "ARMO", [pair.Value.Armo]);
+
+        var safeFileName = SanitizeEdid(armorName).Trim('_');
+        return (ms.ToArray(), $"SlideSmith_{safeFileName}.esp");
+    }
+
+    /// <summary>
+    /// Builds one combined ESL-flagged plugin holding an ARMO/ARMA pair for every entry so a whole
+    /// armor pack ships as a single plugin. Entries beyond the ESL object ID range are rejected.
+    /// </summary>
+    public (byte[] PluginBytes, string FileName)? GenerateCombined(
+        string packName,
+        IReadOnlyList<ScratchPluginArmorEntry> entries,
+        IReadOnlyList<string>? masterFileHints = null)
+    {
+        var armaRecords = new List<byte[]>();
+        var armoRecords = new List<byte[]>();
+        var nextFormId = ArmoFormId;
+        foreach (var entry in entries
+                     .OrderBy(static e => e.ArmorName, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(static e => e.ConvertedNifRelativePaths.FirstOrDefault(), StringComparer.OrdinalIgnoreCase))
+        {
+            if (nextFormId + 1 > MaxEslObjectId) break;
+            var pair = BuildArmorRecordPair(
+                entry.ArmorName, entry.ConvertedNifRelativePaths, entry.BipedSlots,
+                entry.GroundMeshRelativePath, entry.MeshType, nextFormId + 1, nextFormId);
+            if (pair is null) continue;
+            armoRecords.Add(pair.Value.Armo);
+            armaRecords.Add(pair.Value.Arma);
+            nextFormId += 2;
+        }
+
+        if (armoRecords.Count == 0) return null;
+
+        using var ms = new MemoryStream();
+        var masterFiles = BuildScratchMasterFileList(masterFileHints);
+        WriteRecord(ms, "TES4", BuildStandaloneTes4Data(numRecords: armoRecords.Count * 2, masterFiles), formId: 0, flags: EslFlag);
+        WriteGrup(ms, "ARMA", armaRecords);
+        WriteGrup(ms, "ARMO", armoRecords);
+
+        var safeFileName = SanitizeEdid(packName).Trim('_');
+        if (safeFileName.Length == 0) safeFileName = "Pack";
+        return (ms.ToArray(), $"SlideSmith_{safeFileName}.esp");
+    }
+
+    private const uint MaxEslObjectId = 0x00000FFFu;
+
+    private static (byte[] Arma, byte[] Armo)? BuildArmorRecordPair(
+        string armorName,
+        IReadOnlyList<string> convertedNifRelativePaths,
+        IReadOnlyList<int> bipedSlots,
+        string? groundMeshRelativePath,
+        string? meshType,
+        uint ArmaFormId,
+        uint ArmoFormId)
     {
         if (convertedNifRelativePaths.Count == 0) return null;
 
@@ -11132,16 +11222,7 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         }
 
         var armoRecord = BuildRecord("ARMO", armoDataMs.ToArray(), ArmoFormId);
-
-        // ── Assemble ESP ──────────────────────────────────────────────────────
-        using var ms = new MemoryStream();
-        var masterFiles = BuildScratchMasterFileList(masterFileHints);
-        WriteRecord(ms, "TES4", BuildStandaloneTes4Data(numRecords: 2, masterFiles), formId: 0, flags: EslFlag);
-        WriteGrup(ms, "ARMA", [armaRecord]);
-        WriteGrup(ms, "ARMO", [armoRecord]);
-
-        var safeFileName = SanitizeEdid(armorName).Trim('_');
-        return (ms.ToArray(), $"SlideSmith_{safeFileName}.esp");
+        return (armaRecord, armoRecord);
     }
 
     private static byte[] BuildStandaloneTes4Data(int numRecords, IReadOnlyList<string> masterFiles)
@@ -20004,12 +20085,26 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                 return true;
             }
 
-            return HasGenericFeLightRecordEvidence(bytes);
+            return HasGenericFeLightRecordEvidence(bytes) || HasCompactOwnArmorRecordEvidence(bytes);
         }
         catch (InvalidDataException)
         {
             return false;
         }
+    }
+
+    // A light-flagged plugin stores its own records with object IDs in 0x800-0xFFF under the
+    // plugin's own master index; FE-range IDs only exist at runtime, so the on-disk layout of a
+    // valid ESPFE never contains 0xFExxx. Accept it when every armor record the plugin owns fits.
+    private static bool HasCompactOwnArmorRecordEvidence(byte[] bytes)
+    {
+        var masterCount = (uint)BinaryArmaParser.ExtractMasterFileNames(bytes).Count;
+        var ownIds = BinaryArmaParser.ExtractArmaRecords(bytes).Select(static desc => desc.FormId)
+            .Concat(BinaryArmaParser.ExtractArmoRecords(bytes).Select(static desc => desc.FormId))
+            .Where(formId => (formId >> 24) == masterCount)
+            .Select(static formId => formId & 0x00FFFFFFu)
+            .ToList();
+        return ownIds.Count > 0 && ownIds.All(static id => id is >= 0x800u and <= 0xFFFu);
     }
 
     private static bool HasGenericFeLightRecordEvidence(byte[] bytes)
@@ -20937,6 +21032,13 @@ internal static class BinaryArmaParser
     private static readonly HashSet<string> BipedSubrecords =
         new(StringComparer.Ordinal) { "BOD2", "BODT" };
 
+    // ARMA MODL subrecords hold additional-race FormIDs rather than model paths, so only
+    // accept values that look like a NIF path to avoid binary junk in mesh path reports.
+    internal static bool IsPlausibleMeshPath(string? path) =>
+        !string.IsNullOrWhiteSpace(path) &&
+        path.EndsWith(".nif", StringComparison.OrdinalIgnoreCase) &&
+        path.All(static c => c >= ' ' && c != '\u007f');
+
     private static readonly HashSet<string> MeshSubrecords =
         new(StringComparer.Ordinal) { "MOD2", "MOD3", "MOD4", "MOD5", "MODL" };
 
@@ -21311,7 +21413,7 @@ internal static class BinaryArmaParser
                 var path    = System.Text.Encoding.ASCII
                     .GetString(dataBytes, dataStart, strLen)
                     .Replace('\\', '/');
-                if (!string.IsNullOrEmpty(path))
+                if (IsPlausibleMeshPath(path))
                     meshPaths.Add(path);
             }
             else if (string.Equals(subTag, "RNAM", StringComparison.Ordinal) && effectiveSubSize >= 4)
@@ -21393,7 +21495,7 @@ internal static class BinaryArmaParser
                 var path    = System.Text.Encoding.ASCII
                     .GetString(dataBytes, dataStart, strLen)
                     .Replace('\\', '/');
-                if (!string.IsNullOrEmpty(path))
+                if (IsPlausibleMeshPath(path))
                     meshPaths.Add(path);
             }
             else if (BipedSubrecords.Contains(subTag) && effectiveSubSize >= 4)
@@ -23217,10 +23319,14 @@ internal sealed class LocalExportService(
                 .ToList();
             var scratchMasterHints = BuildScratchPluginMasterHints(pluginAnalysis);
 
-            var scratchResult = scratchPluginGen.Generate(
-                armorName, request.TargetBody, pluginNifPaths, bipedSlots, groundMeshRelativePath,
-                meshType: analysis.MeshType,
-                masterFileHints: scratchMasterHints);
+            // Batch runs collect entries and emit a single combined plugin once every piece is done.
+            var scratchResult = request.BatchPluginExportContext is { } batchScratchContext
+                ? CollectBatchScratchEntry(batchScratchContext, new ScratchPluginArmorEntry(
+                    armorName, pluginNifPaths, bipedSlots, groundMeshRelativePath, analysis.MeshType, scratchMasterHints))
+                : scratchPluginGen.Generate(
+                    armorName, request.TargetBody, pluginNifPaths, bipedSlots, groundMeshRelativePath,
+                    meshType: analysis.MeshType,
+                    masterFileHints: scratchMasterHints);
 
             if (scratchResult is var (pluginBytes, pluginFileName))
             {
@@ -34824,6 +34930,14 @@ internal sealed class LocalExportService(
         }
 
         return staged.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static (byte[] PluginBytes, string FileName)? CollectBatchScratchEntry(
+        BatchPluginExportContext context,
+        ScratchPluginArmorEntry entry)
+    {
+        context.ScratchPluginEntries.Add(entry);
+        return null;
     }
 
     private static async Task<IReadOnlyList<string>> StageScratchPluginMeshesAsync(

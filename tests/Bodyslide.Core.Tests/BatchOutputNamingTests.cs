@@ -37,12 +37,12 @@ public sealed class BatchOutputNamingTests
             });
             Assert.Equal(2, results.Select(result => result.OutputDirectory).Distinct(StringComparer.OrdinalIgnoreCase).Count());
             var plugins = Directory.GetFiles(output, "*.esp", SearchOption.TopDirectoryOnly);
-            Assert.Equal(2, plugins.Length);
+            var combinedPlugin = Assert.Single(plugins);
+            var combinedContent = System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(combinedPlugin)).Replace('\\', '/');
             foreach (var result in results)
             {
                 var identity = Path.GetFileName(result.OutputDirectory);
-                var plugin = Assert.Single(plugins, path => Path.GetFileName(path) == $"SlideSmith_{identity}_0.esp");
-                var content = System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(plugin)).Replace('\\', '/');
+                var content = combinedContent;
                 foreach (var name in new[] { "cuirass_0.nif", "cuirass_1.nif", "cuirass_1stperson_0.nif", "cuirass_ground.nif" })
                 {
                     if (name != "cuirass_1.nif")
@@ -88,7 +88,16 @@ public sealed class BatchOutputNamingTests
                 .ConvertAsync(new ConversionRequest(input, "CBBE", output));
             Assert.Equal(3, results.Count);
             Assert.All(results, result => Assert.True(result.Success));
-            Assert.Equal(3, Directory.GetFiles(output, "*.esp", SearchOption.TopDirectoryOnly).Length);
+            var pluginPath = Assert.Single(Directory.GetFiles(output, "*.esp", SearchOption.TopDirectoryOnly));
+            var pluginText = System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(pluginPath)).Replace('\\', '/');
+            foreach (var result in results)
+            {
+                var identity = Path.GetFileName(result.OutputDirectory);
+                Assert.True(
+                    pluginText.Contains($"slidesmith/cbbe/{identity}/", StringComparison.OrdinalIgnoreCase) ||
+                    pluginText.Contains($"slidesmith/cbbe/{identity}_0.nif", StringComparison.OrdinalIgnoreCase),
+                    $"Combined plugin is missing records for {identity}");
+            }
             Assert.Equal(3, results.Select(result => Path.GetFileName(Assert.Single(
                 Directory.GetFiles(Path.Combine(result.OutputDirectory, "CalienteTools", "BodySlide", "SliderSets"), "*.osp"))))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count());
