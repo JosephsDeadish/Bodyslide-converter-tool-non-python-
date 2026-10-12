@@ -39606,7 +39606,8 @@ internal sealed class LocalExportService(
         var topologyWarningSignals = qualityWarnings.Any(static warning =>
            warning.Contains("hole", StringComparison.OrdinalIgnoreCase) ||
            warning.Contains("boundary", StringComparison.OrdinalIgnoreCase) ||
-           warning.Contains("uv", StringComparison.OrdinalIgnoreCase));
+           warning.Contains("uv", StringComparison.OrdinalIgnoreCase) ||
+           warning.StartsWith("nif-stretch-risk:", StringComparison.OrdinalIgnoreCase));
 
         return topologyMismatchRisk ||
               extremeAdaptation ||
