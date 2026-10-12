@@ -22,3 +22,10 @@ Add a row only with the highest level actually demonstrated.
 - Preserved skin weights do not prove fit on a different body; retargeting and live deformation need separate validation.
 - No permitted real-format fixtures yet; see `docs/TEST_CORPUS.md` for policy and candidates (unverified).
 - Desktop UX: input/target/risk/output summary, progress/cancellation, accessibility, and preview need refinement.
+
+## Morph correspondence policy (decided)
+
+- Evidence tiers: `exact` (current, reuse-eligible) > `topology-only` (same block type, vertex count and triangle list; positions may differ) > anything else (ineligible).
+- Uncertain or ambiguous matches are skipped and reported, never applied with a warning.
+- `SkyrimSseNifShapeCorrespondence.TryVerifyTopologyOnlyMatch` exists but is **not yet wired** into reuse. Eligibility is gated in `ConversionPipeline.cs` (`HasExactShapeAndVertexOrder` / `IsExactShapeCorrespondenceEvidence`), which require identical vertex-order fingerprints. Enabling the topology-only tier needs a new eligibility level, its own report label, and real-fixture evidence that per-index deltas are valid on moved vertices.
+- Spatial retargeting between different topologies stays disabled until real fixtures demonstrate it is safe.
