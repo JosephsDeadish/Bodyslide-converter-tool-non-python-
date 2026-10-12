@@ -29,3 +29,10 @@ Add a row only with the highest level actually demonstrated.
 - Uncertain or ambiguous matches are skipped and reported, never applied with a warning.
 - `SkyrimSseNifShapeCorrespondence.TryVerifyTopologyOnlyMatch` exists but is **not yet wired** into reuse. Eligibility is gated in `ConversionPipeline.cs` (`HasExactShapeAndVertexOrder` / `IsExactShapeCorrespondenceEvidence`), which require identical vertex-order fingerprints. Enabling the topology-only tier needs a new eligibility level, its own report label, and real-fixture evidence that per-index deltas are valid on moved vertices.
 - Spatial retargeting between different topologies stays disabled until real fixtures demonstrate it is safe.
+
+## Proximity conform (not yet wired)
+
+`ProximityConform`, `ProximityWeightTransfer` and `ReferenceNifConform` implement BodySlide-style
+reference-body conforming and weight transfer. They are unit-tested on synthetic meshes only, fail
+closed on mismatched reference pairs, and are **not** called by the conversion pipeline yet. They
+have not been validated against real CBBE/3BA/BHUNP bodies, BodySlide builds or in-game.

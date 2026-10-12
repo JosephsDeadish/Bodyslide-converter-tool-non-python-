@@ -11,6 +11,9 @@ public sealed class SkyrimSseNifShapeReaderTests
             .Select(static name => new TestShape(name, [(0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f)]))
             .ToArray());
 
+    internal static byte[] CreateNifFromVertices(params (float X, float Y, float Z)[] vertices) =>
+        CreateNif([new TestShape("Shape", vertices)]);
+
     internal static byte[] CreateDynamicNifForShapeTargets(params string[] shapeNames) =>
         CreateNif(shapeNames
             .Select(static name => new TestShape(
