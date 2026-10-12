@@ -516,7 +516,6 @@ public sealed class MainForm : Form
         quickImportPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         quickImportPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         quickImportPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        quickImportPanel.Controls.Add(dropPanel, 0, 0);
         quickImportPanel.Controls.Add(new Label
         {
             Name = "setupScrollHintLabel",
@@ -525,7 +524,8 @@ public sealed class MainForm : Form
             MaximumSize = new Size(720, 0),
             Margin = new Padding(4, 6, 4, 4),
             Text = "Setup: 1) choose armor input, 2) choose a target body or preset, then scroll down to review settings. Start conversion remains in the lower panel.",
-        }, 0, 1);
+        }, 0, 0);
+        quickImportPanel.Controls.Add(dropPanel, 0, 1);
         quickImportPanel.Controls.Add(startupHandoffPanel, 0, 2);
 
         _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Quick import", quickImportPanel), 0, 0);
