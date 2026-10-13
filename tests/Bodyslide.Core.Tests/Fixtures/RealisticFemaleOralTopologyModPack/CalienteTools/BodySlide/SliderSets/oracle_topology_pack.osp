@@ -1,0 +1,10 @@
+<SliderSetInfo version="1">
+  <SliderSet name="OracleTopologyPack" set="UBE">
+    <OutputPath>meshes\armor\oracledeep\</OutputPath>
+    <OutputFile gender="f" use="true">oracle_topology_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">oracle_topology_1.nif</OutputFile>
+    <Slider name="TongueMidLength" />
+    <Slider name="JawDepth" />
+    <Slider name="ButtShape" />
+  </SliderSet>
+</SliderSetInfo>

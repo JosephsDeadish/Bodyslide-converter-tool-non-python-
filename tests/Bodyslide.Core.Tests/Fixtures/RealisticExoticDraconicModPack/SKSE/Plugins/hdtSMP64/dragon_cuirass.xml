@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="DragonCuirassPhysics">
+  <bone name="NPC Tail" />
+  <bone name="TailBarb" />
+  <bone name="WingFinger01.L" />
+  <bone name="WingFinger01.R" />
+  <bone name="Frill.L" />
+  <bone name="Frill.R" />
+</system>

@@ -1,0 +1,102 @@
+{
+  "maleBodyTargets": [
+    "HIMBO",
+    "SAM",
+    "SAM Light",
+    "SOS",
+    "TNG"
+  ],
+  "defaultProfile": {
+    "meshType": "default",
+    "clippingThreshold": 1.10,
+    "baseInflation": 0.040,
+    "physicsSolver": {
+      "stiffnessMultiplier": 1.00,
+      "offsetMultiplier": 1.00,
+      "dampingMultiplier": 1.00,
+      "gravityMultiplier": 1.00,
+      "massMultiplier": 1.00,
+      "restitutionMultiplier": 1.00
+    }
+  },
+  "profiles": [
+    {
+      "meshType": "physics-enabled",
+      "clippingThreshold": 1.04,
+      "baseInflation": 0.028,
+      "physicsSolver": {
+        "stiffnessMultiplier": 1.00,
+        "offsetMultiplier": 1.12,
+        "dampingMultiplier": 0.82,
+        "gravityMultiplier": 1.15,
+        "massMultiplier": 1.10,
+        "restitutionMultiplier": 1.20
+      }
+    },
+    {
+      "meshType": "skin-tight",
+      "clippingThreshold": 1.05,
+      "baseInflation": 0.022,
+      "physicsSolver": {
+        "stiffnessMultiplier": 0.95,
+        "offsetMultiplier": 0.90,
+        "dampingMultiplier": 1.05,
+        "gravityMultiplier": 0.95,
+        "massMultiplier": 1.00,
+        "restitutionMultiplier": 0.90
+      }
+    },
+    {
+      "meshType": "cloth",
+      "clippingThreshold": 1.07,
+      "baseInflation": 0.030,
+      "physicsSolver": {
+        "stiffnessMultiplier": 0.85,
+        "offsetMultiplier": 1.25,
+        "dampingMultiplier": 0.90,
+        "gravityMultiplier": 1.08,
+        "massMultiplier": 0.95,
+        "restitutionMultiplier": 1.15
+      }
+    },
+    {
+      "meshType": "leather",
+      "clippingThreshold": 1.09,
+      "baseInflation": 0.048,
+      "physicsSolver": {
+        "stiffnessMultiplier": 1.05,
+        "offsetMultiplier": 0.85,
+        "dampingMultiplier": 1.08,
+        "gravityMultiplier": 0.92,
+        "massMultiplier": 1.02,
+        "restitutionMultiplier": 0.88
+      }
+    },
+    {
+      "meshType": "mixed",
+      "clippingThreshold": 1.08,
+      "baseInflation": 0.055,
+      "physicsSolver": {
+        "stiffnessMultiplier": 1.00,
+        "offsetMultiplier": 1.00,
+        "dampingMultiplier": 1.00,
+        "gravityMultiplier": 1.00,
+        "massMultiplier": 1.00,
+        "restitutionMultiplier": 1.00
+      }
+    },
+    {
+      "meshType": "plate",
+      "clippingThreshold": 1.12,
+      "baseInflation": 0.072,
+      "physicsSolver": {
+        "stiffnessMultiplier": 1.12,
+        "offsetMultiplier": 0.70,
+        "dampingMultiplier": 1.15,
+        "gravityMultiplier": 0.85,
+        "massMultiplier": 1.10,
+        "restitutionMultiplier": 0.75
+      }
+    }
+  ]
+}

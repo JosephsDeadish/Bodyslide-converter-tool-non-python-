@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="SprigganBranchPhysics">
+  <bone name="BranchMid.L" />
+  <bone name="BranchMid.R" />
+  <bone name="BranchTip.L" />
+  <bone name="BranchTip.R" />
+  <bone name="VineMid.L" />
+  <bone name="VineMid.R" />
+  <bone name="VineTip.L" />
+  <bone name="VineTip.R" />
+  <bone name="LeafFrond.L" />
+  <bone name="LeafFrond.R" />
+  <bone name="RootClaw.L" />
+  <bone name="RootClaw.R" />
+</system>

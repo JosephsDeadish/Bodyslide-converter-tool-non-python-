@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="EquineBeast">
+  <bone name="TailSheath" />
+  <bone name="BeastKnot" />
+  <bone name="TongueMid" />
+  <bone name="NPC Belly" />
+</system>

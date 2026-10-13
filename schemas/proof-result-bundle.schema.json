@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SlideSmith external proof result bundle",
+  "description": "Imported external observations and evidence references. A structurally valid bundle does not establish that the recorded behavior is correct.",
+  "type": "object",
+  "required": [
+    "ContractVersion",
+    "HarnessKind",
+    "OverallStatus",
+    "Host",
+    "ComponentResults",
+    "ScenarioResults",
+    "ProbeResults",
+    "MissingExpectedArtifacts",
+    "MissingExpectedScenarios",
+    "MissingExpectedProbes",
+    "MissingExpectedFlows",
+    "ValidationObservations",
+    "Notes"
+  ],
+  "properties": {
+    "ContractVersion": { "const": "1.2" },
+    "HarnessKind": { "type": "string", "minLength": 1 },
+    "OverallStatus": { "type": "string", "minLength": 1 },
+    "Host": {
+      "type": "object",
+      "required": [ "OperatingSystem", "HarnessRunner", "Capabilities" ],
+      "properties": {
+        "OperatingSystem": { "type": "string", "minLength": 1 },
+        "HarnessRunner": { "type": "string", "minLength": 1 },
+        "Launcher": { "type": [ "string", "null" ] },
+        "ModManager": { "type": [ "string", "null" ] },
+        "SaveProfile": { "type": [ "string", "null" ] },
+        "ObservationMode": { "type": [ "string", "null" ] },
+        "Capabilities": { "$ref": "#/$defs/stringList" }
+      },
+      "additionalProperties": true
+    },
+    "ComponentResults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [ "Component", "Status", "ExecutedItems", "MissingItems", "EvidenceArtifacts", "Notes" ],
+        "properties": {
+          "Component": { "type": "string", "minLength": 1 },
+          "Status": { "type": "string", "minLength": 1 },
+          "ExecutedItems": { "$ref": "#/$defs/stringList" },
+          "MissingItems": { "$ref": "#/$defs/stringList" },
+          "EvidenceArtifacts": { "$ref": "#/$defs/stringList" },
+          "Notes": { "$ref": "#/$defs/stringList" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "ScenarioResults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [ "Scenario", "Status", "ValidationSaveProfile", "ObservedSignals", "MissingSignals", "EvidenceArtifacts", "Notes" ],
+        "properties": {
+          "Scenario": { "type": "string", "minLength": 1 },
+          "Status": { "type": "string", "minLength": 1 },
+          "ValidationSaveProfile": { "type": "string", "minLength": 1 },
+          "ObservedSignals": { "$ref": "#/$defs/stringList" },
+          "MissingSignals": { "$ref": "#/$defs/stringList" },
+          "EvidenceArtifacts": { "$ref": "#/$defs/stringList" },
+          "Notes": { "$ref": "#/$defs/stringList" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "ProbeResults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [ "ProbeId", "Status", "ObservedSignals", "MissingSignals", "EvidenceArtifacts", "Notes" ],
+        "properties": {
+          "ProbeId": { "type": "string", "minLength": 1 },
+          "Status": { "type": "string", "minLength": 1 },
+          "ObservedSignals": { "$ref": "#/$defs/stringList" },
+          "MissingSignals": { "$ref": "#/$defs/stringList" },
+          "EvidenceArtifacts": { "$ref": "#/$defs/stringList" },
+          "Notes": { "$ref": "#/$defs/stringList" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "MissingExpectedArtifacts": { "$ref": "#/$defs/stringList" },
+    "MissingExpectedScenarios": { "$ref": "#/$defs/stringList" },
+    "MissingExpectedProbes": { "$ref": "#/$defs/stringList" },
+    "MissingExpectedFlows": { "$ref": "#/$defs/stringList" },
+    "ValidationObservations": {
+      "type": "array",
+      "minItems": 3,
+      "items": { "$ref": "#/$defs/validationObservation" }
+    },
+    "Notes": { "$ref": "#/$defs/stringList" }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "validationObservation": {
+      "type": "object",
+      "required": [
+        "ObservationType",
+        "Status",
+        "Tool",
+        "ToolVersion",
+        "ObservedAtUtc",
+        "EvidenceArtifacts",
+        "Details",
+        "Notes"
+      ],
+      "properties": {
+        "ObservationType": {
+          "enum": [
+            "bodyslide-build",
+            "output-inspection",
+            "deformation-observation"
+          ]
+        },
+        "Status": { "enum": [ "pass", "fail", "inconclusive" ] },
+        "Tool": { "type": "string", "minLength": 1 },
+        "ToolVersion": { "type": "string", "minLength": 1 },
+        "ObservedAtUtc": { "type": "string", "format": "date-time" },
+        "EvidenceArtifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "Details": { "type": "object" },
+        "Notes": { "$ref": "#/$defs/stringList" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "ObservationType": { "const": "bodyslide-build" } } },
+          "then": { "properties": { "Details": { "$ref": "#/$defs/bodySlideBuildDetails" } } }
+        },
+        {
+          "if": { "properties": { "ObservationType": { "const": "output-inspection" } } },
+          "then": { "properties": { "Details": { "$ref": "#/$defs/outputInspectionDetails" } } }
+        },
+        {
+          "if": { "properties": { "ObservationType": { "const": "deformation-observation" } } },
+          "then": { "properties": { "Details": { "$ref": "#/$defs/deformationObservationDetails" } } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "evidenceFile": {
+      "type": "object",
+      "required": [ "Path", "SizeBytes", "Sha256" ],
+      "properties": {
+        "Path": { "type": "string", "minLength": 1 },
+        "SizeBytes": { "type": "integer", "minimum": 0 },
+        "Sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "bodySlideBuildDetails": {
+      "type": "object",
+      "required": [ "OutfitName", "PresetName", "Arguments", "TargetDirectoryWasEmpty", "ExitCode", "Outputs" ],
+      "properties": {
+        "OutfitName": { "type": "string", "minLength": 1 },
+        "PresetName": { "type": "string", "minLength": 1 },
+        "Arguments": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "TargetDirectoryWasEmpty": { "const": true },
+        "ExitCode": { "const": 0 },
+        "Outputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidenceFile" } }
+      },
+      "additionalProperties": false
+    },
+    "outputInspectionDetails": {
+      "type": "object",
+      "required": [ "InspectedFiles", "SourceAndOutputHashesCompared", "ShapeTargetsVerified", "OsdRecordsVerified", "VertexIndicesVerified", "Findings" ],
+      "properties": {
+        "InspectedFiles": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidenceFile" } },
+        "SourceAndOutputHashesCompared": { "const": true },
+        "ShapeTargetsVerified": { "const": true },
+        "OsdRecordsVerified": { "const": true },
+        "VertexIndicesVerified": { "const": true },
+        "Findings": { "$ref": "#/$defs/stringList" }
+      },
+      "additionalProperties": false
+    },
+    "deformationObservationDetails": {
+      "type": "object",
+      "required": [ "ShapeName", "SliderName", "LowEndpointValue", "HighEndpointValue", "LowEndpointDeformedTarget", "HighEndpointDeformedTarget", "LowEndpointEvidence", "HighEndpointEvidence" ],
+      "properties": {
+        "ShapeName": { "type": "string", "minLength": 1 },
+        "SliderName": { "type": "string", "minLength": 1 },
+        "LowEndpointValue": { "type": "number" },
+        "HighEndpointValue": { "type": "number" },
+        "LowEndpointDeformedTarget": { "const": true },
+        "HighEndpointDeformedTarget": { "const": true },
+        "LowEndpointEvidence": { "type": "string", "minLength": 1 },
+        "HighEndpointEvidence": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

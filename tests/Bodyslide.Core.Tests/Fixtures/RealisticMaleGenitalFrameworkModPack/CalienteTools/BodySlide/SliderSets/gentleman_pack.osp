@@ -1,0 +1,12 @@
+<SliderSetInfo version="1">
+  <SliderSet name="GentlemanSupport" set="TNG">
+    <OutputPath>meshes\armor\gentleman\</OutputPath>
+    <OutputFile gender="m" use="true">gentleman_harness_0.nif</OutputFile>
+    <OutputFile gender="m" use="true" morphfile="1">gentleman_harness_1.nif</OutputFile>
+    <Slider name="GentlemanChest" />
+    <Slider name="Genitals" />
+    <Slider name="ThroatDepth" />
+    <Slider name="MouthOpen" />
+    <Slider name="HideSheath" />
+  </SliderSet>
+</SliderSetInfo>

@@ -1,0 +1,38 @@
+{
+  "name": "Hive Support Reference",
+  "aliases": [
+    "Mantis Harness",
+    "Scarab Shell"
+  ],
+  "referenceTokens": [
+    "insectoid",
+    "hive",
+    "mantis",
+    "carapace",
+    "mandible"
+  ],
+  "sliderNames": [
+    "Belly",
+    "WaistWidth",
+    "AbdomenLength",
+    "AntennaLength",
+    "MandibleSpread",
+    "WingSpan"
+  ],
+  "physicsBones": [
+    "AbdomenRoot",
+    "AbdomenMid",
+    "AbdomenTip",
+    "AntennaTip.L",
+    "AntennaTip.R",
+    "MandibleTip.L",
+    "MandibleTip.R",
+    "CarapaceWingMid.L",
+    "CarapaceWingMid.R"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female",
+  "skeletonFoundation": "Insectoid chitin-wing skeleton",
+  "skeletonFramework": "insectoid-humanoid",
+  "bodyOutputPath": "meshes\\insectoid\\hive\\"
+}

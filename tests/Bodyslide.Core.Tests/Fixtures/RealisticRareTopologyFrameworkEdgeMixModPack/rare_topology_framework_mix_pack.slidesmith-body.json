@@ -1,0 +1,31 @@
+{
+  "name": "RareTopologyFrameworkEdgeMixReference",
+  "referenceTokens": [
+    "3ba",
+    "cbbe",
+    "rare",
+    "bsgeometry",
+    "nitristrips",
+    "hybrid",
+    "framework",
+    "edge-mix",
+    "beast",
+    "custom-rig"
+  ],
+  "zapSliderNames": [
+    "HideCape",
+    "HidePouch",
+    "HideTailRig"
+  ],
+  "physicsBones": [
+    "NPC L Breast01",
+    "NPC R Breast01",
+    "NPC Belly",
+    "Tail1",
+    "TailTip",
+    "HDT JawLower",
+    "HDT Tongue"
+  ],
+  "physicsProfile": "cbpc",
+  "gender": "female"
+}

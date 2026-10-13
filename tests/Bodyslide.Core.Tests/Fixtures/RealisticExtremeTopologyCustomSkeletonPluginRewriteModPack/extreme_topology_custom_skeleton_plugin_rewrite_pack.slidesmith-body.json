@@ -1,0 +1,34 @@
+{
+  "name": "ExtremeTopologyCustomSkeletonPluginRewriteReference",
+  "referenceTokens": [
+    "3ba",
+    "devious",
+    "ebonite",
+    "hybrid",
+    "framework",
+    "edge-mix",
+    "custom-rig",
+    "rare",
+    "nitristrips",
+    "bsgeometry"
+  ],
+  "zapSliderNames": [
+    "HideCollar",
+    "HideArmbinder",
+    "HideHeelAddon",
+    "HideTailRig"
+  ],
+  "physicsBones": [
+    "NPC L Breast01",
+    "NPC R Breast01",
+    "NPC Belly",
+    "NPC L Foot",
+    "NPC R Foot",
+    "Tail1",
+    "TailTip",
+    "HDT JawLower",
+    "HDT Tongue"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "RareNiTriStripsPackReference",
+  "referenceTokens": ["3ba", "cbbe", "rare", "nitristrips"],
+  "zapSliderNames": ["HideCape"],
+  "physicsBones": ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "HDT JawLower", "HDT Tongue"],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female"
+}

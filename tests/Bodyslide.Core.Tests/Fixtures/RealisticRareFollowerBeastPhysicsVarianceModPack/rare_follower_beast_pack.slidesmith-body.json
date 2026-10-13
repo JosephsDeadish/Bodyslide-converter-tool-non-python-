@@ -1,0 +1,33 @@
+{
+  "name": "RareFollowerBeastPhysicsVarianceReference",
+  "referenceTokens": [
+    "3ba",
+    "cbbe",
+    "rare",
+    "nitristrips",
+    "beast",
+    "follower",
+    "custom",
+    "sam-light",
+    "ube",
+    "physics-variance"
+  ],
+  "zapSliderNames": [
+    "HideCape",
+    "HidePouch",
+    "HideHarness"
+  ],
+  "physicsBones": [
+    "NPC L Breast01",
+    "NPC R Breast01",
+    "NPC Belly",
+    "Tail1",
+    "TailTip",
+    "WingMid.L",
+    "WingMid.R",
+    "HDT JawLower",
+    "HDT Tongue"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female"
+}

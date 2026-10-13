@@ -1,0 +1,34 @@
+{
+  "name": "Dragonkin Pack Reference",
+  "aliases": [
+    "Scaled Revenant",
+    "Wyvern Mail"
+  ],
+  "referenceTokens": [
+    "dragonkin",
+    "draconic",
+    "dragon",
+    "wyvern"
+  ],
+  "sliderNames": [
+    "Belly",
+    "Butt",
+    "WaistWidth",
+    "TailBase",
+    "WingSpan",
+    "FrillWidth"
+  ],
+  "physicsBones": [
+    "NPC Tail",
+    "TailBarb",
+    "WingFinger01.L",
+    "WingFinger01.R",
+    "Frill.L",
+    "Frill.R"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female",
+  "skeletonFoundation": "Draconic beast-humanoid skeleton",
+  "skeletonFramework": "draconic-humanoid",
+  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+}

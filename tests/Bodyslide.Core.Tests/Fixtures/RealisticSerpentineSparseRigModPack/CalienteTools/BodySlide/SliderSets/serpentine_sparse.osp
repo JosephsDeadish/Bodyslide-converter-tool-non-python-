@@ -1,0 +1,10 @@
+<SliderSetInfo version="1">
+  <SliderSet name="SerpentineSparseRig" set="Serpentine Humanoid">
+    <OutputPath>meshes\beast\serpentine_sparse\</OutputPath>
+    <OutputFile gender="f" use="true">serpentine_sparse_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">serpentine_sparse_1.nif</OutputFile>
+    <Slider name="TailBase" />
+    <Slider name="TailLength" />
+    <Slider name="CoilLength" />
+  </SliderSet>
+</SliderSetInfo>

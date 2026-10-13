@@ -1,0 +1,47 @@
+{
+  "name": "Feline Beast Framework",
+  "aliases": [
+    "Cathay Raider",
+    "Panther Beast"
+  ],
+  "referenceTokens": [
+    "feline",
+    "khajiit",
+    "cathay",
+    "beast"
+  ],
+  "sliderNames": [
+    "Belly",
+    "Thighs",
+    "TailBase",
+    "PawWidth",
+    "SheathLength",
+    "KnotSize",
+    "TongueTipLength"
+  ],
+  "physicsBones": [
+    "NPC Belly",
+    "NPC Tail",
+    "Tail1",
+    "Tail2",
+    "PawFront.L",
+    "PawFront.R",
+    "PawRear.L",
+    "PawRear.R",
+    "TailSheath",
+    "BeastForeskin",
+    "BeastGlans",
+    "BeastKnot",
+    "BeastScrotum",
+    "BeastVagina",
+    "BeastAnus",
+    "JawLower",
+    "TongueMid",
+    "TongueTip"
+  ],
+  "physicsProfile": "smp",
+  "gender": "female",
+  "skeletonFoundation": "Feline beast-humanoid skeleton",
+  "skeletonFramework": "digitigrade-beast",
+  "bodyOutputPath": "meshes\\beast\\feline\\"
+}

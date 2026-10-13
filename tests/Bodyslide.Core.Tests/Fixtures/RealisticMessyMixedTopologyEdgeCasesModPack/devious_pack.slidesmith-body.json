@@ -1,0 +1,39 @@
+{
+  "name": "MessyMixedTopologyEdgeCaseReference",
+  "referenceTokens": [
+    "3ba",
+    "devious",
+    "ebonite",
+    "bhunp",
+    "himbo",
+    "sam-light",
+    "ube",
+    "tng",
+    "the new gentleman 2"
+  ],
+  "zapSliderNames": [
+    "HideCollar",
+    "HideArmbinder",
+    "HideHeelAddon"
+  ],
+  "physicsBones": [
+    "NPC L Breast01",
+    "NPC R Breast01",
+    "NPC Belly",
+    "NPC L Foot",
+    "NPC R Foot",
+    "HeelIK.L",
+    "HeelIK.R",
+    "GroundContact.L",
+    "GroundContact.R",
+    "Vagina",
+    "Anus",
+    "HDT JawLower",
+    "HDT Tongue",
+    "HDT TongueTip",
+    "JawSeam.L",
+    "JawSeam.R"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female"
+}

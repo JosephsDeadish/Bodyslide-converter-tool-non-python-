@@ -1,0 +1,16 @@
+{
+  "name": "HeadgearPackReference",
+  "referenceTokens": [
+    "3ba",
+    "3bbb"
+  ],
+  "zapSliderNames": [
+    "ZapVisor"
+  ],
+  "physicsBones": [
+    "NPC Head [Head]",
+    "NPC Neck [Neck]"
+  ],
+  "physicsProfile": "none",
+  "gender": "female"
+}

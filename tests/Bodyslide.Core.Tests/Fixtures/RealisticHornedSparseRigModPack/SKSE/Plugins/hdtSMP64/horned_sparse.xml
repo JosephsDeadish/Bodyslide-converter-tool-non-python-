@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="HornedSparseRigPhysics">
+  <bone name="GoatHorn.L" />
+  <bone name="GoatHorn.R" />
+  <bone name="HornTip.L" />
+  <bone name="HornTip.R" />
+</system>

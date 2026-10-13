@@ -1,0 +1,12 @@
+<SliderSetInfo version="1">
+  <SliderSet name="BeastSupport" set="Canine Humanoid">
+    <OutputPath>meshes\beast\lykaios\</OutputPath>
+    <OutputFile gender="f" use="true">beast_harness_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">beast_harness_1.nif</OutputFile>
+    <Slider name="SheathLength" />
+    <Slider name="ForeskinLength" />
+    <Slider name="TongueTipLength" />
+    <Slider name="TailBase" />
+    <Slider name="HideSheathGuard" />
+  </SliderSet>
+</SliderSetInfo>

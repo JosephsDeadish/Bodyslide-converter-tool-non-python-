@@ -1,0 +1,38 @@
+{
+  "name": "RareWingedDigitigradePhysicsVarianceReference",
+  "referenceTokens": [
+    "3ba",
+    "cbbe",
+    "rare",
+    "nitristrips",
+    "beast",
+    "follower",
+    "custom",
+    "sam-light",
+    "ube",
+    "physics-variance",
+    "winged",
+    "digitigrade",
+    "hock"
+  ],
+  "zapSliderNames": [
+    "HideCape",
+    "HidePouch",
+    "HideHarness"
+  ],
+  "physicsBones": [
+    "NPC L Breast01",
+    "NPC R Breast01",
+    "NPC Belly",
+    "Tail1",
+    "TailTip",
+    "WingMid.L",
+    "WingMid.R",
+    "Hock.L",
+    "Hock.R",
+    "HDT JawLower",
+    "HDT Tongue"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female"
+}

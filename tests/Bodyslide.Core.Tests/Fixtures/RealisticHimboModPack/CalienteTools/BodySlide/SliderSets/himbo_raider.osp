@@ -1,0 +1,10 @@
+<SliderSetInfo version="1">
+  <SliderSet name="HimboSupport" set="HIMBO">
+    <OutputPath>meshes\male/himbo\variant\</OutputPath>
+    <OutputFile gender="m" use="true">himbo_raider_0.nif</OutputFile>
+    <OutputFile gender="m" use="true" morphfile="1">himbo_raider_1.nif</OutputFile>
+    <Slider name="HimboChest" />
+    <Slider name="BellyBulk" />
+    <Slider name="HideHarness" />
+  </SliderSet>
+</SliderSetInfo>
