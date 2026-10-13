@@ -53,3 +53,11 @@ previously rejected **all** of them. It now reads all 15 (opt-in corpus tests:
 
 The vertex transform now rewrites the partition vertex stream for these files; output stays readable
 with identical vertex counts. Not yet verified: that results look right in BodySlide/in-game.
+
+## Real CBBE reference body (user-provided, kept local)
+
+`femalebody_0/_1.nif` (13554 verts, one `CBBE` shape) parse with the NIF reader, and `femalebody.tri`
+parses to 97 CBBE sliders with a matching vertex count. Conforming the body to itself plus its largest
+morph with `ProximityConform` reproduces the morph (max error < 0.05; observed ~0.001). This validates
+the conform math on real geometry. It does **not** validate CBBE -> 3BA/BHUNP fit: no 3BA/BHUNP body
+mesh has been supplied, and nothing has been checked in BodySlide or in game.

@@ -1,5 +1,7 @@
 using Bodyslide.Core;
 
+using System.Numerics;
+
 namespace Bodyslide.Core.Tests;
 
 /// <summary>
@@ -101,5 +103,41 @@ public sealed class LocalCorpusNifTests
 
         Console.WriteLine($"[local-corpus] transform changed={changed}");
         Assert.True(changed > 0);
+    }
+
+    [Fact]
+    public void LocalCorpusCbbeBodyTriMatchesNifAndProximityConformReproducesMorph()
+    {
+        var root = Environment.GetEnvironmentVariable(EnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            return;
+        }
+
+        var nifPath = Path.Combine(root, "femalebody_0.nif");
+        var triPath = Path.Combine(root, "femalebody.tri");
+        if (!File.Exists(nifPath) || !File.Exists(triPath))
+        {
+            return;
+        }
+
+        var body = Assert.Single(SkyrimSseNifShapeReader.Read(File.ReadAllBytes(nifPath)).Shapes);
+        Assert.True(TriMorphReader.TryRead(triPath, out var tri));
+        var triShape = Assert.Single(tri!.Shapes);
+        Assert.Equal(body.Vertices.Count, triShape.VertexCount);
+
+        var morph = triShape.Morphs.OrderByDescending(m => MorphPayloadAnalysis.Analyze(m.Deltas).MaxMagnitude).First();
+        var source = body.Vertices.Select(static v => new Vector3(v.X, v.Y, v.Z)).ToArray();
+        var target = source.Select((p, i) => p + new Vector3(morph.Deltas[i].X, morph.Deltas[i].Y, morph.Deltas[i].Z)).ToArray();
+
+        var result = ProximityConform.TryConform(source, source, target, 1.0f, 6);
+        Assert.NotNull(result);
+        var maxError = 0f;
+        for (var i = 0; i < source.Length; i++)
+        {
+            maxError = MathF.Max(maxError, (result!.Vertices[i] - target[i]).Length());
+        }
+
+        Assert.True(maxError < 0.05f, $"max error {maxError}");
     }
 }
