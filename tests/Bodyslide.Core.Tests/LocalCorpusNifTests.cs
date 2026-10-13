@@ -53,4 +53,53 @@ public sealed class LocalCorpusNifTests
 
         Console.WriteLine($"[local-corpus] supported={supported} rejected={string.Join(", ", rejected.Select(static p => $"{p.Key}={p.Value}"))}");
     }
+
+    [Fact]
+    public void LocalCorpusSkinnedOutfitNifsAreFullyReadWhenRequested()
+    {
+        var root = Environment.GetEnvironmentVariable(EnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root) ||
+            Environment.GetEnvironmentVariable("SLIDESMITH_LOCAL_CORPUS_EXPECT_ALL") != "1")
+        {
+            return;
+        }
+
+        foreach (var path in Directory.EnumerateFiles(root, "*.nif", SearchOption.AllDirectories))
+        {
+            var result = SkyrimSseNifShapeReader.Read(File.ReadAllBytes(path));
+            Assert.True(result.Supported, $"{path}: {result.Diagnostic}");
+            Assert.All(result.Shapes, shape => Assert.NotEmpty(shape.TriangleIndices));
+        }
+    }
+
+    [Fact]
+    public void LocalCorpusTransformKeepsNifsReadableWithSameVertexCounts()
+    {
+        var root = Environment.GetEnvironmentVariable(EnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root) ||
+            Environment.GetEnvironmentVariable("SLIDESMITH_LOCAL_CORPUS_EXPECT_ALL") != "1")
+        {
+            return;
+        }
+
+        var changed = 0;
+        foreach (var path in Directory.EnumerateFiles(root, "*.nif", SearchOption.AllDirectories))
+        {
+            var bytes = File.ReadAllBytes(path);
+            var before = SkyrimSseNifShapeReader.Read(bytes);
+            var transformed = LocalExportService.TryApplyNifVertexTransform(
+                bytes, path, new Dictionary<string, double> { ["chest"] = 0.05, ["hips"] = 0.05 }, null);
+            var after = SkyrimSseNifShapeReader.Read(transformed);
+            Assert.True(after.Supported, $"{path}: {after.Diagnostic}");
+            Assert.Equal(before.Shapes.Select(static x => x.Vertices.Count), after.Shapes.Select(static x => x.Vertices.Count));
+            Assert.Equal(bytes.Length, transformed.Length);
+            if (!transformed.AsSpan().SequenceEqual(bytes))
+            {
+                changed++;
+            }
+        }
+
+        Console.WriteLine($"[local-corpus] transform changed={changed}");
+        Assert.True(changed > 0);
+    }
 }

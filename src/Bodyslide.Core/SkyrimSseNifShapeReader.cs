@@ -118,7 +118,7 @@ internal static class SkyrimSseNifShapeReader
     {
         try
         {
-            var shapes = ReadSupportedShapes(bytes);
+            var shapes = ReadSupportedShapes(bytes, LooksLikeRealSkyrimSeHeader(bytes));
             var diagnostic = shapes.Any(static shape => shape.GeometryBlockType == "BSDynamicTriShape")
                 ? "supported-bsdynamictrishape-dynamic-position-stream"
                 : shapes.Any(static shape => shape.GeometryBlockType == "BSSubIndexTriShape")
@@ -146,7 +146,52 @@ internal static class SkyrimSseNifShapeReader
         }
     }
 
-    private static IReadOnlyList<SkyrimSseNifShape> ReadSupportedShapes(ReadOnlySpan<byte> bytes)
+    // Real Skyrim SE files carry author/process/export short strings and a 16-bit block type
+    // count after the stream version; older compact fixtures use a 32-bit count directly.
+    private static bool LooksLikeRealSkyrimSeHeader(ReadOnlySpan<byte> bytes)
+    {
+        var lineEnd = bytes.IndexOf((byte)'\n');
+        if (lineEnd < 0)
+        {
+            return false;
+        }
+
+        var offset = lineEnd + 1 + sizeof(uint) + 1 + sizeof(uint) + sizeof(uint) + sizeof(uint);
+        for (var i = 0; i < 3; i++)
+        {
+            if (offset >= bytes.Length)
+            {
+                return false;
+            }
+
+            offset += 1 + bytes[offset];
+        }
+
+        if (offset + sizeof(ushort) + sizeof(uint) > bytes.Length)
+        {
+            return false;
+        }
+
+        var typeCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..]);
+        var firstNameLength = BinaryPrimitives.ReadUInt32LittleEndian(bytes[(offset + sizeof(ushort))..]);
+        if (typeCount == 0 || firstNameLength is 0 or > 64 ||
+            offset + sizeof(ushort) + sizeof(uint) + firstNameLength > bytes.Length)
+        {
+            return false;
+        }
+
+        foreach (var character in bytes.Slice(offset + sizeof(ushort) + sizeof(uint), (int)firstNameLength))
+        {
+            if (!char.IsAsciiLetterOrDigit((char)character) && character != (byte)'_')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static IReadOnlyList<SkyrimSseNifShape> ReadSupportedShapes(ReadOnlySpan<byte> bytes, bool realHeader)
     {
         var lineEnd = bytes.IndexOf((byte)'\n');
         if (lineEnd < 0)
@@ -166,7 +211,22 @@ internal static class SkyrimSseNifShapeReader
         var userVersion = ReadUInt32(bytes, ref offset);
         var blockCount = ReadCount(bytes, ref offset, MaximumBlockCount, "nif-block-count-out-of-range");
         var streamVersion = ReadUInt32(bytes, ref offset);
-        var blockTypeCount = ReadCount(bytes, ref offset, MaximumBlockTypeCount, "nif-block-type-count-out-of-range");
+        int blockTypeCount;
+        if (realHeader)
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                var length = ReadByte(bytes, ref offset);
+                Skip(bytes, ref offset, length);
+            }
+
+            blockTypeCount = ReadUInt16(bytes, ref offset);
+        }
+        else
+        {
+            blockTypeCount = ReadCount(bytes, ref offset, MaximumBlockTypeCount, "nif-block-type-count-out-of-range");
+        }
+
         if (version != FileVersion ||
             endian != 1 ||
             userVersion != SkyrimSeUserVersion ||
@@ -344,6 +404,58 @@ internal static class SkyrimSseNifShapeReader
                 vertexCount)
             : null;
         var dataSize = ReadUInt32(bytes[..blockEnd], ref offset);
+        if (isSkinned && vertexCount == 0 && triangleCount == 0 && dataSize == 0 && skinData?.VertexStream is { } stream)
+        {
+            // Skyrim SE skinned shapes written by Outfit Studio keep their vertices in NiSkinPartition;
+            // stream version 100 always stores positions as three 32-bit floats at the vertex start.
+            const ulong PositionsFlag = 1UL << 44;
+            var trailingOffset = offset;
+            var emptyParticleData = blockEnd - offset == sizeof(uint) && ReadUInt32(bytes[..blockEnd], ref trailingOffset) == 0;
+            if ((offset != blockEnd && !emptyParticleData) ||
+                (stream.Descriptor & PositionsFlag) == 0 ||
+                stream.Stride < 3 * sizeof(float) ||
+                skinData.PartitionTriangles is not { Count: > 0 } partitionTriangles)
+            {
+                throw new InvalidDataException($"unsupported-partition-vertex-layout:{strings[(int)nameIndex]}");
+            }
+
+            var streamVertices = new MeshVertex[stream.VertexCount];
+            for (var i = 0; i < streamVertices.Length; i++)
+            {
+                var at = checked(stream.DataOffset + (i * stream.Stride));
+                var x = ReadSingleAt(bytes, at);
+                var y = ReadSingleAt(bytes, at + sizeof(float));
+                var z = ReadSingleAt(bytes, at + (2 * sizeof(float)));
+                if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z))
+                {
+                    throw new InvalidDataException($"bstrishape-nonfinite-vertex:{strings[(int)nameIndex]}");
+                }
+
+                streamVertices[i] = new MeshVertex(x, y, z);
+            }
+
+            return new SkyrimSseNifShape(
+                strings[(int)nameIndex],
+                streamVertices,
+                partitionTriangles.ToArray(),
+                stream.Stride,
+                stream.DataOffset,
+                isSkinned,
+                geometryBlockType,
+                null,
+                null,
+                null,
+                stream.Descriptor,
+                skinInstance,
+                skinInstanceType,
+                skinData.SkinDataBlockIndex,
+                skinData.SkinPartitionBlockIndex,
+                skinData.SkeletonRootBlockIndex,
+                skinData.BoneBlockIndices,
+                skinData.PartitionCount,
+                skinData.BodyPartitions);
+        }
+
         var vertexStride = checked((int)(descriptor & 0xF) * 4);
         var hasPositions = (descriptor & (1UL << 44)) != 0;
         var isDynamic = string.Equals(geometryBlockType, "BSDynamicTriShape", StringComparison.Ordinal);
@@ -533,20 +645,43 @@ internal static class SkyrimSseNifShapeReader
             throw new InvalidDataException($"skin-instance-unmodeled-trailing-data:{shapeName}");
         }
 
+        var vertexStream = shapeVertexCount == 0
+            ? PeekPartitionVertexStream(bytes, blockStarts[skinPartitionBlockIndex], blockEnds[skinPartitionBlockIndex], shapeName)
+            : null;
+        var effectiveVertexCount = vertexStream?.VertexCount ?? shapeVertexCount;
         ReadSkinData(
             bytes,
             blockStarts[skinDataBlockIndex],
             blockEnds[skinDataBlockIndex],
             boneCount,
-            shapeVertexCount,
+            effectiveVertexCount,
             shapeName);
-        var partitionCount = ReadSkinPartition(
-            bytes,
-            blockStarts[skinPartitionBlockIndex],
-            blockEnds[skinPartitionBlockIndex],
-            boneCount,
-            shapeVertexCount,
-            shapeName);
+        var partitionTriangles = new List<ushort>();
+        int partitionCount;
+        try
+        {
+            partitionCount = ReadSkinPartition(
+                bytes,
+                blockStarts[skinPartitionBlockIndex],
+                blockEnds[skinPartitionBlockIndex],
+                boneCount,
+                effectiveVertexCount,
+                shapeName,
+                partitionTriangles,
+                hasFacesFlag: true);
+        }
+        catch (Exception exception) when (exception is InvalidDataException or ArgumentOutOfRangeException)
+        {
+            partitionTriangles.Clear();
+            partitionCount = ReadSkinPartition(
+                bytes,
+                blockStarts[skinPartitionBlockIndex],
+                blockEnds[skinPartitionBlockIndex],
+                boneCount,
+                effectiveVertexCount,
+                shapeName,
+                partitionTriangles);
+        }
 
         if (string.Equals(skinInstanceType, "BSDismemberSkinInstance", StringComparison.Ordinal) &&
             bodyPartitions.Count != partitionCount)
@@ -560,7 +695,32 @@ internal static class SkyrimSseNifShapeReader
             skeletonRootBlockIndex,
             boneBlockIndexes,
             partitionCount,
-            bodyPartitions);
+            bodyPartitions,
+            vertexStream,
+            partitionTriangles);
+    }
+
+    private static PartitionVertexStream? PeekPartitionVertexStream(
+        ReadOnlySpan<byte> bytes, int blockStart, int blockEnd, string shapeName)
+    {
+        var offset = blockStart;
+        _ = ReadCount(bytes[..blockEnd], ref offset, MaximumSkinPartitionCount, "skin-partition-count-out-of-range");
+        var vertexDataSize = ReadCount(bytes[..blockEnd], ref offset, 64 * 1024 * 1024, "skin-partition-vertex-data-size-out-of-range");
+        var vertexSize = ReadUInt32(bytes[..blockEnd], ref offset);
+        var descriptor = ReadUInt64(bytes[..blockEnd], ref offset);
+        if (vertexDataSize == 0)
+        {
+            return null;
+        }
+
+        var stride = checked((int)(descriptor & 0xF) * 4);
+        if (vertexSize == 0 || vertexSize != stride || vertexDataSize % vertexSize != 0 ||
+            vertexDataSize > blockEnd - offset)
+        {
+            throw new InvalidDataException($"skin-partition-vertex-layout-invalid:{shapeName}");
+        }
+
+        return new PartitionVertexStream(offset, checked((int)(vertexDataSize / vertexSize)), stride, descriptor);
     }
 
     private static void ReadSkinData(
@@ -630,7 +790,9 @@ internal static class SkyrimSseNifShapeReader
         int blockEnd,
         int skinBoneCount,
         int shapeVertexCount,
-        string shapeName)
+        string shapeName,
+        List<ushort>? globalTriangles = null,
+        bool hasFacesFlag = false)
     {
         var offset = blockStart;
         var partitionCount = ReadCount(
@@ -719,9 +881,19 @@ internal static class SkyrimSseNifShapeReader
                 stripLengths[i] = ReadUInt16(bytes[..blockEnd], ref offset);
             }
 
-            if (stripCount == 0)
+            var hasFaces = !hasFacesFlag ||
+                ReadBoolean(bytes[..blockEnd], ref offset, "skin-partition-has-faces-flag", shapeName);
+            if (!hasFaces)
             {
-                ReadPartitionTriangles(bytes[..blockEnd], ref offset, triangleCount, vertexCount, shapeName);
+                if (triangleCount != 0 || stripCount != 0)
+                {
+                    throw new InvalidDataException($"skin-partition-faces-missing:{shapeName}");
+                }
+            }
+            else if (stripCount == 0)
+            {
+                // Real Skyrim SE partitions index the whole shape, not just the partition's own vertices.
+                ReadPartitionTriangles(bytes[..blockEnd], ref offset, triangleCount, hasFacesFlag ? shapeVertexCount : vertexCount, shapeName);
             }
             else
             {
@@ -756,7 +928,7 @@ internal static class SkyrimSseNifShapeReader
             _ = ReadByte(bytes[..blockEnd], ref offset);
             _ = ReadBoolean(bytes[..blockEnd], ref offset, "skin-partition-global-vertex-buffer-flag", shapeName);
             _ = ReadUInt64(bytes[..blockEnd], ref offset);
-            ReadPartitionTriangles(bytes[..blockEnd], ref offset, triangleCount, shapeVertexCount, shapeName);
+            ReadPartitionTriangles(bytes[..blockEnd], ref offset, triangleCount, shapeVertexCount, shapeName, globalTriangles);
         }
 
         if (offset != blockEnd)
@@ -772,16 +944,20 @@ internal static class SkyrimSseNifShapeReader
         ref int offset,
         int triangleCount,
         int vertexCount,
-        string shapeName)
+        string shapeName,
+        List<ushort>? collected = null)
     {
         for (var triangleIndex = 0; triangleIndex < triangleCount; triangleIndex++)
         {
             for (var vertex = 0; vertex < 3; vertex++)
             {
-                if (ReadUInt16(bytes, ref offset) >= vertexCount)
+                var index = ReadUInt16(bytes, ref offset);
+                if (index >= vertexCount)
                 {
                     throw new InvalidDataException($"skin-partition-triangle-index-out-of-range:{shapeName}");
                 }
+
+                collected?.Add(index);
             }
         }
     }
@@ -859,7 +1035,11 @@ internal static class SkyrimSseNifShapeReader
         int SkeletonRootBlockIndex,
         IReadOnlyList<int> BoneBlockIndices,
         int PartitionCount,
-        IReadOnlyList<SkyrimSseNifBodyPartition> BodyPartitions);
+        IReadOnlyList<SkyrimSseNifBodyPartition> BodyPartitions,
+        PartitionVertexStream? VertexStream = null,
+        IReadOnlyList<ushort>? PartitionTriangles = null);
+
+    private sealed record PartitionVertexStream(int DataOffset, int VertexCount, int Stride, ulong Descriptor);
 
     private static MeshVertex[] ReadHalfVector3Array(
         ReadOnlySpan<byte> bytes,

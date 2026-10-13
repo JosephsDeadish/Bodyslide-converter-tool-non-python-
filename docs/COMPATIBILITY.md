@@ -41,3 +41,15 @@ Opt-in: set `SLIDESMITH_REFERENCE_SOURCE_NIF` and `SLIDESMITH_REFERENCE_TARGET_N
 target reference body NIF to use proximity conform in place of the heuristic transform. Off by
 default; when the pair or the outfit geometry is ineligible it falls back to the heuristic and
 records `nif-conform:heuristic-fallback`. Successful runs record `nif-conform:proximity-unvalidated`.
+
+## Real-file reader findings (BDE pack, Skyrim SE, Outfit Studio exports)
+
+Checked against 15 real NIFs from a Nexus armor pack (kept local, not committed): the reader
+previously rejected **all** of them. It now reads all 15 (opt-in corpus tests:
+`SLIDESMITH_LOCAL_CORPUS=<dir> SLIDESMITH_LOCAL_CORPUS_EXPECT_ALL=1`). Fixes:
+- real header layout (author/process/export short strings, 16-bit block type count);
+- skinned shapes whose vertices live in `NiSkinPartition` (shape block has no vertex data);
+- `hasFaces` flag and shape-wide triangle indices in multi-partition `NiSkinPartition`.
+
+The vertex transform now rewrites the partition vertex stream for these files; output stays readable
+with identical vertex counts. Not yet verified: that results look right in BodySlide/in-game.
