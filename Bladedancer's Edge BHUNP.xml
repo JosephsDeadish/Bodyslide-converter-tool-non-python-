@@ -1,0 +1,64 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<SliderGroups>
+    <Group name="BHUNP 3BBB">
+        <Member name="BDE_ArmorCombined_BHUNP"/>
+        <Member name="BDE_BreastPlate_BHUNP"/>
+        <Member name="BDE_Cuisse_BHUNP"/>
+        <Member name="BDE_Gloves_BHUNP"/>
+        <Member name="BDE_Gloves_BHUNP(firstPerson)"/>
+        <Member name="BDE_Greaves_BHUNP"/>
+        <Member name="BDE_Legs_BHUNP"/>
+        <Member name="BDE_Necklace_BHUNP"/>
+        <Member name="BDE_Panty_BHUNP"/>
+        <Member name="BDE_PauldronL_BHUNP"/>
+        <Member name="BDE_PauldronR_BHUNP"/>
+        <Member name="BDE_Sabatons_BHUNP"/>
+        <Member name="BDE_Skirt_BHUNP"/>
+        <Member name="BDE_Tasset_BHUNP"/>
+        <Member name="BDE_TemPTTemPP"/>
+        <Member name="BDE_Top_BHUNP"/>
+        <Member name="BDECombined_BHUNP(firstPerson)"/>
+        <Member name="BDEVambraces_BHUNP"/>
+        <Member name="BDEVambraces_BHUNP(firstPerson)"/>
+    </Group>
+    <Group name="Bladedancers Edge BHUNP">
+        <Member name="BDE_ArmorCombined_BHUNP"/>
+        <Member name="BDE_BreastPlate_BHUNP"/>
+        <Member name="BDE_Cuisse_BHUNP"/>
+        <Member name="BDE_Gloves_BHUNP"/>
+        <Member name="BDE_Gloves_BHUNP(firstPerson)"/>
+        <Member name="BDE_Greaves_BHUNP"/>
+        <Member name="BDE_Legs_BHUNP"/>
+        <Member name="BDE_Necklace_BHUNP"/>
+        <Member name="BDE_Panty_BHUNP"/>
+        <Member name="BDE_PauldronL_BHUNP"/>
+        <Member name="BDE_PauldronR_BHUNP"/>
+        <Member name="BDE_Sabatons_BHUNP"/>
+        <Member name="BDE_Skirt_BHUNP"/>
+        <Member name="BDE_Tasset_BHUNP"/>
+        <Member name="BDE_Top_BHUNP"/>
+        <Member name="BDECombined_BHUNP(firstPerson)"/>
+        <Member name="BDEVambraces_BHUNP"/>
+        <Member name="BDEVambraces_BHUNP(firstPerson)"/>
+    </Group>
+    <Group name="Unified UNP">
+        <Member name="BDE_ArmorCombined_BHUNP"/>
+        <Member name="BDE_BreastPlate_BHUNP"/>
+        <Member name="BDE_Cuisse_BHUNP"/>
+        <Member name="BDE_Gloves_BHUNP"/>
+        <Member name="BDE_Gloves_BHUNP(firstPerson)"/>
+        <Member name="BDE_Greaves_BHUNP"/>
+        <Member name="BDE_Legs_BHUNP"/>
+        <Member name="BDE_Necklace_BHUNP"/>
+        <Member name="BDE_Panty_BHUNP"/>
+        <Member name="BDE_PauldronL_BHUNP"/>
+        <Member name="BDE_PauldronR_BHUNP"/>
+        <Member name="BDE_Sabatons_BHUNP"/>
+        <Member name="BDE_Skirt_BHUNP"/>
+        <Member name="BDE_Tasset_BHUNP"/>
+        <Member name="BDE_Top_BHUNP"/>
+        <Member name="BDECombined_BHUNP(firstPerson)"/>
+        <Member name="BDEVambraces_BHUNP"/>
+        <Member name="BDEVambraces_BHUNP(firstPerson)"/>
+    </Group>
+</SliderGroups>
