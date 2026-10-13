@@ -1,0 +1,901 @@
+{
+  "ScannedPlugins": [
+    "BDE_Armor.esp [ESPFE; confidence=1.00]"
+  ],
+  "ArmorAddons": [
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_Combined_1.nif",
+        "armor/GoasBDEarmor/BDEcombined1stP_1.nif"
+      ],
+      "FormId": 33556513,
+      "EditorId": "aaaBDEcombinedAA",
+      "BipedSlots": [
+        32
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 2081,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_BreastPlate_1.nif",
+        "Actors/Character/Character Assets/1stPersonFemaleBody_1.nif"
+      ],
+      "FormId": 33557857,
+      "EditorId": "aaaBDEcuirassAA",
+      "BipedSlots": [
+        32
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3425,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_Top_1.nif",
+        "Actors/Character/Character Assets/1stPersonFemaleBody_1.nif"
+      ],
+      "FormId": 33557858,
+      "EditorId": "aaaBDEcorsetAA",
+      "BipedSlots": [
+        32
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3426,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_Gloves_1.nif",
+        "armor/GoasBDEarmor/BDE_Gloves_1stP_1.nif"
+      ],
+      "FormId": 33557859,
+      "EditorId": "aaaBDEglovesAA",
+      "BipedSlots": [
+        33
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3427,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_Sabatons_1.nif"
+      ],
+      "FormId": 33557860,
+      "EditorId": "aaaBDEbootsAA",
+      "BipedSlots": [
+        37
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3428,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_Cuisse_1.nif"
+      ],
+      "FormId": 33557861,
+      "EditorId": "aaaBDEplatethighAA",
+      "BipedSlots": [
+        53
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3429,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_Greaves_1.nif"
+      ],
+      "FormId": 33557862,
+      "EditorId": "aaaBDEplateshinAA",
+      "BipedSlots": [
+        54
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3430,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDEVambraces_1.nif",
+        "armor/GoasBDEarmor/BDEVambraces1stP_1.nif"
+      ],
+      "FormId": 33557863,
+      "EditorId": "aaaBDEarmsAA",
+      "BipedSlots": [
+        34,
+        58
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3431,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_Tasset_1.nif"
+      ],
+      "FormId": 33557864,
+      "EditorId": "aaaBDEplatehipAA",
+      "BipedSlots": [
+        49
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3432,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_Skirt_1.nif"
+      ],
+      "FormId": 33557865,
+      "EditorId": "aaaBDEhipAA",
+      "BipedSlots": [
+        48
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3433,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_Legs_1.nif"
+      ],
+      "FormId": 33557866,
+      "EditorId": "aaaBDEleatherlegsAA",
+      "BipedSlots": [
+        60
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3434,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_Panty_1.nif"
+      ],
+      "FormId": 33557867,
+      "EditorId": "aaaBDEpantAA",
+      "BipedSlots": [
+        52
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3435,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_PauldronR_1.nif"
+      ],
+      "FormId": 33557868,
+      "EditorId": "aaaBDEshoulderRAA",
+      "BipedSlots": [
+        57
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3436,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_PauldronL_1.nif"
+      ],
+      "FormId": 33557869,
+      "EditorId": "aaaBDEshoulderLAA",
+      "BipedSlots": [
+        59
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3437,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    },
+    {
+      "RecordType": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "DetectedMeshPaths": [
+        "armor/GoasBDEarmor/BDE_Necklace_1.nif"
+      ],
+      "FormId": 33557870,
+      "EditorId": "aaaBDEnecklaceAA",
+      "BipedSlots": [
+        35
+      ],
+      "RaceFormId": 25,
+      "OwningPluginFileName": "BDE_Armor.esp",
+      "LocalFormId": 3438,
+      "DeclaredMasterFileNames": [
+        "Skyrim.esm",
+        "Update.esm"
+      ]
+    }
+  ],
+  "PatchGuidance": "Found 15 ARMA record(s) with mesh paths. Run patch-armor.pas to auto-rewrite matching ArmorAddon (ARMA) records for 3BA:\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEcombinedAA] (FormID: 02000821)\r\n    armor/GoasBDEarmor/BDE_Combined_1.nif\r\n    armor/GoasBDEarmor/BDEcombined1stP_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEcuirassAA] (FormID: 02000D61)\r\n    armor/GoasBDEarmor/BDE_BreastPlate_1.nif\r\n    Actors/Character/Character Assets/1stPersonFemaleBody_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEcorsetAA] (FormID: 02000D62)\r\n    armor/GoasBDEarmor/BDE_Top_1.nif\r\n    Actors/Character/Character Assets/1stPersonFemaleBody_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEglovesAA] (FormID: 02000D63)\r\n    armor/GoasBDEarmor/BDE_Gloves_1.nif\r\n    armor/GoasBDEarmor/BDE_Gloves_1stP_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEbootsAA] (FormID: 02000D64)\r\n    armor/GoasBDEarmor/BDE_Sabatons_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEplatethighAA] (FormID: 02000D65)\r\n    armor/GoasBDEarmor/BDE_Cuisse_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEplateshinAA] (FormID: 02000D66)\r\n    armor/GoasBDEarmor/BDE_Greaves_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEarmsAA] (FormID: 02000D67)\r\n    armor/GoasBDEarmor/BDEVambraces_1.nif\r\n    armor/GoasBDEarmor/BDEVambraces1stP_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEplatehipAA] (FormID: 02000D68)\r\n    armor/GoasBDEarmor/BDE_Tasset_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEhipAA] (FormID: 02000D69)\r\n    armor/GoasBDEarmor/BDE_Skirt_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEleatherlegsAA] (FormID: 02000D6A)\r\n    armor/GoasBDEarmor/BDE_Legs_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEpantAA] (FormID: 02000D6B)\r\n    armor/GoasBDEarmor/BDE_Panty_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEshoulderRAA] (FormID: 02000D6C)\r\n    armor/GoasBDEarmor/BDE_PauldronR_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEshoulderLAA] (FormID: 02000D6D)\r\n    armor/GoasBDEarmor/BDE_PauldronL_1.nif\r\n  Plugin: BDE_Armor.esp [ESPFE; confidence=1.00] [aaaBDEnecklaceAA] (FormID: 02000D6E)\r\n    armor/GoasBDEarmor/BDE_Necklace_1.nif\r\n",
+  "AmbiguousPluginsNeedingRecheck": [],
+  "PluginInstallHints": [
+    {
+      "SourcePlugin": "BDE_Armor.esp",
+      "InheritedMasters": [
+        "Skyrim.esm",
+        "Update.esm"
+      ],
+      "GeneratedPatchPlugin": "BDE_Armor_SlidesmithPatch.esp",
+      "RecommendedPluginLoadAfter": [
+        "Skyrim.esm",
+        "Update.esm",
+        "BDE_Armor.esp"
+      ],
+      "RecommendedModManagerPlacement": "Keep the SlideSmith output mod below the source armor mod so converted assets and generated plugins win conflicts cleanly.",
+      "ManualReviewRequired": false,
+      "Notes": [
+        "Install the SlideSmith output as a separate mod and place it below the original armor/body mod in Mod Organizer 2 or Vortex so converted meshes and physics files win conflicts.",
+        "BDE_Armor_SlidesmithPatch.esp should load after BDE_Armor.esp and keep the inherited master chain in this same order: Skyrim.esm -\u003E Update.esm -\u003E BDE_Armor.esp."
+      ]
+    }
+  ],
+  "UnresolvedTieGroups": [],
+  "LinkedArmorFamilyReviewSteps": [],
+  "RewriteMappings": [
+    {
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_BreastPlate_1.nif",
+      "RewrittenMeshPath": "slidesmith/3ba/armor/GoasBDEarmor/BDE_BreastPlate_1.nif"
+    }
+  ],
+  "ProposedPatchSteps": [
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Combined_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Combined_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDEcombined1stP_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDEcombined1stP_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_BreastPlate_1.nif",
+      "ProposedMeshPath": "slidesmith/3ba/armor/GoasBDEarmor/BDE_BreastPlate_1.nif",
+      "RewriteReady": true,
+      "PlacementNote": "Use patch-armor.pas to rewrite ARMA path to slidesmith/3ba/armor/GoasBDEarmor/BDE_BreastPlate_1.nif and keep the converted NIF at that path.",
+      "XEditAction": "Run generated patch-armor.pas in xEdit to auto-rewrite matching ARMA mesh paths.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "Actors/Character/Character Assets/1stPersonFemaleBody_1.nif",
+      "ProposedMeshPath": "Actors/Character/Character Assets/1stPersonFemaleBody_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Top_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Top_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "Actors/Character/Character Assets/1stPersonFemaleBody_1.nif",
+      "ProposedMeshPath": "Actors/Character/Character Assets/1stPersonFemaleBody_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Gloves_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Gloves_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Gloves_1stP_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Gloves_1stP_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Sabatons_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Sabatons_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Cuisse_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Cuisse_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Greaves_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Greaves_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDEVambraces_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDEVambraces_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDEVambraces1stP_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDEVambraces1stP_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Tasset_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Tasset_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Skirt_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Skirt_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Legs_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Legs_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Panty_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Panty_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_PauldronR_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_PauldronR_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_PauldronL_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_PauldronL_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "ArmorAddon (ARMA)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/BDE_Necklace_1.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/BDE_Necklace_1.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMA mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDcombined.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDcombined.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDbreastplate.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDbreastplate.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDtop.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDtop.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDvambrace.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDvambrace.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDcuisse.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDcuisse.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDtasset.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDtasset.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDsabatons.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDsabatons.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDgreaves.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDgreaves.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDpanty.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDpanty.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDskirt.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDskirt.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDlegs.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDlegs.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDshoulder.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDshoulder.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDshoulder.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDshoulder.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDnecklace.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDnecklace.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    },
+    {
+      "Plugin": "BDE_Armor.esp [ESPFE; confidence=1.00]",
+      "RecordType": "Armor (ARMO)",
+      "OriginalMeshPath": "armor/GoasBDEarmor/GND/GNDgloves.nif",
+      "ProposedMeshPath": "armor/GoasBDEarmor/GND/GNDgloves.nif",
+      "RewriteReady": false,
+      "PlacementNote": "No converted filename match found for this path. Keep original mesh path or patch manually for 3BA.",
+      "XEditAction": "Open in xEdit and patch this ARMO mesh path manually.",
+      "Tool": "xEdit",
+      "ManualReviewReason": null,
+      "CandidateSourceMeshPaths": [],
+      "CandidateSourceFamilies": [],
+      "RelatedPluginMeshPaths": [],
+      "ResolvedNeighborSourceMeshPaths": [],
+      "SharedCandidateFamilies": []
+    }
+  ],
+  "RewriteVerification": {
+    "DetectedMeshPathCount": 33,
+    "RewriteReadyCount": 1,
+    "VerifiedPluginPathCount": 2,
+    "StagedMeshCount": 1,
+    "LinkedArmorReferenceCount": 0,
+    "VerifiedLinkedArmorReferenceCount": 0,
+    "MissingConvertedMatches": [
+      "Actors/Character/Character Assets/1stPersonFemaleBody_1.nif"
+    ],
+    "AmbiguousConvertedMatches": [],
+    "MissingStagedMeshes": [],
+    "MissingLinkedArmorAddonRecords": [],
+    "UnscannedLinkedArmorAddonReferences": [],
+    "UnsupportedLinkedArmorAddonMeshes": [],
+    "MissingLinkedConvertedMatches": [],
+    "MissingLinkedStagedMeshes": [],
+    "PartialLinkedArmorFamilyFailures": [],
+    "MissingPatchPluginMasters": [],
+    "PatchPluginMasterOrderMismatches": [],
+    "UnverifiedPatchedPlugins": [],
+    "Warnings": [],
+    "UnresolvedTieGroups": [],
+    "ResolvedViaSideSignalDisambiguationCount": 0
+  }
+}
