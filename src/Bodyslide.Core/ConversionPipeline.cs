@@ -24793,6 +24793,39 @@ internal sealed class LocalExportService(
         return null;
     }
 
+    internal const string ReferenceSourceNifEnvironmentVariable = "SLIDESMITH_REFERENCE_SOURCE_NIF";
+    internal const string ReferenceTargetNifEnvironmentVariable = "SLIDESMITH_REFERENCE_TARGET_NIF";
+
+    // Opt-in and unvalidated against real bodies: only active when both environment variables
+    // point at existing reference body NIFs (source body, then target body).
+    private static bool TryLoadOptInReferencePair(out byte[] sourceBytes, out byte[] targetBytes)
+    {
+        sourceBytes = [];
+        targetBytes = [];
+        var sourcePath = Environment.GetEnvironmentVariable(ReferenceSourceNifEnvironmentVariable);
+        var targetPath = Environment.GetEnvironmentVariable(ReferenceTargetNifEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(sourcePath) || string.IsNullOrWhiteSpace(targetPath) ||
+            !File.Exists(sourcePath) || !File.Exists(targetPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            sourceBytes = File.ReadAllBytes(sourcePath);
+            targetBytes = File.ReadAllBytes(targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     private static async Task CopyNifAsync(string sourcePath, string destPath, ConvertedMesh mesh, CancellationToken cancellationToken, List<string>? stretchWarnings = null)
     {
         if (!File.Exists(sourcePath))
@@ -24805,7 +24838,22 @@ internal sealed class LocalExportService(
         }
 
         var sourceBytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken);
-        var outputBytes = TryApplyNifVertexTransform(sourceBytes, sourcePath, mesh.RegionalMorphing, mesh.DeformationCage);
+        byte[]? outputBytes = null;
+        if (TryLoadOptInReferencePair(out var referenceSourceBytes, out var referenceTargetBytes))
+        {
+            var conformed = ReferenceNifConform.TryConform(sourceBytes, referenceSourceBytes, referenceTargetBytes);
+            if (conformed is not null)
+            {
+                outputBytes = conformed.Bytes;
+                stretchWarnings?.Add($"nif-conform:proximity-unvalidated:{Path.GetFileName(sourcePath)}:conformed={conformed.ConformedVertices},unmatched={conformed.UnmatchedVertices}");
+            }
+            else
+            {
+                stretchWarnings?.Add($"nif-conform:heuristic-fallback:{Path.GetFileName(sourcePath)}:reference-pair-or-geometry-not-eligible");
+            }
+        }
+
+        outputBytes ??= TryApplyNifVertexTransform(sourceBytes, sourcePath, mesh.RegionalMorphing, mesh.DeformationCage);
         await File.WriteAllBytesAsync(destPath, outputBytes, cancellationToken);
         if (!ReferenceEquals(outputBytes, sourceBytes))
         {

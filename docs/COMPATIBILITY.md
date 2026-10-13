@@ -36,3 +36,8 @@ Add a row only with the highest level actually demonstrated.
 reference-body conforming and weight transfer. They are unit-tested on synthetic meshes only, fail
 closed on mismatched reference pairs, and are **not** called by the conversion pipeline yet. They
 have not been validated against real CBBE/3BA/BHUNP bodies, BodySlide builds or in-game.
+
+Opt-in: set `SLIDESMITH_REFERENCE_SOURCE_NIF` and `SLIDESMITH_REFERENCE_TARGET_NIF` to a source and
+target reference body NIF to use proximity conform in place of the heuristic transform. Off by
+default; when the pair or the outfit geometry is ineligible it falls back to the heuristic and
+records `nif-conform:heuristic-fallback`. Successful runs record `nif-conform:proximity-unvalidated`.
