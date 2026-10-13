@@ -61,3 +61,11 @@ parses to 97 CBBE sliders with a matching vertex count. Conforming the body to i
 morph with `ProximityConform` reproduces the morph (max error < 0.05; observed ~0.001). This validates
 the conform math on real geometry. It does **not** validate CBBE -> 3BA/BHUNP fit: no 3BA/BHUNP body
 mesh has been supplied, and nothing has been checked in BodySlide or in game.
+
+## Real 3BA reference body (user-provided, kept local)
+
+The `femalebody_0/_1.nif` on the uploads branch is now a 3BA body (shapes `3BA`, `3BA_Vagina`,
+`3BA_Anus`, skinned BSTriShape, partition-embedded vertices). The NIF reader parses it, and its TRI
+vertex count matches the main shape; proximity conform reproduces its largest morph. Also uploaded:
+feet, hands and Argonian hands NIFs. Still missing: a BHUNP (source) body, so a BHUNP -> 3BA conform
+cannot be validated; no BodySlide or in-game results.

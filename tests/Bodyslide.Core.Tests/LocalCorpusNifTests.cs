@@ -106,7 +106,7 @@ public sealed class LocalCorpusNifTests
     }
 
     [Fact]
-    public void LocalCorpusCbbeBodyTriMatchesNifAndProximityConformReproducesMorph()
+    public void LocalCorpusFemaleBodyTriMatchesNifAndProximityConformReproducesMorph()
     {
         var root = Environment.GetEnvironmentVariable(EnvironmentVariable);
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
@@ -121,9 +121,9 @@ public sealed class LocalCorpusNifTests
             return;
         }
 
-        var body = Assert.Single(SkyrimSseNifShapeReader.Read(File.ReadAllBytes(nifPath)).Shapes);
+        var body = SkyrimSseNifShapeReader.Read(File.ReadAllBytes(nifPath)).Shapes.First();
         Assert.True(TriMorphReader.TryRead(triPath, out var tri));
-        var triShape = Assert.Single(tri!.Shapes);
+        var triShape = tri!.Shapes.First(s => s.VertexCount == body.Vertices.Count);
         Assert.Equal(body.Vertices.Count, triShape.VertexCount);
 
         var morph = triShape.Morphs.OrderByDescending(m => MorphPayloadAnalysis.Analyze(m.Deltas).MaxMagnitude).First();
