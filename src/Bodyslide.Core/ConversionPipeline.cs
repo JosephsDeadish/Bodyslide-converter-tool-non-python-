@@ -9292,34 +9292,29 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         return names;
     }
 
-    private static readonly string[] BatchTemplateFileNames =
-    [
-        "runtime-observation-bundle.template.json",
-        "target-body-template.slidesmith-body.json",
-        "detected-source-body-template.slidesmith-body.json",
-        "runtime-validation-plan.json",
-        "runtime-validation-harness.json",
-        "proof-harness-bundle.json",
-        "windows-ui-e2e-automation.json",
-        "desktop-workflow-automation.json",
-        "live-game-execution.json",
-        "conversion-matrix-proof.json",
-        "conversion-pipeline-profile.json",
-    ];
+    // Reports that stay beside each piece's output because pack readiness and plugin checks read them.
+    private static readonly HashSet<string> BatchPieceKeptJsonFiles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "conversion-quality.json", "conversion-manifest.json", "skeleton-compatibility.json",
+        "in-game-validation.json", "topology-correspondence.json", "plugin-patches.json",
+        "armor-pack-validation.json", "batch-report.json", "regression-failure-matrix.json",
+        "mod-stack-cross-validation.json", "dependency-map.json", "conversion-matrix-pack-proof.json",
+        "target-body-template.slidesmith-body.json", "proof-harness-bundle.json",
+        "runtime-observation-bundle.template.json", "runtime-validation-harness.json", "remaining-gaps-checklist.json", "support-coverage-signals.json",
+    };
 
-    // Per-piece template/harness files are only useful for single conversions; in a pack they
-    // clutter every piece folder, so group them under one "_extras" subfolder per piece.
+    // Secondary report/template JSONs are only useful for single conversions; in a pack they
+    // clutter every piece folder, so group them under one "_reports" subfolder per piece.
     private static void TuckAwayBatchTemplateFiles(IEnumerable<string> pieceOutputDirectories)
     {
         foreach (var directory in pieceOutputDirectories.Where(Directory.Exists))
         {
-            var extras = Path.Combine(directory, "_extras");
-            foreach (var name in BatchTemplateFileNames)
+            var extras = Path.Combine(directory, "_reports");
+            foreach (var source in Directory.EnumerateFiles(directory, "*.json", SearchOption.TopDirectoryOnly)
+                         .Where(path => !BatchPieceKeptJsonFiles.Contains(Path.GetFileName(path))).ToList())
             {
-                var source = Path.Combine(directory, name);
-                if (!File.Exists(source)) continue;
                 Directory.CreateDirectory(extras);
-                File.Move(source, Path.Combine(extras, name), overwrite: true);
+                File.Move(source, Path.Combine(extras, Path.GetFileName(source)), overwrite: true);
             }
         }
     }
